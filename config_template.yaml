@@ -1,0 +1,166 @@
+# Template configuration file - Copy to config.yaml and customize
+
+drives:
+  # Define drive shortcuts here. You can use these names in sync_pairs and source_folders below. If a drive is not available, the program will skip it gracefully.
+  MAIN_DRIVE: "/Users/janedoe"
+  EXTERNAL_DRIVE: "/Volumes/YourExternalDrive"
+  PROTON_DRIVE: "/Users/janedoe/ProtonDrive"
+  GOOGLE_DRIVE: "/Users/janedoe/GoogleDrive/MyFiles"
+
+sync_pairs:
+  # Example: Using drive placeholders (recommended)
+  - folders:
+      - "MAIN_DRIVE/dev"
+      - "EXTERNAL_DRIVE/dev"
+  
+  # Example: Using drive placeholders with cloud storage
+  - folders:
+      - "MAIN_DRIVE/Documents"
+      - "GOOGLE_DRIVE/Documents"
+  
+  # Example: You can also use direct paths
+  - folders:
+      - "/Users/janedoe/Pictures"
+      - "/Volumes/YourExternalDrive/Pictures"
+  
+  # Note: Folders A and B are interchangeable. Files sync bidirectionally based on:
+  #   1. If file exists in A but not B → copy from A to B
+  #   2. If file exists in B but not A → copy from B to A
+  #   3. If file exists in both but A is newer → copy from A to B
+  #   4. If file exists in both but B is newer → copy from B to A
+
+one_way_pairs:
+  # Example: One-way backups (source → target). Files only copy from A to B.
+  - folders:
+      - "MAIN_DRIVE/Music"
+      - "PROTON_DRIVE/Music"
+  
+  # Example: One-way backups to external drive
+  - folders:
+      - "MAIN_DRIVE/Pictures"
+      - "EXTERNAL_DRIVE/Pictures"
+
+# Optional: roots to scan for duplicate detection when enable_duplicate_detection is true. 
+# You can use drive placeholders here (e.g. MAIN_DRIVE/Documents).
+source_folders:
+  - "MAIN_DRIVE/Documents"
+  - "MAIN_DRIVE/Pictures"
+
+# Folders matching these patterns are backed up to softlink_backup_base (maintaining full source path structure) and replaced with soft links. This prevents their contents from being copied during sync operations.
+softlink_folder_patterns:
+  - ".git"
+  - ".github"
+  - ".vscode"
+  - ".idea"
+  - ".cursor"
+  - ".cursorrules"
+  - ".cursorignore"
+  - ".hg"
+  - ".svn"
+  - ".cvs"
+  - "__pycache__"
+  - ".pytest_cache"
+  - ".mypy_cache"
+  - ".tox"
+  - ".venv"
+  - "venv"
+  - "env"
+
+# Folders matching these patterns have their contents deleted (leaving empty folders) every time file_organizer.py finds them.
+empty_folder_patterns:
+  - "node_modules"
+  - "_build"
+  - "deps"
+  - "ebin"
+  - "dist"
+  - "build"
+  - "target"
+  - ".next"
+  - ".nuxt"
+  - ".cache"
+  - ".parcel-cache"
+  - "coverage"
+  - ".nyc_output"
+  - "elm-stuff"
+  - ".elixir_ls"
+  - ".stack-work"
+  - ".bundle"
+  - "vendor"
+  - "bundle"
+  - "priv/static"
+  - ".gradle"
+  - ".m2"
+  - "tmp/cache"
+  - ".tmp*"
+
+# Files matching these patterns are excluded from sync. Note: softlink_backup_base is always automatically excluded.
+exclude_patterns:
+  - ".DS_Store"
+  - "*.pyc"
+  - "*.log"
+  - ".Spotlight-V100"
+  - ".TemporaryItems"
+  - ".fseventsd"
+  - ".DocumentRevisions-V100"
+
+# Where organized files are stored (with soft links). Use ~ for home directory.
+output_base: "~/organized"
+
+# Where softlink folders (like .git, venv, etc.) are backed up before being replaced with soft links.
+# Use ~ for home directory. This maintains the full source path structure.
+softlink_backup_base: "~/organised"
+
+min_file_size: 1024
+max_file_size: 104857600
+enable_content_analysis: true
+# If set true, this will delete duplicate files. See 'source_folders:' above. Use with care. 
+enable_duplicate_detection: false
+# 'enable_folder_sync: true' = sync folders, 'enable_folder_sync: false' = only organize files. See 'sync_pairs' and 'one_way_pairs' above.
+enable_folder_sync: true
+
+scan_interval: 3600
+flaky_volume_retries: 3
+retry_delay: 5
+use_rsync: true
+rsync_checksum_mode: "timestamp"
+
+# checksum = thorough but SLOW. timestamp = fast (recommended)
+rsync_size_only: false
+rsync_additional_args: []
+# Disable mmap if you see "mmap: Operation canceled" during rsync.
+rsync_disable_mmap: true
+max_drive_usage_percent: 90
+sync_chunk_subfolders: 30
+sync_chunk_concurrency: 1
+sync_timeout_minutes: 60
+
+# Large folders sync in chunks. Each chunk times out after 60 min to prevent infinite hangs.
+max_soft_links_per_file: 6
+
+# Limit how many categories a single file can be linked to. Prevents over-categorization.
+
+# Semantic categorization: groups keyword categories into ~30 broad categories
+# (e.g. "london" -> "Cities & Places", "subpoena" -> "Legal & Justice")
+# Uses a small sentence-embedding model (~80MB, downloaded on first use).
+enable_semantic_categories: true
+semantic_confidence_threshold: 0.35
+# Lower threshold = more files categorized but less accurate. Range: 0.2 - 0.5
+
+ml_content_analysis:
+  enabled: true
+  min_keyword_frequency: 10
+  min_category_size: 5
+  max_categories: 150
+  # min_word_length: 5 avoids short common words. Higher max_categories discovers more topics. 
+  min_word_length: 5
+  stop_words_enabled: true
+# use_clip: false by default (very slow on CPU, ~30min first load)
+  use_clip: false
+
+# If 'auto_git' is true, for any folder underneath the auto_git_folders folders which do not have a .git folder in it, 
+# do a git init, with a new .gitignore file:  
+  auto_git: true
+  auto_git_folders:
+    - "MAIN_DRIVE/dev"
+
+
