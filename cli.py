@@ -75,16 +75,24 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     organizer.organize(entries, dry_run=dry_run)
     organizer.clean_orphaned_links(set())
 
-    # 4. Sync
+    # 4. Sync — run in background thread so slow ProtonDrive/external
+    # drives don't block the fast scan + organize work
     if config.raw_config.get("enable_folder_sync", False) and not dry_run:
-        logger.info("Running folder sync...")
-        summary = sync_engine.run_all_sync_pairs()
-        logger.info("Sync complete: %s", summary)
+        logger.info("Starting background folder sync...")
+        import threading
+        def background_sync():
+            try:
+                summary = sync_engine.run_all_sync_pairs()
+                logger.info("Background sync complete: %s", summary)
+            except Exception as e:
+                logger.error("Background sync failed: %s", e)
+        t = threading.Thread(target=background_sync, daemon=True)
+        t.start()
 
-    # 5. Softlink handling
-    logger.info("Processing softlink folders...")
+    # 5. Softlink handling (exclude patterns for rsync)
     exclude_for_rsync = softlink_handler.get_rsync_exclude_patterns()
-    logger.info("Excluding from sync: %s", exclude_for_rsync[:10])
+    if exclude_for_rsync:
+        logger.info("Excluding from sync: %s", exclude_for_rsync[:10])
 
     # 6. Auto-git
     if auto_git.enabled:
