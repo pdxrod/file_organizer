@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>File Organizer</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, sans-serif; background: #111; color: #ddd; padding: 12px; }
+h1 { font-size: 20px; margin-bottom: 8px; }
+.stats { color: #888; font-size: 13px; margin-bottom: 12px; }
+button { padding: 10px 18px; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; margin: 4px; }
+.btn-scan { background: #2d7d46; color: #fff; }
+.btn-refresh { background: #444; color: #fff; }
+.btn-back { background: #444; color: #fff; }
+.cat-list { list-style: none; }
+.cat-item { display: flex; justify-content: space-between; padding: 12px 8px; border-bottom: 1px solid #333; cursor: pointer; font-size: 15px; }
+.cat-item:active { background: #222; }
+.cat-name { color: #4ea8ff; }
+.cat-count { color: #888; font-size: 13px; }
+.file-list { list-style: none; }
+.file-item { padding: 10px 8px; border-bottom: 1px solid #333; font-size: 13px; }
+.file-target { color: #666; font-size: 11px; }
+.log-view { background: #000; color: #0f0; font-family: monospace; font-size: 11px; padding: 10px; border-radius: 6px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; margin-top: 12px; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<h1> File Organizer</h1>
+<div class="stats" id="stats">Loading...</div>
+<button class="btn-scan" onclick="scan()"> Run Scan</button>
+<button class="btn-refresh" onclick="location.reload()"> Refresh</button>
+<button class="btn-refresh" onclick="toggleLog()"> Log</button>
+
+<div id="catView"><ul class="cat-list" id="catList"></ul></div>
+<div id="fileView" class="hidden">
+  <button class="btn-back" onclick="showCategories()"> Back</button>
+  <h2 id="fileTitle"></h2>
+  <ul class="file-list" id="fileList"></ul>
+</div>
+<div id="logView" class="hidden">
+  <button class="btn-back" onclick="toggleLog()"> Back</button>
+  <div class="log-view" id="logContent"></div>
+</div>
+
+<script>
+async function load() {
+  const r = await fetch('/api/status');
+  const d = await r.json();
+  document.getElementById('stats').textContent = d.total_categories + ' categories  ' + d.total_links + ' links' + (d.running ? ' (running)' : '');
+  const list = document.getElementById('catList');
+  list.innerHTML = '';
+  d.categories.forEach(c => {
+    const li = document.createElement('li');
+    li.className = 'cat-item';
+    li.innerHTML = '<span class="cat-name">' + c.name + '</span><span class="cat-count">' + c.links + '</span>';
+    li.onclick = () => showFiles(c.name);
+    list.appendChild(li);
+  });
+}
+
+async function showFiles(cat) {
+  document.getElementById('catView').classList.add('hidden');
+  document.getElementById('fileView').classList.remove('hidden');
+  document.getElementById('fileTitle').textContent = cat + '/';
+  const r = await fetch('/api/category/' + encodeURIComponent(cat));
+  const d = await r.json();
+  const list = document.getElementById('fileList');
+  list.innerHTML = '';
+  (d.files || []).forEach(f => {
+    const li = document.createElement('li');
+    li.className = 'file-item';
+    li.innerHTML = f.name + '<br><span class="file-target"> ' + f.target + '</span>';
+    list.appendChild(li);
+  });
+}
+
+function showCategories() {
+  document.getElementById('catView').classList.remove('hidden');
+  document.getElementById('fileView').classList.add('hidden');
+}
+
+async function scan() {
+  const r = await fetch('/api/scan', {method:'POST'});
+  const d = await r.json();
+  alert(d.status || d.error);
+}
+
+async function toggleLog() {
+  const lv = document.getElementById('logView');
+  if (lv.classList.contains('hidden')) {
+    lv.classList.remove('hidden');
+    document.getElementById('catView').classList.add('hidden');
+    const r = await fetch('/api/log');
+    const d = await r.json();
+    document.getElementById('logContent').textContent = d.log;
+  } else {
+    lv.classList.add('hidden');
+    document.getElementById('catView').classList.remove('hidden');
+  }
+}
+
+load();
+setInterval(load, 10000);
+</script>
+</body>
+</html>
