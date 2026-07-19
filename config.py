@@ -20,7 +20,6 @@ DEFAULTS: Dict[str, Any] = {
     "one_way_pairs": [],
     "source_folders": [],
     "output_base": "~/organized",
-    "softlink_backup_base": "~/organised",
     "exclude_patterns": [
         ".DS_Store", "*.pyc", "*.log",
         ".Spotlight-V100", ".TemporaryItems", ".fseventsd",
@@ -32,12 +31,6 @@ DEFAULTS: Dict[str, Any] = {
         "coverage", ".nyc_output", "elm-stuff", ".elixir_ls",
         ".stack-work", ".bundle", "vendor", "bundle", "priv/static",
         ".gradle", ".m2", "tmp/cache", ".tmp*",
-    ],
-    "softlink_folder_patterns": [
-        ".git", ".github", ".vscode", ".idea", ".cursor",
-        ".cursorrules", ".cursorignore", ".hg", ".svn", ".cvs",
-        "__pycache__", ".pytest_cache", ".mypy_cache",
-        ".tox", ".venv", "venv", "env",
     ],
     "min_file_size": 1024,
     "max_file_size": 104857600,  # 100 MB
@@ -121,7 +114,6 @@ class Config:
             self._resolve_path(p) for p in merged.get("source_folders", [])
         ]
         merged["output_base"] = self._resolve_path(merged["output_base"])
-        merged["softlink_backup_base"] = self._resolve_path(merged.get("softlink_backup_base", "~/organised"))
         merged["auto_git_folders"] = [
             self._resolve_path(p) for p in merged.get("auto_git_folders", [])
         ]

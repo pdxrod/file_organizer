@@ -46,26 +46,6 @@ source_folders:
   - "MAIN_DRIVE/Documents"
   - "MAIN_DRIVE/Pictures"
 
-# Folders matching these patterns are backed up to softlink_backup_base (maintaining full source path structure) and replaced with soft links. This prevents their contents from being copied during sync operations.
-softlink_folder_patterns:
-  - ".git"
-  - ".github"
-  - ".vscode"
-  - ".idea"
-  - ".cursor"
-  - ".cursorrules"
-  - ".cursorignore"
-  - ".hg"
-  - ".svn"
-  - ".cvs"
-  - "__pycache__"
-  - ".pytest_cache"
-  - ".mypy_cache"
-  - ".tox"
-  - ".venv"
-  - "venv"
-  - "env"
-
 # Folders matching these patterns have their contents deleted (leaving empty folders) every time file_organizer.py finds them.
 empty_folder_patterns:
   - "node_modules"
@@ -93,7 +73,7 @@ empty_folder_patterns:
   - "tmp/cache"
   - ".tmp*"
 
-# Files matching these patterns are excluded from sync. Note: softlink_backup_base is always automatically excluded.
+# Files matching these patterns are excluded from sync. The output_base (~/organized) is always automatically excluded.
 exclude_patterns:
   - ".DS_Store"
   - "*.pyc"
@@ -108,7 +88,6 @@ output_base: "~/organized"
 
 # Where softlink folders (like .git, venv, etc.) are backed up before being replaced with soft links.
 # Use ~ for home directory. This maintains the full source path structure.
-softlink_backup_base: "~/organised"
 
 min_file_size: 1024
 max_file_size: 104857600

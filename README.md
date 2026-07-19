@@ -33,7 +33,7 @@ There are two primary ways to use it:
 | v1 (file_organiser) | v2 (file_organizer) |
 |---------------------|---------------------|
 | Categories included trivial words like `ready`, `wrote`, `that` | Extended stopwords list (100+ words) + min word length 5 + corpus frequency filtering — only meaningful categories survive |
-| `.git` folders moved to `~/organised` and softlinked — **broke git** | `.git`, `.hg`, `.svn` **never softlinked** — excluded from sync entirely. Use `git push` for backup |
+| `.git` folders were moved to `~/organised` and softlinked — **broke git** | `.git`, `.hg`, `.svn` simply excluded from sync |
 | `.venv`/`node_modules` softlinked during sync | Excluded from sync — reproducible from lock files. Tool reminds you to `pip freeze` if `requirements.txt` is missing |
 | Custom file-copy sync logic | Native `rsync` with configurable checksum/size-only modes |
 | Single monolithic file | Modular package: `config`, `scanner`, `analyzer`, `organizer`, `sync_engine`, `softlink_handler`, `auto_git`, `dedup` |
@@ -178,7 +178,7 @@ Three types of patterns control what happens to matching folders:
 |---------|-------------|
 | `exclude_patterns` | Files/folders skipped entirely during scan and sync |
 | `empty_folder_patterns` | Contents deleted (leaving empty folder) — for build caches like `node_modules`, `__pycache__` |
-| `softlink_folder_patterns` | Excluded from sync. `.git`/`.hg`/`.svn` are **never softlinked**. Others (`.venv`, `venv`) are excluded — regenerate from lock files |
+| `exclude_patterns` | Files/folders excluded from scan and sync |
 
 ### Content Analysis
 
@@ -249,14 +249,14 @@ For **one-way** pairs: runs rsync source→target only.
 
 ---
 
-## `~/organized` vs `~/organised`
+## `~/organized`
 
 | Directory | Purpose | Who needs it |
 |-----------|---------|-------------|
 | `~/organized` | Soft-link tree of your files, browsable by type, year, and topic | Everyone |
 | `~/organised` | Legacy backup location for development folders (`.git`, `__pycache__`, `.venv`) | No longer needed in v2 — these are excluded from sync |
 
-> In v2, `~/organised` is effectively unused. The old approach of softlinking `.git` folders here has been retired. The `softlink_backup_base` config key still exists for backward compatibility but the new strategy is to exclude these folders from sync.
+> Contains soft links to your files, organized by type, year, and content category.
 
 ---
 
