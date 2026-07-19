@@ -189,21 +189,23 @@ case "$1" in
         run_organizer --config "$SCRIPT_DIR/config.yaml" --create-test
         ;;
 
+    clean)
+        echo "Wiping ~/organized, log, and progress — then fresh scan..."
+        rm -rf ~/organized
+        rm -f ~/.file_organizer.log ~/.file_organizer_progress.json ~/.file_organizer_discovered_categories.json
+        echo "Clean. Starting fresh scan..."
+        run_organizer --REAL --config "$SCRIPT_DIR/config.yaml" --scan-once
+        ;;
+
     gui)
         echo "Starting File Organizer Desktop App..."
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            python3 "$PROJECT_DIR/desktop_app.py" &
-            sleep 0.5
-            osascript -e 'tell application "System Events" to set frontmost of first process whose name is "Python" to true' 2>/dev/null || true
-        else
-            python3 "$PROJECT_DIR/desktop_app.py"
-        fi
+        python3 "$PROJECT_DIR/desktop_app.py"
         ;;
 
     *)
         echo "File Organizer v2 — Management Script"
         echo ""
-        echo "Usage: $0 {start|stop|restart|status|log|test|test-real|sync|dedupe|cleanup|create-test|gui}"
+        echo "Usage: $0 {start|stop|restart|status|log|test|test-real|clean|sync|dedupe|cleanup|create-test|gui}"
         echo ""
         echo "Background Daemon:"
         echo "  start       Start organizer as background daemon (PRODUCTION MODE)"
@@ -217,6 +219,7 @@ case "$1" in
         echo "  test-real   Run single scan in PRODUCTION MODE"
         echo "  sync        Synchronize folders only (PRODUCTION MODE)"
         echo "  dedupe      Remove duplicate files only (PRODUCTION MODE)"
+        echo "  clean       Wipe ~/organized + log, then fresh scan"
         echo "  cleanup     Remove broken/stale symlinks from ~/organized"
         echo "  create-test Create test environment with sample files"
         echo "  gui         Launch desktop GUI application"

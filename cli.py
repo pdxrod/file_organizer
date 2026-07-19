@@ -72,8 +72,11 @@ def run_full_cycle(config: Config, dry_run: bool = False):
                 file_cat_map[fp] = matched
     # Convert scanned files to entries for organizer
     entries = [(sf.path, sf.mtime, file_cat_map.get(sf.path, [])) for sf in scanned]
-    organizer.organize(entries, dry_run=dry_run)
-    organizer.clean_orphaned_links(set())
+    stats = organizer.organize(entries, dry_run=dry_run)
+    logger.info('Links created: %s', stats)
+    valid_files = {sf.path for sf in scanned}
+    if not dry_run:
+        organizer.clean_orphaned_links(valid_files)
 
     # 4. Sync — run in background thread so slow ProtonDrive/external
     # drives don't block the fast scan + organize work

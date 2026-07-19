@@ -128,6 +128,12 @@ class FileScanner:
                     continue
 
                 filepath = dirpath / f
+                if f.startswith('._') and len(f) > 2:
+                    try:
+                        filepath.unlink()
+                    except OSError:
+                        pass
+                    continue
                 yield (filepath, False)
 
             # Yield flagged softlink folders

@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from collections import Counter
 from typing import Optional
+from .common_words import COMMON_ENGLISH_WORDS
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class ContentAnalyzer:
         self._min_word_length: int = ml.get("min_word_length", 5)
         self._min_keyword_frequency: int = ml.get("min_keyword_frequency", 10)
         self._min_category_size: int = ml.get("min_category_size", 5)
-        self._max_categories: int = ml.get("max_categories", 9999)
+        self._max_categories: int = min(ml.get("max_categories", 50), 200)
         self._use_clip: bool = ml.get("use_clip", False)
         self._stopwords_enabled: bool = ml.get("stop_words_enabled", True)
 
