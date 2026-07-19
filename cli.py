@@ -63,8 +63,17 @@ def run_full_cycle(config: Config, dry_run: bool = False):
 
     # 3. Organize
     logger.info("Building organized link tree...")
-    organizer.build_tree(scanned, categories, dry_run=dry_run)
-    organizer.cleanup_stale_links(dry_run=dry_run)
+    # Build mapping of file -> assigned categories
+    file_cat_map: dict = {}
+    if categories:
+        for fp, kws in file_keywords:
+            matched = [cat for cat in categories if cat in kws]
+            if matched:
+                file_cat_map[fp] = matched
+    # Convert scanned files to entries for organizer
+    entries = [(sf.path, sf.mtime, file_cat_map.get(sf.path, [])) for sf in scanned]
+    organizer.organize(entries, dry_run=dry_run)
+    organizer.clean_orphaned_links(set())
 
     # 4. Sync
     if config.raw_config.get("enable_folder_sync", False) and not dry_run:
@@ -132,7 +141,11 @@ def main():
         return
 
     # Full cycle
-    run_full_cycle(config, dry_run=not real_mode)
+    try:
+        run_full_cycle(config, dry_run=not real_mode)
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user. Exiting.")
+        return
 
     # Daemon mode
     if real_mode and not args.scan_once:

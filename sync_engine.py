@@ -70,6 +70,10 @@ class SyncEngine:
             result = subprocess.run(
                 args,
                 capture_output=True,
+                timeout=self._timeout,
+            )
+                args,
+                capture_output=True,
                 text=True,
                 timeout=self._timeout,
             )
