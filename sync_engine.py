@@ -72,20 +72,18 @@ class SyncEngine:
                 capture_output=True,
                 timeout=self._timeout,
             )
-                args,
-                capture_output=True,
-                text=True,
-                timeout=self._timeout,
-            )
             if result.returncode == 0:
                 logger.debug("Sync complete: %s → %s", source, target)
                 return True
             else:
-                logger.error("rsync failed (%d): %s", result.returncode, result.stderr[:500])
+                stderr_text = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+                logger.error("rsync failed (%d): %s", result.returncode, stderr_text[:500])
                 return False
         except subprocess.TimeoutExpired:
             logger.error("rsync timed out after %ds: %s → %s", self._timeout, source, target)
             return False
+        except KeyboardInterrupt:
+            raise
         except FileNotFoundError:
             logger.error("rsync not found — please install rsync")
             return False
@@ -153,7 +151,11 @@ class SyncEngine:
                 logger.warning("Skipping one-way — source missing: %s", source)
                 continue
 
-            target.mkdir(parents=True, exist_ok=True)
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except (PermissionError, OSError) as e:
+                logger.warning("Skipping - cannot create target %s: %s", target, e)
+                continue
 
             logger.info("One-way sync: %s → %s", source, target)
             ok = self.sync_one_way(source, target)
