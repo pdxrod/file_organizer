@@ -106,18 +106,10 @@ class AutoGit:
 
     def __init__(self, config):
         self.config = config
-        self._auto_git: bool = config.raw_config.get(
-            "ml_content_analysis", {}
-        ).get("auto_git", False)
+        self._auto_git: bool = config.raw_config.get("auto_git", False)
         self._auto_git_folders: list[str] = (
-            config.raw_config.get("ml_content_analysis", {})
-            .get("auto_git_folders", [])
-            or []
+            config.raw_config.get("auto_git_folders", []) or []
         )
-        # Resolve drive placeholders
-        self._auto_git_folders = [
-            config.resolve_path(p) for p in self._auto_git_folders
-        ]
 
     @property
     def enabled(self) -> bool:

@@ -43,7 +43,7 @@ There are two primary ways to use it:
 ## Quick Start
 
 ```bash
-cd /Users/rod/dev/file_organizer
+cd /path/to/file_organizer
 
 # 1. Create test environment with sample files
 ./manage_organizer.sh create-test

@@ -3,18 +3,17 @@
 # Usage: ./manage_organizer.sh {start|stop|restart|status|log|test|test-real|sync|dedupe|cleanup|gui}
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PACKAGE_NAME="file_organizer"
-MAIN_SCRIPT="$SCRIPT_DIR/file_organizer.py"
+# The package lives inside SCRIPT_DIR; run from parent so `python -m file_organizer` works
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_FILE="$HOME/.file_organizer.log"
 PID_FILE="/tmp/file_organizer.pid"
 
 # Ensure we can import the package
-export PYTHONPATH="$SCRIPT_DIR/..:$PYTHONPATH"
-cd "$SCRIPT_DIR" || exit 1
+cd "$PROJECT_DIR" || exit 1
 
-# Helper: run python with the package
+# Helper: run the file_organizer package
 run_organizer() {
-    python3 "$MAIN_SCRIPT" "$@"
+    python3 -m file_organizer "$@"
 }
 
 case "$1" in
@@ -39,7 +38,7 @@ case "$1" in
         fi
 
         # Start in background
-        nohup python3 "$MAIN_SCRIPT" --REAL --config "$SCRIPT_DIR/config.yaml" > /dev/null 2>&1 &
+        nohup python3 -m file_organizer --REAL --config "$SCRIPT_DIR/config.yaml" > /dev/null 2>&1 &
         PID=$!
         echo $PID > "$PID_FILE"
 
@@ -193,11 +192,11 @@ case "$1" in
     gui)
         echo "Starting File Organizer Desktop App..."
         if [[ "$OSTYPE" == "darwin"* ]]; then
-            python3 "$SCRIPT_DIR/desktop_app.py" &
+            python3 "$PROJECT_DIR/desktop_app.py" &
             sleep 0.5
             osascript -e 'tell application "System Events" to set frontmost of first process whose name is "Python" to true' 2>/dev/null || true
         else
-            python3 "$SCRIPT_DIR/desktop_app.py"
+            python3 "$PROJECT_DIR/desktop_app.py"
         fi
         ;;
 

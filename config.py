@@ -85,6 +85,8 @@ class Config:
         self._path = path
         self.drives: Dict[str, str] = {}
         self.data: Dict[str, Any] = {}
+        if self._path:
+            self.load(self._path)
 
     @property
     def raw_config(self) -> Dict[str, Any]:
