@@ -32,10 +32,10 @@ There are two primary ways to use it:
 
 | v1 (file_organiser) | v2 (file_organizer) |
 |---------------------|---------------------|
-| Categories included trivial words like `ready`, `wrote`, `that` | Extended stopwords list (100+ words) + min word length 5 + corpus frequency filtering — only meaningful categories survive |
+| Categories included trivial words like `ready`, `wrote`, `that` | 610 stopwords + 1,369 common English words filtered + TF-IDF scoring (`df × log(N/df)²`) — distinctive words like `yugoslavia` outrank generic ones like `otherwise` |
 | `.git` folders were moved to `~/organised` and softlinked — **broke git** | `.git`, `.hg`, `.svn` simply excluded from sync |
 | `.venv`/`node_modules` softlinked during sync | Excluded from sync — reproducible from lock files. Tool reminds you to `pip freeze` if `requirements.txt` is missing |
-| Custom file-copy sync logic | Native `rsync` with configurable checksum/size-only modes |
+| Custom file-copy sync logic | Native `rsync` with configurable checksum/size-only modes. Folder sync runs in background thread — organize step returns in ~30s regardless of sync duration |
 | Single monolithic file | Modular package: `config`, `scanner`, `analyzer`, `organizer`, `sync_engine`, `softlink_handler`, `auto_git`, `dedup` |
 
 ---
@@ -56,6 +56,9 @@ ls -la test/organized/
 
 # 4. Run for real (one cycle)
 ./manage_organizer.sh test-real
+
+# Or wipe everything and do a fresh scan:
+./manage_organizer.sh clean
 ```
 
 ---
@@ -127,7 +130,40 @@ tail -f ~/.file_organizer.log
 
 ---
 
-## Configuration (`config.yaml`)
+## Mobile & Web Access
+
+### Web UI (Mac + phone/tablet browser)
+
+```bash
+pip3 install flask
+python3 web_app.py
+# Opens http://<your-mac-ip>:5000 — browse categories from any device
+```
+
+### Android Emulator (iOS Simulator via Xcode also works)
+
+```bash
+# Android Studio → Device Manager → Create Device → Pixel 6 → Run
+# The Android app loads the web UI in a WebView
+# Emulator uses http://10.0.2.2:5000 to reach the Mac's localhost
+```
+
+### Pull Phone Media (USB)
+
+```bash
+# Plug Android phone via USB with File Transfer + USB Debugging enabled
+./phone_pull.sh   # Streams DCIM/Camera, Screenshots, Pictures to ~/PhoneMedia
+```
+
+Then add to `config.yaml`:
+```yaml
+source_folders:
+  - "MAIN_DRIVE/PhoneMedia"
+```
+
+---
+
+## ## Configuration (`config.yaml`)
 
 ### Drives
 
