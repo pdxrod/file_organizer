@@ -32,10 +32,10 @@ There are two primary ways to use it:
 
 | v1 (file_organiser) | v2 (file_organizer) |
 |---------------------|---------------------|
-| Categories included trivial words like `ready`, `wrote`, `that` | Extended stopwords list (100+ words) + min word length 5 + corpus frequency filtering — only meaningful categories survive |
+| Categories included trivial words like `ready`, `wrote`, `that` | 610 stopwords + 1,369 common English words filtered + TF-IDF scoring (`df × log(N/df)²`) — distinctive words like `yugoslavia` outrank generic ones like `otherwise` |
 | `.git` folders were moved to `~/organised` and softlinked — **broke git** | `.git`, `.hg`, `.svn` simply excluded from sync |
 | `.venv`/`node_modules` softlinked during sync | Excluded from sync — reproducible from lock files. Tool reminds you to `pip freeze` if `requirements.txt` is missing |
-| Custom file-copy sync logic | Native `rsync` with configurable checksum/size-only modes |
+| Custom file-copy sync logic | Native `rsync` with checksum/size-only modes. Folder sync runs in background thread — organize step returns in ~30s |
 | Single monolithic file | Modular package: `config`, `scanner`, `analyzer`, `organizer`, `sync_engine`, `softlink_handler`, `auto_git`, `dedup` |
 
 ---
@@ -56,6 +56,9 @@ ls -la test/organized/
 
 # 4. Run for real (one cycle)
 ./manage_organizer.sh test-real
+
+# Or wipe everything and do a fresh scan:
+./manage_organizer.sh clean
 ```
 
 ---
