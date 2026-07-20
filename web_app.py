@@ -80,7 +80,12 @@ def _is_running():
 
 if __name__ == "__main__":
     import socket
-    hostname = socket.gethostname()
-    local_ip = socket.gethostbyname(hostname)
-    print(f"\n  Mobile UI: http://{local_ip}:5000\n")
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+    except Exception:
+        local_ip = "127.0.0.1"
+    finally:
+        s.close()
     app.run(host="0.0.0.0", port=5000, debug=False)
