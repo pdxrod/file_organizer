@@ -14,6 +14,9 @@ from collections import Counter
 from typing import Optional
 from .common_words import COMMON_ENGLISH_WORDS
 
+# Lowercased copy for O(1) case-insensitive lookup
+_COMMON_WORDS_LOWER: set[str] = {w.lower() for w in COMMON_ENGLISH_WORDS}
+
 logger = logging.getLogger(__name__)
 
 # Extended stopwords — common English words that should never be categories
@@ -89,8 +92,12 @@ class ContentAnalyzer:
             if len(w) < self._min_word_length and w not in _WHITELIST_SHORT:
                 continue
 
-            # Stopwords filter
+            # Stopwords filter (small, aggressive list)
             if self._stopwords_enabled and w in _STOPWORDS:
+                continue
+
+            # Common English words filter (large corpus, ~1400 words)
+            if self._stopwords_enabled and w in _COMMON_WORDS_LOWER:
                 continue
 
             keywords.append(w)
@@ -118,12 +125,49 @@ class ContentAnalyzer:
 
         return self.extract_keywords_from_text(stem)
 
+    def _extract_image_metadata(self, filepath: Path) -> str:
+        """Extract text metadata from image files using available tools."""
+        # Try macOS Spotlight metadata (no dependencies)
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["mdls", "-name", "kMDItemDescription", "-name", "kMDItemKeywords",
+                 "-name", "kMDItemHeadline", "-name", "kMDItemDisplayName",
+                 str(filepath)],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                # Extract the values from mdls output (format: key = "value")
+                text = result.stdout
+                return text
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+
+        # Try Pillow for EXIF/IPTC (optional dependency)
+        try:
+            from PIL import Image
+            from PIL.ExifTags import TAGS
+            img = Image.open(filepath)
+            exif = img.getexif()
+            parts = []
+            for tag_id, value in exif.items():
+                tag = TAGS.get(tag_id, str(tag_id))
+                if isinstance(value, str):
+                    parts.append(f"{tag}: {value}")
+            if parts:
+                return " ".join(parts)
+        except Exception:
+            pass
+
+        return ""
+
     def extract_keywords_from_content(
         self, filepath: Path, max_bytes: int = 65536
     ) -> list[str]:
-        """Extract keywords from file contents (text files only)."""
-        # Check if it's a text file
+        """Extract keywords from file contents (text and image metadata)."""
         ext = filepath.suffix.lower()
+
+        # Text files
         text_exts = {
             ".txt", ".md", ".rst", ".py", ".js", ".ts", ".html", ".htm",
             ".css", ".scss", ".sass", ".json", ".xml", ".yaml", ".yml",
@@ -135,15 +179,21 @@ class ContentAnalyzer:
             ".toml", ".cfg", ".ini", ".conf", ".env", ".lock",
         }
 
-        if ext not in text_exts and ext not in {".pdf", ".docx", ".odt", ".rtf"}:
-            # Not a text file we can read
-            return []
+        if ext in text_exts or ext in {".pdf", ".docx", ".odt", ".rtf"}:
+            try:
+                content = filepath.read_text(encoding="utf-8", errors="ignore")[:max_bytes]
+                return self.extract_keywords_from_text(content)
+            except (OSError, UnicodeDecodeError):
+                return []
 
-        try:
-            content = filepath.read_text(encoding="utf-8", errors="ignore")[:max_bytes]
-            return self.extract_keywords_from_text(content)
-        except (OSError, UnicodeDecodeError):
-            return []
+        # Image files: extract metadata
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".heic", ".heif"}
+        if ext in image_exts:
+            metadata = self._extract_image_metadata(filepath)
+            if metadata:
+                return self.extract_keywords_from_text(metadata)
+
+        return []
 
     def analyze_file(self, filepath: Path) -> list[str]:
         """Extract keywords from both filename and content."""
@@ -173,13 +223,32 @@ class ContentAnalyzer:
                 self._global_freq[kw] += 1
         return self._global_freq
 
-    def filter_meaningful_categories(self, freq: Counter) -> list[str]:
-        """Filter keywords to only those that are meaningful as categories."""
-        categories = []
+    def filter_meaningful_categories(self, freq: Counter, total_files: int = 0) -> list[str]:
+        """Filter keywords using inverse document frequency (IDF).
 
-        for kw, count in freq.most_common():
-            if count < self._min_keyword_frequency:
+        Scores words by log(N/df) so that distinctive words (appearing in
+        fewer files) rank higher than common words (appearing everywhere).
+        The min_keyword_frequency threshold prevents single-file outliers.
+        """
+        import math
+
+        if total_files <= 0:
+            total_files = sum(freq.values())  # fallback
+
+        # Score each keyword by IDF: higher = more distinctive
+        scored = []
+        for kw, df in freq.items():
+            if df < self._min_keyword_frequency:
                 continue
+            idf = math.log(total_files / df)
+            scored.append((kw, idf, df))
+
+        # Sort by IDF descending (most distinctive first)
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        # Take top N
+        categories = []
+        for kw, score, df in scored:
             if len(categories) >= self._max_categories:
                 break
             categories.append(kw)

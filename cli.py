@@ -56,7 +56,7 @@ def run_full_cycle(config: Config, dry_run: bool = False):
             if kws:
                 file_keywords.append((sf.path, kws))
         freq = analyzer.build_category_frequencies(file_keywords)
-        categories = analyzer.filter_meaningful_categories(freq)
+        categories = analyzer.filter_meaningful_categories(freq, total_files=len(scanned))
         logger.info("Found %d meaningful categories.", len(categories))
     else:
         categories = []
