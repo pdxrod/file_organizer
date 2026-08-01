@@ -136,10 +136,11 @@ ml_content_analysis:
 # use_clip: false by default (very slow on CPU, ~30min first load)
   use_clip: false
 
-# If 'auto_git' is true, for any folder underneath the auto_git_folders folders which do not have a .git folder in it, 
-# do a git init, with a new .gitignore file:  
-  auto_git: true
-  auto_git_folders:
-    - "MAIN_DRIVE/dev"
-
+# If 'auto_git' is true, for any folder underneath the auto_git_folders folders which do not have a .git folder in it,
+# do a git init, write a .gitignore, git add ., and git commit. Defaults to false for safety.
+# Use './manage_organizer.sh git-preview' to see which folders would be affected.
+# Use './manage_organizer.sh git-init' to actually run it.
+auto_git: false
+auto_git_folders:
+  - "MAIN_DRIVE/dev"
 

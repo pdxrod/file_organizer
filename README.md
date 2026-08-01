@@ -81,6 +81,8 @@ ls -la test/organized/
 | `sync` | Folder synchronization only (production mode) |
 | `dedupe` | Deduplication only (production mode) |
 | `cleanup` | Remove broken/excluded symlinks from `~/organized` |
+| `git-preview` | Show which folders would get `git init` (no changes made) |
+| `git-init` | Run `git init`, `.gitignore`, `git add`, `git commit` for real |
 | `gui` | Launch the desktop GUI application |
 | `create-test` | Create test environment with sample files |
 
@@ -99,6 +101,8 @@ python3 -m file_organizer [OPTIONS]
 | `--scan-once` | Run a single cycle then exit |
 | `--sync-only` | Only synchronize folders |
 | `--dedupe-only` | Only run deduplication |
+| `--git-preview` | Show which folders would get `git init` (no changes) |
+| `--git-init` | Run `git init`, `.gitignore`, `git add`, `git commit` |
 | `--create-test` | Create test environment and exit |
 | `--config PATH` | Use a custom config file (default: `config.yaml`) |
 | `-v`, `--verbose` | Verbose logging |
@@ -199,12 +203,28 @@ ml_content_analysis:
 ### Auto Git
 
 ```yaml
+# Defaults to false for safety — set to true to enable
 auto_git: true
 auto_git_folders:
   - "MAIN_DRIVE/dev"
 ```
 
-Scans folders under `auto_git_folders` and runs `git init` on those that contain source code but no existing `.git` folder. Skips data directories, build outputs, and nested dependencies.
+Scans folders under `auto_git_folders` and, for those that contain source code but no existing `.git` folder, runs:
+1. `git init`
+2. Writes a `.gitignore` (excluding `node_modules/`, `.venv/`, `__pycache__/`, IDE files, etc.)
+3. `git add .`
+4. `git commit -m "Initial commit (auto-git)"`
+
+Skips data directories, build outputs, collection folders, and nested dependencies.
+
+**Workflow**:
+```bash
+# 1. Preview what will happen (safe, no changes)
+./manage_organizer.sh git-preview
+
+# 2. Run it for real
+./manage_organizer.sh git-init
+```
 
 ### Full Options Reference
 

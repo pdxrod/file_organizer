@@ -1,6 +1,6 @@
 #!/bin/bash
 # Management script for File Organizer v2
-# Usage: ./manage_organizer.sh {start|stop|restart|status|log|test|test-real|sync|dedupe|cleanup|gui}
+# Usage: ./manage_organizer.sh {start|stop|restart|status|log|test|test-real|sync|dedupe|cleanup|git-preview|git-init|gui}
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # The package lives inside SCRIPT_DIR; run from parent so `python -m file_organizer` works
@@ -197,6 +197,19 @@ case "$1" in
         run_organizer --REAL --config "$SCRIPT_DIR/config.yaml" --scan-once
         ;;
 
+    git-preview)
+        echo "Previewing folders that would get 'git init'..."
+        run_organizer --config "$SCRIPT_DIR/config.yaml" --git-preview
+        ;;
+
+    git-init)
+        echo "Running auto-git: git init, .gitignore, add, commit..."
+        echo "WARNING: This will create .git folders and commit files!"
+        echo "Run 'git-preview' first to see what will be affected."
+        echo ""
+        run_organizer --config "$SCRIPT_DIR/config.yaml" --git-init
+        ;;
+
     gui)
         echo "Starting File Organizer Desktop App..."
         python3 "$PROJECT_DIR/desktop_app.py"
@@ -205,7 +218,7 @@ case "$1" in
     *)
         echo "File Organizer v2 — Management Script"
         echo ""
-        echo "Usage: $0 {start|stop|restart|status|log|test|test-real|clean|sync|dedupe|cleanup|create-test|gui}"
+        echo "Usage: $0 {start|stop|restart|status|log|test|test-real|clean|sync|dedupe|cleanup|git-preview|git-init|create-test|gui}"
         echo ""
         echo "Background Daemon:"
         echo "  start       Start organizer as background daemon (PRODUCTION MODE)"
@@ -221,6 +234,8 @@ case "$1" in
         echo "  dedupe      Remove duplicate files only (PRODUCTION MODE)"
         echo "  clean       Wipe ~/organized + log, then fresh scan"
         echo "  cleanup     Remove broken/stale symlinks from ~/organized"
+        echo "  git-preview Show which folders would get git init (no changes)"
+        echo "  git-init    Run git init, .gitignore, add, commit (for real)"
         echo "  create-test Create test environment with sample files"
         echo "  gui         Launch desktop GUI application"
         exit 1

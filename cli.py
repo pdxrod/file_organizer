@@ -97,8 +97,8 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     if exclude_for_rsync:
         logger.info("Excluding from sync: %s", exclude_for_rsync[:10])
 
-    # 6. Auto-git
-    if auto_git.enabled:
+    # 6. Auto-git (only in production mode — this makes real changes)
+    if auto_git.enabled and not dry_run:
         logger.info("Auto-git scan...")
         git_summary = auto_git.scan_and_init()
         logger.info("Auto-git: %s", git_summary)
@@ -117,6 +117,8 @@ def main():
     parser.add_argument("--scan-once", action="store_true", help="Run one cycle then exit")
     parser.add_argument("--sync-only", action="store_true", help="Only sync folders")
     parser.add_argument("--dedupe-only", action="store_true", help="Only run deduplication")
+    parser.add_argument("--git-preview", action="store_true", help="Preview which folders would get git init (no changes)")
+    parser.add_argument("--git-init", action="store_true", help="Run auto-git: init, .gitignore, add, commit")
     parser.add_argument("--create-test", action="store_true", help="Create test environment")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
@@ -149,6 +151,36 @@ def main():
     if args.dedupe_only and real_mode:
         dedup = DedupEngine(config)
         dedup.run(dry_run=False)
+        return
+
+    if args.git_preview:
+        import json
+        auto_git = AutoGit(config)
+        result = auto_git.preview()
+        if not result["enabled"]:
+            print(result["message"])
+        else:
+            print(f"Auto-git is enabled. Scanning: {', '.join(result['auto_git_folders'])}")
+            print(f"Folders that would get 'git init': {result['candidate_count']}")
+            print()
+            for c in result["candidates"]:
+                print(f"  {c['path']}")
+                print(f"    Reason: {c['reason']}")
+            if result["candidate_count"] == 0:
+                print("  (none — all folders already have .git or don't qualify)")
+            print()
+            print("No changes were made. Run with --git-init to apply.")
+        return
+
+    if args.git_init:
+        auto_git = AutoGit(config)
+        if not auto_git.enabled:
+            print("Auto-git is disabled in config. Nothing to do.")
+        else:
+            print(f"Running auto-git on: {', '.join(auto_git._auto_git_folders)}")
+            summary = auto_git.scan_and_init()
+            print(f"Scanned: {summary['scanned']}, Initialized: {summary['initialized']}, Skipped: {summary['skipped']}")
+            print("Check ~/.file_organizer.log for details.")
         return
 
     # Full cycle
