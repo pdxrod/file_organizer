@@ -12,6 +12,7 @@ from file_organizer.sync_engine import SyncEngine
 from file_organizer.softlink_handler import SoftlinkHandler
 from file_organizer.auto_git import AutoGit
 from file_organizer.dedup import DedupEngine
+from file_organizer.organizer import _TYPE_MAP
 
 logger = logging.getLogger("file_organizer")
 
@@ -42,9 +43,19 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     else:
         logger.info("=== PRODUCTION MODE — changes will be applied ===")
 
-    # 1. Scan
+    # 1. Scan — build allowed extensions from organize_file_types config
+    allowed_types: list[str] = config.raw_config.get("organize_file_types", []) or []
+    if allowed_types:
+        allowed_extensions: set[str] = {
+            ext for ext, ftype in _TYPE_MAP.items() if ftype in allowed_types
+        }
+        logger.info("Filtering to file types: %s (%d extensions)",
+                     allowed_types, len(allowed_extensions))
+    else:
+        allowed_extensions = None  # include all
+
     logger.info("Scanning source folders...")
-    scanned = list(scanner.scan_all_sources())
+    scanned = list(scanner.scan_all_sources(allowed_extensions=allowed_extensions))
     logger.info("Scanned %d files.", len(scanned))
 
     # 2. Analyze

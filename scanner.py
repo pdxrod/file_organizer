@@ -123,17 +123,21 @@ class FileScanner:
 
             # Yield files
             for f in filenames:
+                # Skip all dot files
+                if f.startswith('.'):
+                    # Delete .trashed files immediately (like ._ AppleDouble files)
+                    if f.startswith('.trashed') or f.startswith('._'):
+                        try:
+                            (dirpath / f).unlink()
+                        except OSError:
+                            pass
+                    continue
+
                 f_rel = os.path.join(rel_dir, f) if rel_dir != "." else f
                 if self.should_exclude(f_rel, is_dir=False):
                     continue
 
                 filepath = dirpath / f
-                if f.startswith('._') and len(f) > 2:
-                    try:
-                        filepath.unlink()
-                    except OSError:
-                        pass
-                    continue
                 yield (filepath, False)
 
             # Yield flagged softlink folders
@@ -142,12 +146,24 @@ class FileScanner:
                 if self.is_softlink_folder_pattern(d):
                     yield (dirpath / d, True)
 
-    def scan_all_sources(self) -> Iterator[ScannedFile]:
-        """Scan all source_folders from config, yielding ScannedFile entries."""
-        source_folders = self.config.get("source_folders") or []
+    def scan_all_sources(
+        self, allowed_extensions: Optional[set[str]] = None
+    ) -> Iterator[ScannedFile]:
+        """Scan organize_folders (or source_folders) from config.
+
+        Args:
+            allowed_extensions: if set, only yield files whose suffix is in
+                               this set (e.g. {'.pdf', '.jpg', '.png'}).
+        """
+        # Use organize_folders if configured, otherwise fall back to source_folders
+        source_folders = (
+            self.config.get("organize_folders")
+            or self.config.get("source_folders")
+            or []
+        )
 
         if not source_folders:
-            logger.info("No source_folders configured — nothing to scan.")
+            logger.info("No organize_folders or source_folders configured.")
             return
 
         for src in source_folders:
@@ -168,6 +184,8 @@ class FileScanner:
                             if sub.is_file() and not self.should_exclude(
                                 str(sub.relative_to(root))
                             ):
+                                if allowed_extensions and sub.suffix.lower() not in allowed_extensions:
+                                    continue
                                 yield ScannedFile(
                                     path=sub,
                                     size=sub.stat().st_size,
@@ -176,6 +194,8 @@ class FileScanner:
                                     relative_to=root,
                                 )
                 else:
+                    if allowed_extensions and filepath.suffix.lower() not in allowed_extensions:
+                        continue
                     try:
                         st = filepath.stat()
                     except OSError:

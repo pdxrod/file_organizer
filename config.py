@@ -19,6 +19,8 @@ DEFAULTS: Dict[str, Any] = {
     "sync_pairs": [],
     "one_way_pairs": [],
     "source_folders": [],
+    "organize_folders": [],  # folders to scan for ~/organized (defaults to source_folders)
+    "organize_file_types": ["documents", "images", "music", "video"],  # which type categories to link
     "output_base": "~/organized",
     "exclude_patterns": [
         ".DS_Store", "*.pyc", "*.log",
@@ -112,6 +114,9 @@ class Config:
         merged["one_way_pairs"] = self._resolve_sync_pairs(merged.get("one_way_pairs", []))
         merged["source_folders"] = [
             self._resolve_path(p) for p in merged.get("source_folders", [])
+        ]
+        merged["organize_folders"] = [
+            self._resolve_path(p) for p in merged.get("organize_folders", [])
         ]
         merged["output_base"] = self._resolve_path(merged["output_base"])
         merged["auto_git_folders"] = [

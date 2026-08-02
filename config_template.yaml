@@ -46,6 +46,22 @@ source_folders:
   - "MAIN_DRIVE/Documents"
   - "MAIN_DRIVE/Pictures"
 
+# Folders to scan for creating the ~/organized soft-link tree.
+# Only documents, images, music, and video files are linked (see organize_file_types).
+# If empty, falls back to source_folders above.
+organize_folders:
+  - "MAIN_DRIVE/Documents"
+  - "MAIN_DRIVE/Music"
+  - "MAIN_DRIVE/Pictures"
+
+# Which file type categories to include in ~/organized.
+# Options: documents, images, music, video, code, archives, other
+organize_file_types:
+  - documents
+  - images
+  - music
+  - video
+
 # Folders matching these patterns have their contents deleted (leaving empty folders) every time file_organizer.py finds them.
 empty_folder_patterns:
   - "node_modules"
