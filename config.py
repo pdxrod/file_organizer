@@ -285,6 +285,60 @@ class Config:
         return False
 
 
+    @classmethod
+    def create_starter(cls, target_path: str) -> str:
+        """Create a starter config.yaml from the template with most features
+        turned off for safety.  Returns the path to the created file."""
+        template_path = os.path.join(os.path.dirname(__file__), "config_template.yaml")
+
+        if not os.path.exists(template_path):
+            raise ConfigError(
+                f"Template not found at {template_path}. "
+                "Please reinstall file_organizer."
+            )
+
+        with open(template_path, "r") as f:
+            starter = yaml.safe_load(f) or {}
+
+        # ── turn off almost everything for a safe starter config ──
+        starter["enable_content_analysis"] = False
+        starter["enable_folder_sync"] = False
+        starter["enable_duplicate_detection"] = False
+        starter["enable_semantic_categories"] = False
+        starter["auto_git"] = False
+        if "ml_content_analysis" in starter:
+            starter["ml_content_analysis"]["enabled"] = False
+
+        with open(target_path, "w") as f:
+            yaml.safe_dump(starter, f, default_flow_style=False, sort_keys=False)
+
+        print(
+            f"\n{'='*60}\n"
+            f"  Starter config created: {target_path}\n"
+            f"{'='*60}\n"
+            f"\n"
+            f"  Most features are OFF by default for safety.\n"
+            f"\n"
+            f"  To get started:\n"
+            f"    1. Edit {target_path}\n"
+            f"    2. Set your drive paths under 'drives:'\n"
+            f"    3. Configure 'source_folders' to point at folders you\n"
+            f"       want to scan\n"
+            f"    4. Enable the features you want (set to true):\n"
+            f"         - enable_content_analysis\n"
+            f"         - enable_folder_sync\n"
+            f"         - enable_duplicate_detection  (careful!)  \n"
+            f"         - enable_semantic_categories\n"
+            f"         - auto_git\n"
+            f"    5. Run './manage_organizer.sh test' to dry-run\n"
+            f"    6. When ready, run './manage_organizer.sh start'\n"
+            f"{'='*60}\n",
+            file=sys.stderr,
+        )
+
+        return str(target_path)
+
+
 def load_config(path: Optional[str] = None) -> Config:
     """Convenience: load and return a Config."""
     return Config(path).load(path)

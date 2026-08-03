@@ -130,6 +130,7 @@ def main():
     parser.add_argument("--dedupe-only", action="store_true", help="Only run deduplication")
     parser.add_argument("--git-preview", action="store_true", help="Preview which folders would get git init (no changes)")
     parser.add_argument("--git-init", action="store_true", help="Run auto-git: init, .gitignore, add, commit")
+    parser.add_argument("--cleanup", action="store_true", help="Remove broken and stale symlinks from ~/organized")
     parser.add_argument("--create-test", action="store_true", help="Create test environment")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
@@ -162,6 +163,36 @@ def main():
     if args.dedupe_only and real_mode:
         dedup = DedupEngine(config)
         dedup.run(dry_run=False)
+        return
+
+    if args.cleanup and real_mode:
+        organizer = Organizer(config)
+        output_base = organizer.output_base
+        removed = 0
+        for link_path in output_base.rglob("*"):
+            if not link_path.is_symlink():
+                continue
+            try:
+                target = link_path.resolve()
+            except OSError:
+                # Broken symlink
+                link_path.unlink(missing_ok=True)
+                logger.info("Removed broken symlink: %s", link_path)
+                removed += 1
+                continue
+            if not target.exists():
+                link_path.unlink(missing_ok=True)
+                logger.info("Removed stale symlink (target gone): %s -> %s", link_path, target)
+                removed += 1
+        # Remove empty directories
+        for dirpath in sorted(output_base.rglob("*"), key=lambda p: -len(str(p))):
+            if dirpath.is_dir() and not any(dirpath.iterdir()):
+                try:
+                    dirpath.rmdir()
+                    logger.info("Removed empty directory: %s", dirpath)
+                except OSError:
+                    pass
+        logger.info("Cleanup complete: removed %d symlinks.", removed)
         return
 
     if args.git_preview:

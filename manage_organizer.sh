@@ -211,6 +211,14 @@ case "$1" in
         ;;
 
     gui)
+        if [ ! -f "$SCRIPT_DIR/config.yaml" ]; then
+            echo "No config.yaml found. Creating starter config..."
+            run_organizer --config "$SCRIPT_DIR/config.yaml" --scan-once 2>&1 | head -10
+            echo ""
+            echo "A starter config.yaml has been created."
+            echo "Please edit it before starting the GUI."
+            exit 1
+        fi
         echo "Starting File Organizer Desktop App..."
         python3 "$PROJECT_DIR/desktop_app.py"
         ;;
