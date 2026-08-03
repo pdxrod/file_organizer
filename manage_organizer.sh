@@ -77,7 +77,7 @@ case "$1" in
         fi
 
         # Find and stop any remaining file_organizer processes
-        PIDS=$(ps auxw | grep -i "file_organizer" | grep -v grep | grep -v manage_organizer | awk '{print $2}' || true)
+        PIDS=$(ps auxw | grep -i "python.*file_organizer" | grep -v grep | grep -v manage_organizer | awk '{print $2}' || true)
         if [ -n "$PIDS" ]; then
             for PID in $PIDS; do
                 if ps -p "$PID" > /dev/null 2>&1; then
@@ -134,7 +134,7 @@ case "$1" in
             fi
         fi
 
-        PIDS=$(ps auxw | grep -i "file_organizer" | grep -v grep | grep -v manage_organizer | awk '{print $2}' || true)
+        PIDS=$(ps auxw | grep -i "python.*file_organizer" | grep -v grep | grep -v manage_organizer | awk '{print $2}' || true)
         if [ -n "$PIDS" ]; then
             for PID in $PIDS; do
                 if ps -p "$PID" > /dev/null 2>&1; then
