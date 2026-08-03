@@ -220,7 +220,7 @@ case "$1" in
             exit 1
         fi
         echo "Starting File Organizer Desktop App..."
-        python3 "$PROJECT_DIR/desktop_app.py"
+        python3 "$SCRIPT_DIR/desktop_app.py"
         ;;
 
     *)

@@ -152,8 +152,4 @@ flagged/
 
 .cache
 mkdocs-material-insiders
-phone_pull.sh
-requirements.txt
-templates/
-web_app.py
 .swp
