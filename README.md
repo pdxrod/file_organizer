@@ -304,8 +304,159 @@ If any of the above is unclear, stay in test mode or run with `enable_duplicate_
 | macOS | Full support (primary development platform) |
 | Linux | Full support |
 | Windows | Supported (symlinks require admin or Developer Mode; rsync via WSL or cygwin) |
-| Android | Planned (background daemon for photo/file backup to cloud drives) |
+| Android | Supported — see [Phone Daemon](#phone-daemon) below |
 | iOS | Not currently planned |
+
+---
+
+## Phone Daemon
+
+The phone daemon solves **two problems** with Proton Drive's built-in Android backup:
+
+1. **Under-backup**: Proton Drive only backs up camera photos. It misses screenshots,
+   .txt files, downloaded images, and files in folders like DCIM/Screenshots or Documents.
+
+2. **Over-eager backup**: Photos are backed up immediately — including ones you'll delete
+   seconds later. Now you have to delete them in two (or three) places.
+
+### Solution: `phone_daemon.py`
+
+A lightweight Python daemon that runs on your Android phone (via **Termux**) or macOS.
+It monitors configurable source directories and copies **only files that have survived
+a grace period** to Proton Drive's "My Files/misc" folder.
+
+```mermaid
+flowchart LR
+    A[Phone: new photo<br/>in DCIM/Camera] -->|waits 10 min| B{Still exists?}
+    B -->|yes| C[Copy to Proton Drive<br/>My Files/misc]
+    B -->|no: deleted| D[Skipped — never backed up]
+    C --> E[Proton Drive syncs<br/>to cloud]
+    E --> F[Mac file_organizer<br/>picks it up]
+```
+
+### Quick Start — Phone Daemon
+
+```bash
+# 1. On your phone, install Termux from F-Droid
+# 2. In Termux, grant storage access:
+termux-setup-storage
+
+# 3. Install Python and dependencies:
+pkg install python rsync
+pip install pyyaml
+
+# 4. Copy the daemon and config to your phone (via ADB or scp):
+adb push phone_daemon.py phone_daemon_config.yaml manage_phone_daemon.sh \\
+    /sdcard/
+
+# 5. In Termux, move them to a working directory:
+cp /sdcard/phone_daemon.py ~/
+cp /sdcard/phone_daemon_config.yaml ~/
+cp /sdcard/manage_phone_daemon.sh ~/
+
+# 6. Find your Proton Drive folder:
+python3 phone_daemon.py --find-proton
+
+# 7. Edit the config to set the correct target_directory, then test:
+python3 phone_daemon.py --scan-once --dry-run
+
+# 8. Run for real:
+./manage_phone_daemon.sh start
+```
+
+### Phone Daemon Commands
+
+```bash
+./manage_phone_daemon.sh {command}
+```
+
+| Command | What it does |
+|---------|-------------|
+| `start` | Start daemon in background |
+| `stop` | Stop the daemon |
+| `restart` | Stop then start |
+| `status` | Check if daemon is running |
+| `log` | Tail the log file |
+| `stats` | Show sync database statistics |
+| `test` | Single dry-run scan (no files copied) |
+| `test-real` | Single production scan |
+| `find-proton` | Search for Proton Drive folder on device |
+
+### Key Configuration (`phone_daemon_config.yaml`)
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `source_directories` | DCIM, Pictures, Documents, Download | Folders to monitor |
+| `target_directory` | ProtonDrive/My Files/misc | Where files get copied to |
+| `min_age_minutes` | 10 | **Grace period** — files younger than this are skipped. Gives you time to delete unwanted photos before they're backed up |
+| `scan_interval_seconds` | 60 | How often to check for new files |
+| `max_file_size_mb` | 500 | Skip files larger than this |
+| `include_extensions` | [] (all) | Only copy these extensions, e.g. `[".jpg", ".png", ".pdf"]` |
+| `exclude_extensions` | .tmp, .temp, .partial, … | Never copy these |
+
+### How It Works
+
+1. **Scan**: Every N seconds, walks `source_directories`, skipping excluded patterns
+   and files younger than `min_age_minutes`.
+2. **Hash**: Computes SHA-256 hash of each candidate file (content-based tracking).
+3. **Check DB**: Looks up hash+path in a local SQLite database — if already synced, skip.
+4. **Copy**: Copies new files to `target_directory`, preserving relative folder structure
+   (e.g. `DCIM/Camera/IMG_001.jpg` → `ProtonDrive/My Files/misc/DCIM/Camera/IMG_001.jpg`).
+5. **Record**: Marks the file as synced in the database.
+6. **Cleanup**: Periodically prunes database entries for files that no longer exist.
+
+The content-hash tracking means you can rename or move a file and it won't be re-copied.
+
+---
+
+## Phone Sync via ADB (`phone_pull.sh`)
+
+For when your phone is **connected via USB**, `phone_pull.sh` provides fast,
+streaming sync using ADB. Useful for bulk transfers or when Termux isn't available.
+
+All paths are driven by `config.yaml` — nothing is hardcoded in the script.
+
+```yaml
+# In config.yaml:
+phone_pull:
+  local_stage: "MAIN_DRIVE/misc"          # phone files land here (flat)
+  remote_stage: "PROTON_DRIVE/My Files/misc"  # push-mode source / cloud folder
+  adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
+```
+
+```bash
+# Pull from all connected phones → local_stage (flat, no subdirectories)
+./phone_pull.sh pull
+
+# Push from remote_stage → phone
+./phone_pull.sh push
+
+# List connected devices and their stats
+./phone_pull.sh list
+
+# Pull from a specific device
+./phone_pull.sh pull --device R5GL11RL4ML
+
+# Dry-run (show what would transfer without copying)
+./phone_pull.sh pull --dry-run
+```
+
+**Pull flow**: Phone → (ADB tar stream) → temp staging → flattened into `local_stage` →
+file_organizer picks it up (via `source_folders`) → sync engine mirrors to
+`remote_stage` and any other configured drives.
+
+**Push flow**: `remote_stage` files → (ADB) → Phone.
+
+To set up ADB:
+```bash
+# On macOS:
+brew install android-platform-tools
+# Or set adb_path in config.yaml to your SDK location
+
+# Enable USB Debugging on your phone (Developer Options)
+# Then verify:
+adb devices
+```
 
 ---
 

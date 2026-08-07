@@ -1,0 +1,102 @@
+# Phone Daemon Configuration
+# ============================
+# Copy this file to phone_daemon_config.yaml and edit for your device.
+#
+# This daemon monitors source directories on your phone and copies new files
+# to a Proton Drive folder. It runs on Android via Termux, or on macOS.
+
+# ── Source directories to monitor ────────────────────────────────────────────
+# On Android, these are under /storage/emulated/0/
+# On macOS, use absolute paths like /Users/rod/...
+source_directories:
+  # Android typical paths:
+  - "/storage/emulated/0/DCIM"
+  - "/storage/emulated/0/Pictures"
+  - "/storage/emulated/0/Documents"
+  - "/storage/emulated/0/Download"
+  # Android — additional folders you may want:
+  # - "/storage/emulated/0/Movies"
+  # - "/storage/emulated/0/Music"
+  # - "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media"
+  #
+  # macOS example:
+  # - "/Users/rod/Desktop"
+  # - "/Users/rod/Downloads"
+
+# ── Target Proton Drive folder ───────────────────────────────────────────────
+# Files are copied here, preserving relative folder structure.
+# 
+# On Android: Find the Proton Drive folder on your device. Common locations:
+#   /storage/emulated/0/ProtonDrive/My Files/misc
+#   /storage/emulated/0/Android/media/com.protontech.android.drive/My Files/misc
+# 
+# On macOS:
+#   /Users/YOURNAME/Library/CloudStorage/ProtonDrive-.../My Files/misc
+#
+# TIP: Run `python3 phone_daemon.py --find-proton` to search automatically.
+target_directory: "/storage/emulated/0/ProtonDrive/My Files/misc"
+
+# ── Grace period (minutes) ───────────────────────────────────────────────────
+# Files must be at least this old before the daemon will copy them.
+# This gives you time to delete unwanted photos BEFORE they get backed up
+# — solving the Proton Drive "too eager" backup problem.
+#
+# Set to 0 to copy immediately. Recommended: 5-10 minutes.
+min_age_minutes: 10
+
+# ── Scan interval (seconds) ──────────────────────────────────────────────────
+# How often the daemon checks for new files.
+# Shorter = more responsive but uses more battery.
+# Recommended: 60-300 seconds on phone, 30-60 on desktop.
+scan_interval_seconds: 60
+
+# ── Maximum file size (MB) ───────────────────────────────────────────────────
+# Files larger than this are skipped. 0 = no limit.
+max_file_size_mb: 500
+
+# ── Extension filters ────────────────────────────────────────────────────────
+# include_extensions: if non-empty, ONLY these extensions are copied.
+#   Example: [".jpg", ".png", ".pdf", ".txt", ".mp4", ".3gp"]
+#
+# exclude_extensions: these are NEVER copied (temporary/download-partial files).
+#
+# Both lists are case-insensitive. Leave include_extensions empty to copy ALL types.
+include_extensions: []
+exclude_extensions:
+  - ".tmp"
+  - ".temp"
+  - ".partial"
+  - ".crdownload"
+  - ".part"
+  - ".download"
+
+# ── Exclude patterns ─────────────────────────────────────────────────────────
+# Files or folders whose name contains any of these patterns are skipped.
+# Case-insensitive substring match. Useful for thumbnails, caches, etc.
+exclude_patterns:
+  - ".thumbnails"
+  - ".thumbdata"
+  - ".face"
+  - ".pending"
+  - ".trashed"
+  - ".trash"
+  - "thumbdata"
+  - ".cache"
+  - ".tmp"
+
+# ── Delete after copy? ───────────────────────────────────────────────────────
+# DANGER: If true, the daemon DELETES the original file after copying.
+# This keeps your phone clean but you lose the original. 
+# Strongly recommended: keep this FALSE.
+delete_after_copy: false
+
+# ── Database path ────────────────────────────────────────────────────────────
+# SQLite database tracking which files have already been synced.
+# Uses content hashing so renames don't trigger re-copies.
+db_path: "~/.phone_daemon.db"
+
+# ── Log path ─────────────────────────────────────────────────────────────────
+log_path: "~/.phone_daemon.log"
+
+# ── PID file path ────────────────────────────────────────────────────────────
+pid_path: "~/.phone_daemon.pid"

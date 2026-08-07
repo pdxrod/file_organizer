@@ -160,3 +160,13 @@ auto_git: false
 auto_git_folders:
   - "MAIN_DRIVE/dev"
 
+# ── Phone pull (ADB-based sync) ──────────────────────────────────────────────
+# Used by phone_pull.sh.  local_stage is where phone files land on this machine
+# (flat, no subdirectories).  remote_stage is what gets synced back to the
+# phone in push mode.  Both resolve drive: references like MAIN_DRIVE, etc.
+# Change these to whatever cloud drive or external disk you use.
+phone_pull:
+  local_stage: "MAIN_DRIVE/misc"
+  remote_stage: "PROTON_DRIVE/My Files/misc"
+  adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
+
