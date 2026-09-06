@@ -55,6 +55,15 @@ name_map = {'local_stage': 'LOCAL_STAGE', 'remote_stage': 'REMOTE_STAGE', 'adb_p
 for var, shell_var in name_map.items():
     val = resolve(pp.get(var, '~/misc' if var != 'adb_path' else 'adb'))
     print(shell_var + '=' + shlex.quote(val))
+
+# Optional keys: phone_source_dirs (pull) and phone_push_dir (push target).
+# Emitted as bash array / scalar assignments so dirs with spaces survive.
+src_dirs = pp.get('phone_source_dirs')
+if src_dirs:
+    print('PHONE_SOURCE_DIRS=(' + ' '.join(shlex.quote(d) for d in src_dirs) + ')')
+push_dir = pp.get('phone_push_dir')
+if push_dir:
+    print('PHONE_TARGET_DIR=' + shlex.quote(push_dir))
 PYEOF
 }
 
@@ -66,19 +75,25 @@ TEMP_STAGE="${LOCAL_STAGE}/.tmp_pull"
 # Android base path for storage
 ANDROID_BASE="/storage/emulated/0"
 
-# Source directories on phone to pull FROM
-PHONE_SOURCE_DIRS=(
-    "DCIM/Camera"
-    "DCIM/Screenshots"
-    "Pictures"
-    "Download"
-    "Documents"
-    "Movies"
-    "Music"
-)
+# Source directories on phone to pull FROM.
+# Overridable via phone_pull.phone_source_dirs in config.yaml.
+if [[ -z "${PHONE_SOURCE_DIRS+x}" ]]; then
+    PHONE_SOURCE_DIRS=(
+        "DCIM/Camera"
+        "DCIM/Screenshots"
+        "Pictures"
+        "Download"
+        "Documents"
+        "Movies"
+        "Music"
+    )
+fi
 
-# Target directory on phone for push (where phone_daemon looks)
-PHONE_TARGET_DIR="ProtonDrive/My Files/misc"
+# Target directory on phone for push.
+# Overridable via phone_pull.phone_push_dir in config.yaml.
+if [[ -z "${PHONE_TARGET_DIR+x}" ]]; then
+    PHONE_TARGET_DIR="ProtonDrive/My Files/misc"
+fi
 
 # File extensions to include (empty = all)
 INCLUDE_EXTS=()

@@ -227,22 +227,35 @@ class SyncDB:
         )
         self.conn.commit()
 
-    def prune_missing(self, max_age_days: int = 30) -> int:
-        """Remove entries for files that no longer exist at source.
-        Only prunes entries older than max_age_days to avoid race conditions."""
+    def prune_missing(self, target_dir: Path, max_age_days: int = 30) -> int:
+        """Remove entries for files that no longer exist at source, and delete
+        their staged copies from target_dir so deleted files never get backed
+        up. Only prunes entries older than max_age_days to avoid race
+        conditions with in-flight scans."""
         cutoff = (datetime.utcnow() - timedelta(days=max_age_days)).isoformat()
         rows = self.conn.execute(
-            "SELECT id, source_path FROM synced_files WHERE copied_at < ?",
+            "SELECT id, source_path, target_path FROM synced_files WHERE copied_at < ?",
             (cutoff,),
         ).fetchall()
 
+        target_root = target_dir.resolve()
         removed = 0
-        for row_id, source_path in rows:
-            if not Path(source_path).exists():
-                self.conn.execute(
-                    "DELETE FROM synced_files WHERE id=?", (row_id,)
-                )
-                removed += 1
+        for row_id, source_path, target_path in rows:
+            if Path(source_path).exists():
+                continue
+            # Delete the staged copy if it is still a file under our target root.
+            try:
+                tgt = Path(target_path)
+                if tgt.is_file():
+                    tgt.resolve().relative_to(target_root)
+                    tgt.unlink(missing_ok=True)
+                    logger.info("Pruned staged copy of deleted source: %s", tgt)
+            except (OSError, ValueError):
+                pass
+            self.conn.execute(
+                "DELETE FROM synced_files WHERE id=?", (row_id,)
+            )
+            removed += 1
 
         if removed:
             self.conn.commit()
@@ -445,11 +458,16 @@ class PhoneDaemon:
         pid_path = Path(_expand_path(self.config.get("pid_path", DEFAULT_PID)))
         pid_path.unlink(missing_ok=True)
 
-    def copy_file(self, source: Path, dry_run: bool = False) -> bool:
+    def copy_file(self, source: Path, dry_run: bool = False) -> Optional[Path]:
         """Copy a file to the target directory, preserving relative structure.
 
         The target path mirrors the source structure under target_dir.
         For example, DCIM/Camera/IMG_001.jpg → <target>/DCIM/Camera/IMG_001.jpg
+
+        Returns the final target path on success (or the would-be target in
+        dry-run mode), or None on failure. Copies are atomic: data is written
+        to a '.partial' temp name and renamed into place, so concurrent
+        readers (e.g. an ADB tar stream) never see a half-written file.
         """
         # Determine relative path: find which source dir the file is under
         source_resolved = source.resolve()
@@ -471,7 +489,7 @@ class PhoneDaemon:
 
         if dry_run:
             logger.info("[DRY-RUN] Would copy: %s → %s", source, target)
-            return True
+            return target
 
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -483,22 +501,29 @@ class PhoneDaemon:
                     tgt_hash = hash_file(target, self.max_size_mb)
                     if src_hash and tgt_hash and src_hash == tgt_hash:
                         logger.debug("Target already exists with same content: %s", target)
-                        return True  # already synced, not an error
-                    # Different content — rename with a suffix
-                    stem = target.stem
-                    suffix = target.suffix
-                    counter = 1
-                    while target.exists():
-                        target = target.parent / f"{stem}_{counter}{suffix}"
-                        counter += 1
+                        return target  # already synced, not an error
+                # Different content — rename with a suffix
+                stem = target.stem
+                suffix = target.suffix
+                counter = 1
+                while target.exists():
+                    target = target.parent / f"{stem}_{counter}{suffix}"
+                    counter += 1
 
-            shutil.copy2(source, target)
+            # Atomic copy: write to a temp name, then rename into place.
+            partial = target.parent / (target.name + ".partial")
+            try:
+                shutil.copy2(source, partial)
+                os.replace(partial, target)
+            finally:
+                if partial.exists():
+                    partial.unlink(missing_ok=True)
             logger.info("Copied: %s → %s (%.1f KB)",
                         source, target, source.stat().st_size / 1024)
-            return True
+            return target
         except (PermissionError, OSError) as e:
             logger.error("Failed to copy %s → %s: %s", source, target, e)
-            return False
+            return None
 
     def scan_and_sync(self, dry_run: bool = False) -> dict:
         """Run one scan-and-sync cycle. Returns stats dict."""
@@ -528,10 +553,11 @@ class PhoneDaemon:
                 continue
 
             # Copy it
-            if self.copy_file(filepath, dry_run=dry_run):
+            target_path = self.copy_file(filepath, dry_run=dry_run)
+            if target_path is not None:
                 if not dry_run:
                     self.db.mark_synced(
-                        str(filepath), str(self.target_dir),
+                        str(filepath), str(target_path),
                         file_hash, size, mtime,
                     )
                 stats["copied"] += 1
@@ -558,8 +584,8 @@ class PhoneDaemon:
             stats["errors"], human_bytes(stats["bytes"]),
         )
 
-        # Prune stale entries periodically
-        pruned = self.db.prune_missing(max_age_days=30)
+        # Prune stale entries periodically (deletes staged copies too)
+        pruned = self.db.prune_missing(self.target_dir, max_age_days=30)
         if pruned:
             logger.info("Pruned %d stale DB entries (files no longer exist)", pruned)
 

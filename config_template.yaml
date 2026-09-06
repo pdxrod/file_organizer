@@ -169,4 +169,12 @@ phone_pull:
   local_stage: "MAIN_DRIVE/misc"
   remote_stage: "PROTON_DRIVE/My Files/misc"
   adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
+  # Directories on the phone to pull (relative to /storage/emulated/0).
+  # The phone daemon stages grace-period-filtered, deduped files into
+  # file_organizer_staging, so pull from there rather than the raw folders.
+  phone_source_dirs:
+    - "file_organizer_staging"
+  # Where push mode places files on the phone (also relative). Use a folder
+  # the daemon does NOT scan to avoid copy loops.
+  phone_push_dir: "file_organizer_staging"
 

@@ -23,18 +23,23 @@ source_directories:
   # - "/Users/rod/Desktop"
   # - "/Users/rod/Downloads"
 
-# ── Target Proton Drive folder ───────────────────────────────────────────────
+# ── Target staging folder ────────────────────────────────────────────────────
 # Files are copied here, preserving relative folder structure.
-# 
-# On Android: Find the Proton Drive folder on your device. Common locations:
-#   /storage/emulated/0/ProtonDrive/My Files/misc
-#   /storage/emulated/0/Android/media/com.protontech.android.drive/My Files/misc
-# 
-# On macOS:
+#
+# On Android: Proton Drive's app has NO continuously-synced local folder, so
+# files are staged on shared storage and the Mac pulls them later via
+# phone_pull.sh (USB or wireless debugging) and uploads to Proton Drive.
+#
+# IMPORTANT: the staging folder must NOT be inside any source_directories
+# below (DCIM/Pictures/Documents/Download), or the daemon would re-copy its
+# own output every scan.
+#
+# On macOS (running the daemon on the Mac itself):
 #   /Users/YOURNAME/Library/CloudStorage/ProtonDrive-.../My Files/misc
 #
-# TIP: Run `python3 phone_daemon.py --find-proton` to search automatically.
-target_directory: "/storage/emulated/0/ProtonDrive/My Files/misc"
+# TIP: Run `python3 phone_daemon.py --find-proton` to locate Proton Drive
+# folders (mainly useful on macOS).
+target_directory: "/storage/emulated/0/file_organizer_staging"
 
 # ── Grace period (minutes) ───────────────────────────────────────────────────
 # Files must be at least this old before the daemon will copy them.
@@ -47,8 +52,8 @@ min_age_minutes: 10
 # ── Scan interval (seconds) ──────────────────────────────────────────────────
 # How often the daemon checks for new files.
 # Shorter = more responsive but uses more battery.
-# Recommended: 60-300 seconds on phone, 30-60 on desktop.
-scan_interval_seconds: 60
+# Recommended: 60-300 seconds on phone (300 saves battery), 30-60 on desktop.
+scan_interval_seconds: 300
 
 # ── Maximum file size (MB) ───────────────────────────────────────────────────
 # Files larger than this are skipped. 0 = no limit.

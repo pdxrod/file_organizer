@@ -323,45 +323,54 @@ The phone daemon solves **two problems** with Proton Drive's built-in Android ba
 
 A lightweight Python daemon that runs on your Android phone (via **Termux**) or macOS.
 It monitors configurable source directories and copies **only files that have survived
-a grace period** to Proton Drive's "My Files/misc" folder.
+a grace period** into a staging folder on the phone's shared storage. The Mac then
+pulls that staging folder (via `phone_pull.sh` over USB or wireless debugging) and
+mirrors it to Proton Drive from the desktop.
+
+> **Why staging + pull?** Proton Drive's Android app has no continuously-synced local
+> folder (unlike the desktop app), so the phone cannot upload to Proton Drive directly.
+> The daemon does the grace-period filtering and content-hash dedup on the phone; the
+> Mac does the cloud upload.
 
 ```mermaid
 flowchart LR
     A[Phone: new photo<br/>in DCIM/Camera] -->|waits 10 min| B{Still exists?}
-    B -->|yes| C[Copy to Proton Drive<br/>My Files/misc]
+    B -->|yes| C[Copy to phone staging<br/>/storage/emulated/0/file_organizer_staging]
     B -->|no: deleted| D[Skipped — never backed up]
-    C --> E[Proton Drive syncs<br/>to cloud]
-    E --> F[Mac file_organizer<br/>picks it up]
+    C --> E[phone_pull.sh pulls<br/>staging over USB/WiFi]
+    E --> F[Mac sync engine →<br/>Proton Drive desktop → cloud]
 ```
 
 ### Quick Start — Phone Daemon
 
 ```bash
-# 1. On your phone, install Termux from F-Droid
+# 1. On your phone, install Termux from F-Droid (or the current Play Store build)
 # 2. In Termux, grant storage access:
 termux-setup-storage
+#    (on Android 11+ also enable All files access for Termux in
+#     Settings → Apps → Termux → Permissions)
 
-# 3. Install Python and dependencies:
-pkg install python rsync
+# 3. Install Python:
+pkg install python procps
 pip install pyyaml
 
-# 4. Copy the daemon and config to your phone (via ADB or scp):
-adb push phone_daemon.py phone_daemon_config.yaml manage_phone_daemon.sh \\
-    /sdcard/
+# 4. Copy the daemon and config to your phone (via ADB or git clone):
+#    adb push phone_daemon.py phone_daemon_config.yaml manage_phone_daemon.sh /sdcard/Download/
+#    or, in Termux: git clone https://github.com/pdxrod/file_organizer.git
 
-# 5. In Termux, move them to a working directory:
-cp /sdcard/phone_daemon.py ~/
-cp /sdcard/phone_daemon_config.yaml ~/
-cp /sdcard/manage_phone_daemon.sh ~/
+# 5. In Termux, put the files in your working directory:
+cp ~/storage/shared/Download/phone_daemon.py ~/file_organizer/ 2>/dev/null || true
 
-# 6. Find your Proton Drive folder:
-python3 phone_daemon.py --find-proton
+# 6. Edit the config: set target_directory to a staging folder on shared
+#    storage (NOT inside DCIM/Pictures/Documents/Download — the daemon scans
+#    those, and staging inside them would loop):
+#      target_directory: "/storage/emulated/0/file_organizer_staging"
 
-# 7. Edit the config to set the correct target_directory, then test:
+# 7. Test without copying:
 python3 phone_daemon.py --scan-once --dry-run
 
-# 8. Run for real:
-./manage_phone_daemon.sh start
+# 8. Run for real (foreground session in Termux survives best on Samsung):
+python3 phone_daemon.py
 ```
 
 ### Phone Daemon Commands
@@ -387,7 +396,7 @@ python3 phone_daemon.py --scan-once --dry-run
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `source_directories` | DCIM, Pictures, Documents, Download | Folders to monitor |
-| `target_directory` | ProtonDrive/My Files/misc | Where files get copied to |
+| `target_directory` | `/storage/emulated/0/file_organizer_staging` | Staging folder on the phone's shared storage (NOT a source dir) |
 | `min_age_minutes` | 10 | **Grace period** — files younger than this are skipped. Gives you time to delete unwanted photos before they're backed up |
 | `scan_interval_seconds` | 60 | How often to check for new files |
 | `max_file_size_mb` | 500 | Skip files larger than this |
@@ -400,10 +409,12 @@ python3 phone_daemon.py --scan-once --dry-run
    and files younger than `min_age_minutes`.
 2. **Hash**: Computes SHA-256 hash of each candidate file (content-based tracking).
 3. **Check DB**: Looks up hash+path in a local SQLite database — if already synced, skip.
-4. **Copy**: Copies new files to `target_directory`, preserving relative folder structure
-   (e.g. `DCIM/Camera/IMG_001.jpg` → `ProtonDrive/My Files/misc/DCIM/Camera/IMG_001.jpg`).
-5. **Record**: Marks the file as synced in the database.
-6. **Cleanup**: Periodically prunes database entries for files that no longer exist.
+4. **Copy**: Copies new files to `target_directory` atomically (`.partial` temp name +
+   rename), preserving relative folder structure
+   (e.g. `DCIM/Camera/IMG_001.jpg` → `file_organizer_staging/DCIM/Camera/IMG_001.jpg`).
+5. **Record**: Marks the file as synced in the database, storing the exact staged path.
+6. **Cleanup**: Periodically prunes database entries for files that no longer exist —
+   and deletes their staged copies, so photos deleted on the phone are never backed up.
 
 The content-hash tracking means you can rename or move a file and it won't be re-copied.
 
@@ -422,6 +433,9 @@ phone_pull:
   local_stage: "MAIN_DRIVE/misc"          # phone files land here (flat)
   remote_stage: "PROTON_DRIVE/My Files/misc"  # push-mode source / cloud folder
   adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
+  phone_source_dirs:                      # folders pulled from the phone
+    - "file_organizer_staging"            #   (relative to /storage/emulated/0)
+  phone_push_dir: "file_organizer_staging"  # where push mode puts files
 ```
 
 ```bash
@@ -445,7 +459,13 @@ phone_pull:
 file_organizer picks it up (via `source_folders`) → sync engine mirrors to
 `remote_stage` and any other configured drives.
 
-**Push flow**: `remote_stage` files → (ADB) → Phone.
+Normally you pull from `file_organizer_staging` — the phone daemon's filtered,
+deduped output — rather than the raw DCIM/Pictures folders, so deleted junk
+never reaches the Mac. (If you don't run the phone daemon, set
+`phone_source_dirs` to the raw folders and `phone_pull.sh` applies its own
+5-minute grace period and mtime-based dedup.)
+
+**Push flow**: `remote_stage` files → (ADB) → Phone's `phone_push_dir`.
 
 To set up ADB:
 ```bash
