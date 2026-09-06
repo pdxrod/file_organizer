@@ -55,14 +55,14 @@ check_config() {
         echo -e "${YELLOW}No config found at $CONFIG_FILE${NC}"
         echo
         echo "Creating starter config from template..."
-        if [ -f "$SCRIPT_DIR/phone_daemon_config.yaml" ]; then
-            cp "$SCRIPT_DIR/phone_daemon_config.yaml" "$CONFIG_FILE"
+        if [ -f "$SCRIPT_DIR/phone_daemon_config.template.yaml" ]; then
+            cp "$SCRIPT_DIR/phone_daemon_config.template.yaml" "$CONFIG_FILE"
             echo -e "${GREEN}✔ Created $CONFIG_FILE${NC}"
             echo
             echo -e "${YELLOW}⚠  IMPORTANT: Edit $CONFIG_FILE before running!${NC}"
             echo "  - Set source_directories for your device"
-            echo "  - Set target_directory to your Proton Drive 'My Files/misc' folder"
-            echo "  - Run './manage_phone_daemon.sh find-proton' to locate Proton Drive"
+            echo "  - On Android: target_directory = /storage/emulated/0/file_organizer_staging"
+            echo "  - On macOS: run './manage_phone_daemon.sh find-proton' to locate Proton Drive"
         else
             echo -e "${RED}✗ Template not found. Run from the file_organizer directory.${NC}"
             exit 1
@@ -221,7 +221,8 @@ cmd_find_proton() {
     cd "$SCRIPT_DIR"
     $PYTHON "$DAEMON_SCRIPT" --find-proton
     echo
-    echo "Tip: Copy the correct path into your phone_daemon_config.yaml as target_directory."
+    echo "Tip: On macOS set that path as target_directory; on Android use"
+    echo "     /storage/emulated/0/file_organizer_staging instead."
 }
 
 cmd_setup() {
@@ -244,7 +245,7 @@ cmd_setup() {
     if [ -f "$CONFIG_FILE" ]; then
         echo -e "${GREEN}✔ Config exists at $CONFIG_FILE${NC}"
     else
-        cp "$SCRIPT_DIR/phone_daemon_config.yaml" "$CONFIG_FILE"
+        cp "$SCRIPT_DIR/phone_daemon_config.template.yaml" "$CONFIG_FILE"
         echo -e "${GREEN}✔ Created $CONFIG_FILE${NC}"
     fi
 
@@ -253,7 +254,8 @@ cmd_setup() {
     echo
     echo "Next steps:"
     echo "  1. Edit $CONFIG_FILE"
-    echo "     - Set the correct target_directory (Proton Drive path)"
+    echo "     - On Android: target_directory = /storage/emulated/0/file_organizer_staging"
+    echo "     - On macOS: set the Proton Drive path (see find-proton)"
     echo "     - Adjust source_directories if needed"
     echo "  2. Run a dry-run test:  ./manage_phone_daemon.sh test"
     echo "  3. Run a real scan:     ./manage_phone_daemon.sh scan"

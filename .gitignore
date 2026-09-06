@@ -29,6 +29,7 @@ test/organized/peggy/
 test/organized/something/
 config.yaml
 config.yaml.bak
+phone_daemon_config.yaml
 phone_pull.sh.bak
 __pycache__/
 *.py[cod]

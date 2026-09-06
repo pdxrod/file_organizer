@@ -1,9 +1,13 @@
-# Phone Daemon Configuration
-# ============================
-# Copy this file to phone_daemon_config.yaml and edit for your device.
+# Phone Daemon Configuration — TEMPLATE
+# =======================================
+# Copy this file to phone_daemon_config.yaml and edit for your device:
+#   cp phone_daemon_config.template.yaml phone_daemon_config.yaml
+#
+# The live phone_daemon_config.yaml is git-ignored, so per-device settings
+# never conflict with git pull.
 #
 # This daemon monitors source directories on your phone and copies new files
-# to a Proton Drive folder. It runs on Android via Termux, or on macOS.
+# to a staging folder on shared storage. It runs on Android via Termux, or on macOS.
 
 # ── Source directories to monitor ────────────────────────────────────────────
 # On Android, these are under /storage/emulated/0/

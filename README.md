@@ -355,21 +355,25 @@ pkg install python procps
 pip install pyyaml
 
 # 4. Copy the daemon and config to your phone (via ADB or git clone):
-#    adb push phone_daemon.py phone_daemon_config.yaml manage_phone_daemon.sh /sdcard/Download/
+#    adb push phone_daemon.py phone_daemon_config.template.yaml manage_phone_daemon.sh /sdcard/Download/
 #    or, in Termux: git clone https://github.com/pdxrod/file_organizer.git
 
 # 5. In Termux, put the files in your working directory:
 cp ~/storage/shared/Download/phone_daemon.py ~/file_organizer/ 2>/dev/null || true
 
-# 6. Edit the config: set target_directory to a staging folder on shared
+# 6. Create your own config from the template (the live config is
+#    git-ignored, so your edits never conflict with git pull):
+cp phone_daemon_config.template.yaml phone_daemon_config.yaml
+
+# 7. Edit the config: set target_directory to a staging folder on shared
 #    storage (NOT inside DCIM/Pictures/Documents/Download — the daemon scans
 #    those, and staging inside them would loop):
 #      target_directory: "/storage/emulated/0/file_organizer_staging"
 
-# 7. Test without copying:
+# 8. Test without copying:
 python3 phone_daemon.py --scan-once --dry-run
 
-# 8. Run for real (foreground session in Termux survives best on Samsung):
+# 9. Run for real (foreground session in Termux survives best on Samsung):
 python3 phone_daemon.py
 ```
 
