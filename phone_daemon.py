@@ -104,7 +104,12 @@ def load_config(path: str) -> dict:
     config_path = Path(path).expanduser().resolve()
 
     if not config_path.exists():
-        logger.info("No config found at %s — using built-in defaults.", config_path)
+        logger.warning(
+            "No config found at %s — using built-in defaults. "
+            "Copy phone_daemon_config.template.yaml to phone_daemon_config.yaml "
+            "to set your own paths.",
+            config_path,
+        )
         return _default_config()
 
     content = config_path.read_text(encoding="utf-8")
@@ -128,6 +133,23 @@ def load_config(path: str) -> dict:
         sys.exit(1)
 
 
+def resolve_config_path(requested: str) -> str:
+    """Resolve the requested config path.
+
+    If the path is a bare relative filename that does not exist in the
+    current working directory, fall back to the same filename next to this
+    script. This lets `python3 /path/to/phone_daemon.py` find a config that
+    ships alongside the script regardless of where it is launched from.
+    """
+    p = Path(requested)
+    if p.is_absolute() or p.exists():
+        return requested
+    candidate = Path(__file__).resolve().parent / requested
+    if candidate.exists():
+        return str(candidate)
+    return requested
+
+
 def _default_config() -> dict:
     """Return sensible default configuration."""
     return {
@@ -137,7 +159,7 @@ def _default_config() -> dict:
             "/storage/emulated/0/Documents",
             "/storage/emulated/0/Download",
         ],
-        "target_directory": "/storage/emulated/0/ProtonDrive/My Files/misc",
+        "target_directory": "/storage/emulated/0/file_organizer_staging",
         "min_age_minutes": 10,
         "scan_interval_seconds": 60,
         "max_file_size_mb": 500,
@@ -682,6 +704,7 @@ def main():
         help="Verbose logging",
     )
     args = parser.parse_args()
+    args.config = resolve_config_path(args.config)
 
     # ── Special commands (no config needed) ──
 
