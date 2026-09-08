@@ -65,6 +65,23 @@ DEFAULTS: Dict[str, Any] = {
     },
     "auto_git": False,
     "auto_git_folders": [],
+    "log_path": "~/.file_organizer.log",
+    "pid_path": "/tmp/file_organizer.pid",
+    "phone_pull": {
+        "local_stage": "~/misc",
+        "remote_stage": "~/misc",
+        "adb_path": "adb",
+        "temp_stage": "",  # empty = <local_stage>/.tmp_pull
+        "android_base": "/storage/emulated/0",
+        "min_age_minutes": 5,
+        "state_file": "~/.phone_pull_state",
+        "phone_source_dirs": ["file_organizer_staging"],
+        "phone_push_dir": "file_organizer_staging",
+        "include_extensions": [],
+        "exclude_extensions": [
+            ".tmp", ".temp", ".partial", ".crdownload", ".part", ".download",
+        ],
+    },
 }
 
 
@@ -122,6 +139,27 @@ class Config:
         merged["auto_git_folders"] = [
             self._resolve_path(p) for p in merged.get("auto_git_folders", [])
         ]
+
+        # Deep-merge nested phone_pull defaults so a partial phone_pull:
+        # section in YAML still gets the remaining defaults.
+        pp = dict(DEFAULTS.get("phone_pull", {}))
+        pp.update(merged.get("phone_pull") or {})
+        for key in ("local_stage", "remote_stage", "adb_path", "state_file", "temp_stage"):
+            if pp.get(key):
+                pp[key] = self._resolve_path(pp[key])
+        if not pp.get("temp_stage"):
+            pp["temp_stage"] = os.path.join(
+                pp.get("local_stage") or os.path.expanduser("~/misc"), ".tmp_pull"
+            )
+        elif not os.path.isabs(pp["temp_stage"]):
+            # Relative temp_stage values are relative to local_stage
+            pp["temp_stage"] = os.path.join(
+                pp.get("local_stage") or os.path.expanduser("~/misc"), pp["temp_stage"]
+            )
+        merged["phone_pull"] = pp
+
+        merged["log_path"] = self._resolve_path(merged.get("log_path", DEFAULTS["log_path"]))
+        merged["pid_path"] = self._resolve_path(merged.get("pid_path", DEFAULTS["pid_path"]))
 
         self.data = merged
         self._validate()
@@ -342,3 +380,22 @@ class Config:
 def load_config(path: Optional[str] = None) -> Config:
     """Convenience: load and return a Config."""
     return Config(path).load(path)
+
+
+def resolve_log_path(config_path: Optional[str] = None) -> str:
+    """Read log_path from a config.yaml, falling back to the default.
+
+    Safe to call before a full Config is loaded (e.g. during logging setup
+    in cli.py, or from the GUI/web apps). Never raises.
+    """
+    default = os.path.expanduser("~/.file_organizer.log")
+    target = config_path or os.path.join(os.path.dirname(__file__), "config.yaml")
+    try:
+        with open(target, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+        val = cfg.get("log_path")
+        if val:
+            return os.path.expanduser(str(val))
+    except Exception:
+        pass
+    return default

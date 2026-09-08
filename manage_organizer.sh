@@ -5,8 +5,26 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # The package lives inside SCRIPT_DIR; run from parent so `python -m file_organizer` works
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Default log/pid paths — overridden by config.yaml (log_path / pid_path)
 LOG_FILE="$HOME/.file_organizer.log"
 PID_FILE="/tmp/file_organizer.pid"
+
+if [ -f "$SCRIPT_DIR/config.yaml" ] && command -v python3 >/dev/null 2>&1; then
+    eval "$(python3 - "$SCRIPT_DIR/config.yaml" <<'PYEOF'
+import sys, os, shlex
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+defaults = {"log_path": "~/.file_organizer.log", "pid_path": "/tmp/file_organizer.pid"}
+for key in ("log_path", "pid_path"):
+    val = str(cfg.get(key, defaults[key]))
+    print("%s=%s" % (key.upper(), shlex.quote(os.path.expanduser(val))))
+PYEOF
+)"
+fi
 
 # Ensure we can import the package
 cd "$PROJECT_DIR" || exit 1
@@ -192,7 +210,7 @@ case "$1" in
     clean)
         echo "Wiping ~/organized, log, and progress — then fresh scan..."
         rm -rf ~/organized
-        rm -f ~/.file_organizer.log ~/.file_organizer_progress.json ~/.file_organizer_discovered_categories.json
+        rm -f "$LOG_FILE" ~/.file_organizer_progress.json ~/.file_organizer_discovered_categories.json
         echo "Clean. Starting fresh scan..."
         run_organizer --REAL --config "$SCRIPT_DIR/config.yaml" --scan-once
         ;;

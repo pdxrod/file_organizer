@@ -20,13 +20,36 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DAEMON_SCRIPT="$SCRIPT_DIR/phone_daemon.py"
 CONFIG_FILE="$SCRIPT_DIR/phone_daemon_config.yaml"
+
+# Default log/pid/db paths — overridden by phone_daemon_config.yaml
 LOG_FILE="$HOME/.phone_daemon.log"
 PID_FILE="$HOME/.phone_daemon.pid"
+DB_FILE="$HOME/.phone_daemon.db"
+
+if [ -f "$CONFIG_FILE" ] && command -v python3 >/dev/null 2>&1; then
+    eval "$(python3 - "$CONFIG_FILE" <<'PYEOF'
+import sys, os, shlex
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+defaults = {
+    "log_path": "~/.phone_daemon.log",
+    "pid_path": "~/.phone_daemon.pid",
+    "db_path": "~/.phone_daemon.db",
+}
+for key in ("log_path", "pid_path", "db_path"):
+    val = str(cfg.get(key, defaults[key]))
+    print("%s=%s" % (key.upper(), shlex.quote(os.path.expanduser(val))))
+PYEOF
+)"
+fi
 
 # Python — prefer python3 on macOS/Linux, python on Termux
-if command -v python3 &>/dev/null; then
+if command -v python3 >/dev/null 2>&1; then
     PYTHON="python3"
-elif command -v python &>/dev/null; then
+elif command -v python >/dev/null 2>&1; then
     PYTHON="python"
 else
     echo "ERROR: Python not found. Install Python 3.8+ first."
@@ -170,7 +193,7 @@ cmd_status() {
         echo -e "${GREEN}● Phone daemon is RUNNING${NC} (PID: ${pid:-unknown})"
 
         # Show stats from DB
-        if [ -f "$HOME/.phone_daemon.db" ]; then
+        if [ -f "$DB_FILE" ]; then
             echo
             $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --stats 2>/dev/null || true
         fi

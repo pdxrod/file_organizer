@@ -50,62 +50,53 @@ def resolve(path):
             return base + path[len(drive):]
     return path
 
-pp = cfg.get('phone_pull', {})
-name_map = {'local_stage': 'LOCAL_STAGE', 'remote_stage': 'REMOTE_STAGE', 'adb_path': 'ADB'}
-for var, shell_var in name_map.items():
-    val = resolve(pp.get(var, '~/misc' if var != 'adb_path' else 'adb'))
-    print(shell_var + '=' + shlex.quote(val))
-
-# Optional keys: phone_source_dirs (pull) and phone_push_dir (push target).
-# Emitted as bash array / scalar assignments so dirs with spaces survive.
-src_dirs = pp.get('phone_source_dirs')
-if src_dirs:
-    print('PHONE_SOURCE_DIRS=(' + ' '.join(shlex.quote(d) for d in src_dirs) + ')')
-push_dir = pp.get('phone_push_dir')
-if push_dir:
-    print('PHONE_TARGET_DIR=' + shlex.quote(push_dir))
+pp = cfg.get('phone_pull', {}) or {}
+defaults = {
+    'local_stage': '~/misc',
+    'remote_stage': '~/misc',
+    'adb_path': 'adb',
+    'phone_source_dirs': ['DCIM/Camera', 'DCIM/Screenshots', 'Pictures',
+                          'Download', 'Documents', 'Movies', 'Music'],
+    'phone_push_dir': 'ProtonDrive/My Files/misc',
+    'android_base': '/storage/emulated/0',
+    'min_age_minutes': 5,
+    'state_file': '~/.phone_pull_state',
+    'include_extensions': [],
+    'exclude_extensions': ['.tmp', '.temp', '.partial', '.crdownload', '.part', '.download'],
+}
+local_stage = resolve(pp.get('local_stage') or defaults['local_stage'])
+print('LOCAL_STAGE=' + shlex.quote(local_stage))
+print('REMOTE_STAGE=' + shlex.quote(resolve(pp.get('remote_stage') or defaults['remote_stage'])))
+print('ADB=' + shlex.quote(resolve(pp.get('adb_path') or defaults['adb_path'])))
+# Temp staging lives inside local_stage; relative values are joined onto it.
+ts = pp.get('temp_stage')
+if not ts:
+    ts = os.path.join(local_stage, '.tmp_pull')
+elif not os.path.isabs(ts):
+    ts = os.path.join(local_stage, ts)
+print('TEMP_STAGE=' + shlex.quote(ts))
+print('ANDROID_BASE=' + shlex.quote(pp.get('android_base') or defaults['android_base']))
+try:
+    min_age = int(pp.get('min_age_minutes', defaults['min_age_minutes']))
+except (TypeError, ValueError):
+    min_age = defaults['min_age_minutes']
+print('MIN_AGE_MINUTES=' + shlex.quote(str(min_age)))
+print('STATE_FILE=' + shlex.quote(os.path.expanduser(pp.get('state_file') or defaults['state_file'])))
+src_dirs = pp.get('phone_source_dirs') or defaults['phone_source_dirs']
+print('PHONE_SOURCE_DIRS=(' + ' '.join(shlex.quote(d) for d in src_dirs) + ')')
+print('PHONE_TARGET_DIR=' + shlex.quote(pp.get('phone_push_dir') or defaults['phone_push_dir']))
+print('INCLUDE_EXTS=(' + ' '.join(shlex.quote(str(e).lower()) for e in (pp.get('include_extensions') or defaults['include_extensions'])) + ')')
+print('EXCLUDE_EXTS=(' + ' '.join(shlex.quote(str(e).lower()) for e in (pp.get('exclude_extensions') or defaults['exclude_extensions'])) + ')')
 PYEOF
 }
 
 eval "$(_load_config)"
 
-# Temp directory used during flattening (created/removed each run)
-TEMP_STAGE="${LOCAL_STAGE}/.tmp_pull"
-
-# Android base path for storage
-ANDROID_BASE="/storage/emulated/0"
-
-# Source directories on phone to pull FROM.
-# Overridable via phone_pull.phone_source_dirs in config.yaml.
-if [[ -z "${PHONE_SOURCE_DIRS+x}" ]]; then
-    PHONE_SOURCE_DIRS=(
-        "DCIM/Camera"
-        "DCIM/Screenshots"
-        "Pictures"
-        "Download"
-        "Documents"
-        "Movies"
-        "Music"
-    )
-fi
-
-# Target directory on phone for push.
-# Overridable via phone_pull.phone_push_dir in config.yaml.
-if [[ -z "${PHONE_TARGET_DIR+x}" ]]; then
-    PHONE_TARGET_DIR="ProtonDrive/My Files/misc"
-fi
-
-# File extensions to include (empty = all)
-INCLUDE_EXTS=()
-
-# File extensions to exclude (temporary/in-progress files)
-EXCLUDE_EXTS=(".tmp" ".temp" ".partial" ".crdownload" ".part" ".download")
-
-# Minimum file age in minutes (skip newer files — gives time to delete junk)
-MIN_AGE_MINUTES=5
-
-# State file to track last-synced mtimes (avoids re-copying unchanged files)
-STATE_FILE="${HOME}/.phone_pull_state"
+# Fallbacks if config.yaml is missing these (loader usually supplies them)
+: "${TEMP_STAGE:=${LOCAL_STAGE}/.tmp_pull}"
+: "${ANDROID_BASE:=/storage/emulated/0}"
+: "${MIN_AGE_MINUTES:=5}"
+: "${STATE_FILE:=${HOME}/.phone_pull_state}"
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 
@@ -138,10 +129,15 @@ DESCRIPTION:
   to delete unwanted files before they are synced.
 
 CONFIGURATION:
-  All paths come from config.yaml — see the phone_pull: section.
+  All settings come from config.yaml — see the phone_pull: section.
   - local_stage:  where phone files land on this machine
   - remote_stage: cloud-drive folder for push mode (e.g. Proton Drive)
   - adb_path:     path to the adb binary
+  - temp_stage:   temp folder used during pulls (default: <local_stage>/.tmp_pull)
+  - android_base: phone shared-storage root (default: /storage/emulated/0)
+  - min_age_minutes: skip files younger than this many minutes
+  - state_file:   file tracking last-synced mtimes
+  - include_extensions / exclude_extensions: extension filters
 EOF
 }
 
@@ -311,13 +307,14 @@ do_pull() {
         rel_path="${temp_file#$TEMP_STAGE/}"
         phone_path="${ANDROID_BASE}/${rel_path}"
 
-        # Extension filter
+        # Extension filter (case-insensitive; Bash 3.2 has no ${var,,})
         local ext=".${fname##*.}"
         [[ "$ext" == ".$fname" ]] && ext=""
+        ext=$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')
         local skip=false
         if [[ ${#EXCLUDE_EXTS[@]} -gt 0 ]]; then
             for ex in "${EXCLUDE_EXTS[@]}"; do
-                [[ "${ext,,}" == "${ex,,}" ]] && skip=true && break
+                [[ "$ext" == "$ex" ]] && skip=true && break
             done
         fi
         [[ "$skip" == "true" ]] && continue
@@ -325,7 +322,7 @@ do_pull() {
         if [[ ${#INCLUDE_EXTS[@]} -gt 0 ]]; then
             skip=true
             for inc in "${INCLUDE_EXTS[@]}"; do
-                [[ "${ext,,}" == "${inc,,}" ]] && skip=false && break
+                [[ "$ext" == "$inc" ]] && skip=false && break
             done
             [[ "$skip" == "true" ]] && continue
         fi
@@ -419,12 +416,13 @@ do_push() {
         local rel_path="${local_file#$REMOTE_STAGE/}"
         local phone_path="${phone_target}/${rel_path}"
 
-        # Extension filter for push
+        # Extension filter for push (case-insensitive; Bash 3.2 compatible)
         local ext=".${local_file##*.}"
         [[ "$ext" == ".$local_file" ]] && ext=""
+        ext=$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')
         if [[ ${#EXCLUDE_EXTS[@]} -gt 0 ]]; then
             for ex in "${EXCLUDE_EXTS[@]}"; do
-                [[ "${ext,,}" == "${ex,,}" ]] && continue 2
+                [[ "$ext" == "$ex" ]] && continue 2
             done
         fi
 
@@ -496,7 +494,7 @@ main() {
     # Verify ADB is available
     if [[ ! -x "$ADB" ]]; then
         # Try to find adb in PATH
-        if command -v adb &>/dev/null; then
+        if command -v adb >/dev/null 2>&1; then
             ADB="adb"
         else
             err "ADB not found at: $ADB"

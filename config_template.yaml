@@ -102,6 +102,11 @@ exclude_patterns:
 # Where organized files are stored (with soft links). Use ~ for home directory.
 output_base: "~/organized"
 
+# Log and PID files for the organizer daemon (used by manage_organizer.sh,
+# cli.py, web_app.py, desktop_app.py).
+log_path: "~/.file_organizer.log"
+pid_path: "/tmp/file_organizer.pid"
+
 # Where softlink folders (like .git, venv, etc.) are backed up before being replaced with soft links.
 # Use ~ for home directory. This maintains the full source path structure.
 
@@ -177,4 +182,23 @@ phone_pull:
   # Where push mode places files on the phone (also relative). Use a folder
   # the daemon does NOT scan to avoid copy loops.
   phone_push_dir: "file_organizer_staging"
+  # Temp staging folder used during pulls. Relative values are joined onto
+  # local_stage. Created and removed on every run.
+  temp_stage: ".tmp_pull"
+  # Android shared-storage root on the phone (Termux: /storage/emulated/0).
+  android_base: "/storage/emulated/0"
+  # Skip files younger than this many minutes (grace period to delete junk
+  # before it gets pulled).
+  min_age_minutes: 5
+  # Where phone_pull.sh remembers per-file mtimes (avoids re-copying).
+  state_file: "~/.phone_pull_state"
+  # Extension filters for pull/push (case-insensitive, dots included).
+  include_extensions: []
+  exclude_extensions:
+    - ".tmp"
+    - ".temp"
+    - ".partial"
+    - ".crdownload"
+    - ".part"
+    - ".download"
 

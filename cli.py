@@ -4,7 +4,7 @@
 import os, sys, argparse, logging, signal, time
 from pathlib import Path
 
-from file_organizer.config import Config
+from file_organizer.config import Config, resolve_log_path
 from file_organizer.scanner import FileScanner
 from file_organizer.analyzer import ContentAnalyzer
 from file_organizer.organizer import Organizer
@@ -16,7 +16,7 @@ from file_organizer.organizer import _TYPE_MAP
 
 logger = logging.getLogger("file_organizer")
 
-def setup_logging(verbose: bool = False):
+def setup_logging(verbose: bool = False, config_path: str = "config.yaml"):
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
@@ -24,7 +24,7 @@ def setup_logging(verbose: bool = False):
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler(os.path.expanduser("~/.file_organizer.log")),
+            logging.FileHandler(resolve_log_path(config_path)),
         ],
     )
 
@@ -136,7 +136,7 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     args = parser.parse_args()
 
-    setup_logging(args.verbose)
+    setup_logging(args.verbose, args.config)
     real_mode = args.REAL
 
     # Load config
@@ -222,7 +222,7 @@ def main():
             print(f"Running auto-git on: {', '.join(auto_git._auto_git_folders)}")
             summary = auto_git.scan_and_init()
             print(f"Scanned: {summary['scanned']}, Initialized: {summary['initialized']}, Skipped: {summary['skipped']}")
-            print("Check ~/.file_organizer.log for details.")
+            print("Check %s for details." % resolve_log_path(args.config))
         return
 
     # Full cycle

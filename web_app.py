@@ -5,9 +5,14 @@ import os, sys, json, subprocess, threading
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request
 
+try:
+    from file_organizer.config import resolve_log_path
+except ImportError:
+    resolve_log_path = None
+
 app = Flask(__name__)
 ORGANIZED = Path.home() / "organized"
-LOG_FILE = Path.home() / ".file_organizer.log"
+LOG_FILE = Path(resolve_log_path() if resolve_log_path else os.path.expanduser("~/.file_organizer.log"))
 PROJECT_DIR = Path(__file__).parent
 
 @app.route("/")
