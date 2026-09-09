@@ -260,7 +260,22 @@ class SyncDB:
                VALUES (?, ?, ?, ?, ?, ?)""",
             (source_path, target_path, content_hash, file_size, file_mtime, now),
         )
+        # Keep only the newest version per source so stats and target
+        # lookups stay accurate after in-place updates.
+        self.conn.execute(
+            "DELETE FROM synced_files WHERE source_path=? AND content_hash != ?",
+            (source_path, content_hash),
+        )
         self.conn.commit()
+
+    def latest_target_for_source(self, source_path: str) -> Optional[str]:
+        """Return the most recently staged target path for a source file."""
+        row = self.conn.execute(
+            "SELECT target_path FROM synced_files WHERE source_path=? "
+            "ORDER BY id DESC LIMIT 1",
+            (source_path,),
+        ).fetchone()
+        return row[0] if row else None
 
     def forget_source(self, source_path: str) -> None:
         """Remove tracking for a specific source path (e.g. file was deleted)."""
@@ -562,13 +577,32 @@ class PhoneDaemon:
                     if src_hash and tgt_hash and src_hash == tgt_hash:
                         logger.debug("Target already exists with same content: %s", target)
                         return target  # already synced, not an error
-                # Different content — rename with a suffix
-                stem = target.stem
-                suffix = target.suffix
-                counter = 1
-                while target.exists():
-                    target = target.parent / f"{stem}_{counter}{suffix}"
-                    counter += 1
+
+                # Target exists with different content. If this source was
+                # staged before, this is an UPDATE: overwrite the previously
+                # staged copy in place so the name stays stable across
+                # versions. Otherwise it's a name collision from a DIFFERENT
+                # source — keep the old suffix behaviour.
+                known = self.db.latest_target_for_source(str(source))
+                update_path = None
+                if known is not None:
+                    try:
+                        cand = Path(_expand_path(known))
+                        cand.resolve().relative_to(self.target_dir.resolve())
+                        if cand.exists():
+                            update_path = cand
+                    except (ValueError, OSError):
+                        pass
+                if update_path is not None:
+                    target = update_path
+                    logger.info("Updating staged copy in place: %s", target)
+                else:
+                    stem = target.stem
+                    suffix = target.suffix
+                    counter = 1
+                    while target.exists():
+                        target = target.parent / f"{stem}_{counter}{suffix}"
+                        counter += 1
 
             # Atomic copy: write to a temp name, then rename into place.
             partial = target.parent / (target.name + ".partial")
