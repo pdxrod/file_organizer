@@ -190,6 +190,7 @@ def _default_config() -> dict:
             ".thumbnails", ".thumbdata", ".face", ".pending",
             ".trashed", ".trash", "thumbdata", ".cache",
         ],
+        "exclude_folder_patterns": [],  # folder NAMES only — e.g. "line", "twitter"
         "delete_after_copy": False,  # DANGER: only set true if you know what you're doing
         "db_path": DEFAULT_DB,
         "log_path": DEFAULT_LOG,
@@ -359,6 +360,7 @@ def scan_sources(
     include_extensions: list[str],
     exclude_extensions: list[str],
     exclude_patterns: list[str],
+    exclude_folder_patterns: list[str],
     max_file_size_mb: int,
     min_age_seconds: float,
 ) -> Iterator[tuple[Path, float]]:
@@ -370,6 +372,11 @@ def scan_sources(
     - Its name doesn't match any exclude pattern
     - It's not too large
     - It's old enough (min_age_seconds)
+
+    exclude_patterns matches file names AND folder names;
+    exclude_folder_patterns matches FOLDER names only (used to skip whole
+    app folders like LINE without dropping files whose names merely
+    contain the word).
     """
     now = time.time()
     include_set = {e.lower() for e in include_extensions} if include_extensions else None
@@ -385,12 +392,18 @@ def scan_sources(
             continue
 
         for dirpath_str, dirnames, filenames in os.walk(root, followlinks=False):
-            # Filter directory names in-place to skip excluded dirs
+            # Filter directory names in-place to skip excluded dirs.
+            # exclude_patterns applies here too (thumbnails etc.);
+            # exclude_folder_patterns is folder-names-only.
             dirnames[:] = [
                 d for d in dirnames
                 if not any(
                     pat.lower() in d.lower()
                     for pat in exclude_patterns
+                )
+                and not any(
+                    pat.lower() in d.lower()
+                    for pat in exclude_folder_patterns
                 )
             ]
 
@@ -482,6 +495,9 @@ class PhoneDaemon:
         self.min_age = self.config.get("min_age_minutes", 10) * 60
         self.scan_interval = self.config.get("scan_interval_seconds", 60)
         self.max_size_mb = self.config.get("max_file_size_mb", 500)
+        self.exclude_folder_patterns = (
+            self.config.get("exclude_folder_patterns", []) or []
+        )
 
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -576,7 +592,8 @@ class PhoneDaemon:
 
         for filepath, mtime in scan_sources(
             self.source_dirs, include_ext, exclude_ext,
-            exclude_pat, self.max_size_mb, self.min_age,
+            exclude_pat, self.exclude_folder_patterns,
+            self.max_size_mb, self.min_age,
         ):
             stats["scanned"] += 1
 
