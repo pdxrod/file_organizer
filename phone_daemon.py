@@ -100,17 +100,36 @@ def _expand_path(raw: str) -> str:
 
 
 def load_config(path: str) -> dict:
-    """Load config from YAML (preferred) or JSON file. Returns dict."""
+    """Load config from YAML (preferred) or JSON file. Returns dict.
+
+    If the config file does not exist and a template is available next to
+    the config path or next to this script, the template is copied to the
+    config path automatically so the daemon has a real, editable config.
+    """
     config_path = Path(path).expanduser().resolve()
 
     if not config_path.exists():
-        logger.warning(
-            "No config found at %s — using built-in defaults. "
-            "Copy phone_daemon_config.template.yaml to phone_daemon_config.yaml "
-            "to set your own paths.",
-            config_path,
-        )
-        return _default_config()
+        template_candidates = [
+            config_path.parent / "phone_daemon_config.template.yaml",
+            Path(__file__).resolve().parent / "phone_daemon_config.template.yaml",
+        ]
+        template = next((t for t in template_candidates if t.exists()), None)
+        if template is not None:
+            shutil.copy2(template, config_path)
+            logger.warning(
+                "No config found at %s — created it from %s. "
+                "Review source_directories and target_directory, then re-run.",
+                config_path,
+                template,
+            )
+        else:
+            logger.warning(
+                "No config found at %s — using built-in defaults. "
+                "Copy phone_daemon_config.template.yaml to phone_daemon_config.yaml "
+                "to set your own paths.",
+                config_path,
+            )
+            return _default_config()
 
     content = config_path.read_text(encoding="utf-8")
 

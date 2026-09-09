@@ -80,10 +80,11 @@ check_config() {
         echo "Creating starter config from template..."
         if [ -f "$SCRIPT_DIR/phone_daemon_config.template.yaml" ]; then
             cp "$SCRIPT_DIR/phone_daemon_config.template.yaml" "$CONFIG_FILE"
-            echo -e "${GREEN}✔ Created $CONFIG_FILE${NC}"
+            echo -e "${GREEN}✔ Created $CONFIG_FILE from template — includes common Android folders.${NC}"
             echo
-            echo -e "${YELLOW}⚠  IMPORTANT: Edit $CONFIG_FILE before running!${NC}"
-            echo "  - Set source_directories for your device"
+            echo -e "${YELLOW}⚠  Review $CONFIG_FILE before running:${NC}"
+            echo "  - source_directories lists DCIM/Pictures/Documents/Download plus app media"
+            echo "  - Missing folders are skipped automatically — no need to trim the list"
             echo "  - On Android: target_directory = /storage/emulated/0/file_organizer_staging"
             echo "  - On macOS: run './manage_phone_daemon.sh find-proton' to locate Proton Drive"
         else

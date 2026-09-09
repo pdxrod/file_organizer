@@ -12,16 +12,34 @@
 # ── Source directories to monitor ────────────────────────────────────────────
 # On Android, these are under /storage/emulated/0/
 # On macOS, use absolute paths like /Users/rod/...
+#
+# Missing directories are skipped silently at scan time, so it is safe to
+# keep a generous list — the daemon only scans folders that actually exist.
+#
+# Note: the Files app's "Images" is a virtual MediaStore collection, not a
+# real folder. The physical folders behind it are listed below.
 source_directories:
-  # Android typical paths:
+  # ── Core Android folders ──
+  # DCIM covers Camera AND (on Samsung) DCIM/Screenshots.
   - "/storage/emulated/0/DCIM"
+  # Pictures covers Pictures/Screenshots on devices that put them there.
   - "/storage/emulated/0/Pictures"
   - "/storage/emulated/0/Documents"
   - "/storage/emulated/0/Download"
-  # Android — additional folders you may want:
-  # - "/storage/emulated/0/Movies"
-  # - "/storage/emulated/0/Music"
-  # - "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media"
+  - "/storage/emulated/0/Movies"
+  - "/storage/emulated/0/Music"
+  # ── App media folders (Android) ─────────────────────────────────────
+  # These hold messenger/browser images that show up in Files → Images.
+  # Kept active on purpose: if a folder doesn't exist it is skipped.
+  - "/storage/emulated/0/WhatsApp/Media"
+  - "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media"
+  - "/storage/emulated/0/Telegram/Telegram Images"
+  - "/storage/emulated/0/Telegram/Telegram Video"
+  - "/storage/emulated/0/Android/media/jp.naver.line.android"
+  # Android/data app folders are readable on Android 10 and older only;
+  # uncomment on such devices if you want them:
+  # - "/storage/emulated/0/Android/data/jp.naver.line.android/storage"
+  # - "/storage/emulated/0/Android/data/org.telegram.messenger"
   #
   # macOS example:
   # - "/Users/rod/Desktop"
