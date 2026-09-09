@@ -35,7 +35,7 @@ import logging
 import argparse
 import shutil
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Iterator
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -253,7 +253,7 @@ class SyncDB:
         content_hash: str, file_size: int, file_mtime: float,
     ) -> None:
         """Record a successful sync."""
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         self.conn.execute(
             """INSERT OR REPLACE INTO synced_files
                (source_path, target_path, content_hash, file_size, file_mtime, copied_at)
@@ -274,7 +274,10 @@ class SyncDB:
         their staged copies from target_dir so deleted files never get backed
         up. Only prunes entries older than max_age_days to avoid race
         conditions with in-flight scans."""
-        cutoff = (datetime.utcnow() - timedelta(days=max_age_days)).isoformat()
+        cutoff = (
+            datetime.now(timezone.utc).replace(tzinfo=None)
+            - timedelta(days=max_age_days)
+        ).isoformat()
         rows = self.conn.execute(
             "SELECT id, source_path, target_path FROM synced_files WHERE copied_at < ?",
             (cutoff,),
