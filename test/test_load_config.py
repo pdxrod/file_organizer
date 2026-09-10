@@ -67,6 +67,38 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(cfg["target_directory"], "/storage/emulated/0/staging")
         self.assertEqual(cfg["min_age_minutes"], 5)
 
+    def test_yaml_config_without_pyyaml_exits_with_install_hint(self):
+        """Regression: with PyYAML missing, a comment-first YAML config used to
+        die as a JSON decode error at 'line 1 column 1' with no install hint."""
+        self.config.write_text("# comment first\n" + TEMPLATE_YAML)
+        orig_yaml = sys.modules.get("yaml")
+        sys.modules["yaml"] = None  # makes `import yaml` raise ImportError
+        try:
+            with self.assertLogs("phone_daemon", level="WARNING") as cm:
+                with self.assertRaises(SystemExit):
+                    phone_daemon.load_config(str(self.config))
+        finally:
+            if orig_yaml is None:
+                sys.modules.pop("yaml", None)
+            else:
+                sys.modules["yaml"] = orig_yaml
+        joined = "\n".join(cm.output)
+        self.assertIn("pkg install python-pyyaml", joined)
+
+    def test_json_config_still_parses_without_pyyaml(self):
+        """The JSON fallback must keep working when PyYAML is unavailable."""
+        self.config.write_text('{"target_directory": "/tmp/staging"}')
+        orig_yaml = sys.modules.get("yaml")
+        sys.modules["yaml"] = None
+        try:
+            cfg = phone_daemon.load_config(str(self.config))
+        finally:
+            if orig_yaml is None:
+                sys.modules.pop("yaml", None)
+            else:
+                sys.modules["yaml"] = orig_yaml
+        self.assertEqual(cfg["target_directory"], "/tmp/staging")
+
 
 if __name__ == "__main__":
     unittest.main()

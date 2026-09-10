@@ -167,7 +167,12 @@ def load_config(path: str) -> dict:
         if cfg:
             return cfg
     except ImportError:
-        pass
+        logger.warning(
+            "PyYAML is not installed — YAML configs will fail. Install it with:\n"
+            "  Termux:  pkg install python-pyyaml\n"
+            "  macOS:   pip install pyyaml\n"
+            "Trying JSON fallback…"
+        )
     except Exception as e:
         logger.warning("YAML parse failed (%s), trying JSON…", e)
 
@@ -176,6 +181,14 @@ def load_config(path: str) -> dict:
         return json.loads(content)
     except json.JSONDecodeError as e:
         logger.error("Cannot parse config as YAML or JSON: %s", e)
+        stripped = content.lstrip()
+        if not stripped.startswith(("{", "[")):
+            logger.error(
+                "The config does not start like JSON. If it is YAML, PyYAML is "
+                "probably missing — install it with:\n"
+                "  Termux:  pkg install python-pyyaml\n"
+                "  macOS:   pip install pyyaml"
+            )
         sys.exit(1)
 
 
