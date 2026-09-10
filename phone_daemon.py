@@ -99,6 +99,15 @@ def _expand_path(raw: str) -> str:
     return os.path.expandvars(os.path.expanduser(raw))
 
 
+def _find_template(config_path: Path) -> Optional[Path]:
+    """Locate a template config next to the config path or next to this script."""
+    candidates = [
+        config_path.parent / "phone_daemon_config.template.yaml",
+        Path(__file__).resolve().parent / "phone_daemon_config.template.yaml",
+    ]
+    return next((t for t in candidates if t.exists()), None)
+
+
 def load_config(path: str) -> dict:
     """Load config from YAML (preferred) or JSON file. Returns dict.
 
@@ -109,11 +118,7 @@ def load_config(path: str) -> dict:
     config_path = Path(path).expanduser().resolve()
 
     if not config_path.exists():
-        template_candidates = [
-            config_path.parent / "phone_daemon_config.template.yaml",
-            Path(__file__).resolve().parent / "phone_daemon_config.template.yaml",
-        ]
-        template = next((t for t in template_candidates if t.exists()), None)
+        template = _find_template(config_path)
         if template is not None:
             shutil.copy2(template, config_path)
             logger.warning(
@@ -132,6 +137,28 @@ def load_config(path: str) -> dict:
             return _default_config()
 
     content = config_path.read_text(encoding="utf-8")
+
+    # An existing-but-empty config (truncated copy, stray `touch`, …) would
+    # otherwise die later with a JSON decode error at "line 1 column 1".
+    # Recover from the template instead.
+    if not content.strip():
+        template = _find_template(config_path)
+        if template is not None:
+            shutil.copy2(template, config_path)
+            content = config_path.read_text(encoding="utf-8")
+            logger.warning(
+                "Config at %s was empty — replaced it from %s. "
+                "Review source_directories and target_directory, then re-run.",
+                config_path,
+                template,
+            )
+        else:
+            logger.warning(
+                "Config at %s was empty and no template was found — "
+                "using built-in defaults.",
+                config_path,
+            )
+            return _default_config()
 
     # Try YAML first
     try:
