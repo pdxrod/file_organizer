@@ -67,14 +67,49 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(cfg["target_directory"], "/storage/emulated/0/staging")
         self.assertEqual(cfg["min_age_minutes"], 5)
 
-    def test_yaml_config_without_pyyaml_exits_with_install_hint(self):
+    def test_yaml_config_without_pyyaml_parses_via_builtin_parser(self):
         """Regression: with PyYAML missing, a comment-first YAML config used to
-        die as a JSON decode error at 'line 1 column 1' with no install hint."""
-        self.config.write_text("# comment first\n" + TEMPLATE_YAML)
+        die as a JSON decode error at 'line 1 column 1'. Now the built-in
+        parser reads the supported config subset."""
+        self.config.write_text(
+            "# comment first\n"
+            "target_directory: /storage/emulated/0/staging  # trailing\n"
+            "min_age_minutes: 5\n"
+            "delete_after_copy: false\n"
+            "include_extensions: []\n"
+            "exclude_extensions: [\".tmp\", \".part\"]\n"
+            "source_directories:\n"
+            "  # inline comment between items\n"
+            "  - \"/storage/emulated/0/DCIM\"\n"
+            "  - \"/storage/emulated/0/Pictures\"\n"
+        )
         orig_yaml = sys.modules.get("yaml")
         sys.modules["yaml"] = None  # makes `import yaml` raise ImportError
         try:
-            with self.assertLogs("phone_daemon", level="WARNING") as cm:
+            cfg = phone_daemon.load_config(str(self.config))
+        finally:
+            if orig_yaml is None:
+                sys.modules.pop("yaml", None)
+            else:
+                sys.modules["yaml"] = orig_yaml
+        self.assertEqual(cfg["target_directory"], "/storage/emulated/0/staging")
+        self.assertEqual(cfg["min_age_minutes"], 5)
+        self.assertIs(cfg["delete_after_copy"], False)
+        self.assertEqual(cfg["include_extensions"], [])
+        self.assertEqual(cfg["exclude_extensions"], [".tmp", ".part"])
+        self.assertEqual(
+            cfg["source_directories"][:2],
+            ["/storage/emulated/0/DCIM", "/storage/emulated/0/Pictures"],
+        )
+
+    def test_unparseable_config_without_pyyaml_exits_with_install_hint(self):
+        """Content outside the subset and not JSON must exit with an
+        actionable hint rather than a bare decode error."""
+        self.config.write_text("key: [unterminated\n")
+        orig_yaml = sys.modules.get("yaml")
+        sys.modules["yaml"] = None
+        try:
+            with self.assertLogs("phone_daemon", level="ERROR") as cm:
                 with self.assertRaises(SystemExit):
                     phone_daemon.load_config(str(self.config))
         finally:
@@ -83,7 +118,21 @@ class LoadConfigTests(unittest.TestCase):
             else:
                 sys.modules["yaml"] = orig_yaml
         joined = "\n".join(cm.output)
-        self.assertIn("pkg install python-pyyaml", joined)
+        self.assertIn("pip install pyyaml", joined)
+
+    def test_builtin_parser_matches_pyyaml_on_real_template(self):
+        """Parity guard: the built-in parser must produce exactly the same
+        config dict as PyYAML for the shipped template. If this fails, the
+        template has outgrown the supported subset."""
+        import yaml as pyyaml
+
+        repo_root = Path(__file__).resolve().parent.parent
+        template_text = (
+            repo_root / "phone_daemon_config.template.yaml"
+        ).read_text(encoding="utf-8")
+        expected = pyyaml.safe_load(template_text)
+        actual = phone_daemon._parse_simple_yaml(template_text)
+        self.assertEqual(actual, expected)
 
     def test_json_config_still_parses_without_pyyaml(self):
         """The JSON fallback must keep working when PyYAML is unavailable."""

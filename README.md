@@ -350,11 +350,12 @@ termux-setup-storage
 #    (on Android 11+ also enable All files access for Termux in
 #     Settings → Apps → Termux → Permissions)
 
-# 3. Install Python:
+# 3. Install Python. PyYAML is OPTIONAL: the daemon has a built-in parser
+#    for the config format, and Termux no longer ships python-pyyaml anyway.
+#    Only install it (pip install pyyaml, needs clang) if you want full YAML.
 pkg install python procps
-pip install pyyaml
 
-# 4. Copy the daemon and config to your phone (via ADB or git clone):
+# 4. Get the daemon and config (via ADB or git clone):
 #    adb push phone_daemon.py phone_daemon_config.template.yaml manage_phone_daemon.sh /sdcard/Download/
 #    or, in Termux: git clone https://github.com/pdxrod/file_organizer.git
 

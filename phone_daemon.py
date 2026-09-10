@@ -27,6 +27,7 @@ Usage:
 import os
 import sys
 import json
+import re
 import time
 import signal
 import hashlib
@@ -108,6 +109,104 @@ def _find_template(config_path: Path) -> Optional[Path]:
     return next((t for t in candidates if t.exists()), None)
 
 
+def _parse_simple_scalar(token: str):
+    """Parse one YAML scalar value (no nested collections)."""
+    token = token.strip()
+    if not token:
+        return None
+    # Quoted string — take verbatim, quotes included.
+    if len(token) >= 2 and token[0] in "'\"" and token[-1] == token[0]:
+        return token[1:-1]
+    # Strip a trailing comment that is not inside quotes (none are, here).
+    comment_at = token.find(" #")
+    if comment_at != -1:
+        token = token[:comment_at].strip()
+    low = token.lower()
+    if low in ("null", "~", "none", ""):
+        return None
+    if low in ("true", "yes", "on"):
+        return True
+    if low in ("false", "no", "off"):
+        return False
+    if re.match(r"^[+-]?\d+$", token):
+        return int(token)
+    if re.match(r"^[+-]?\d*\.\d+$", token):
+        return float(token)
+    return token
+
+
+def _parse_simple_yaml(content: str) -> dict:
+    """Parse the flat YAML subset used by phone_daemon_config.yaml.
+
+    Used when PyYAML is not installed (Termux no longer ships python-pyyaml,
+    and a pip install would need the clang toolchain). Supports:
+      - comment lines (# …) anywhere, including inside block lists
+      - flat `key: value` mappings
+      - block lists:
+          key:
+            - item
+      - inline lists:  key: []  /  key: [a, b]   (naive comma split — no
+        commas inside quoted items)
+      - scalars: quoted strings, bare strings, ints, floats, bools, null
+
+    Raises ValueError on anything outside this subset; callers then fall
+    back to JSON or fail with an install hint.
+    """
+    cfg: dict = {}
+    lines = content.splitlines()
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i].rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+        if line[0] in " \t":
+            raise ValueError(
+                f"line {i + 1}: indented line outside of a list: {stripped!r}"
+            )
+        if ":" not in stripped:
+            raise ValueError(f"line {i + 1}: expected 'key: value', got {stripped!r}")
+        key, _, rest = stripped.partition(":")
+        key = key.strip()
+        rest = rest.strip()
+        if not key:
+            raise ValueError(f"line {i + 1}: empty key in {stripped!r}")
+        if rest in ("", "-"):
+            # Block list — collect following `- item` lines.
+            items = []
+            j = i + 1
+            while j < n:
+                lj = lines[j].rstrip()
+                sj = lj.strip()
+                if not sj or sj.startswith("#"):
+                    j += 1
+                    continue
+                if not sj.startswith("-"):
+                    break
+                items.append(_parse_simple_scalar(sj[1:]))
+                j += 1
+            cfg[key] = items
+            i = j
+            continue
+        if rest.startswith("["):
+            if not rest.endswith("]"):
+                raise ValueError(
+                    f"line {i + 1}: unterminated inline list for {key!r}"
+                )
+            inner = rest[1:-1].strip()
+            if not inner:
+                cfg[key] = []
+            else:
+                cfg[key] = [_parse_simple_scalar(p) for p in inner.split(",")]
+            i += 1
+            continue
+        cfg[key] = _parse_simple_scalar(rest)
+        i += 1
+    return cfg
+
+
 def load_config(path: str) -> dict:
     """Load config from YAML (preferred) or JSON file. Returns dict.
 
@@ -167,12 +266,22 @@ def load_config(path: str) -> dict:
         if cfg:
             return cfg
     except ImportError:
-        logger.warning(
-            "PyYAML is not installed — YAML configs will fail. Install it with:\n"
-            "  Termux:  pkg install python-pyyaml\n"
-            "  macOS:   pip install pyyaml\n"
-            "Trying JSON fallback…"
-        )
+        # Termux no longer ships a python-pyyaml package and a pip install
+        # would need the clang toolchain, so use the built-in parser for the
+        # flat config subset this daemon uses (unless the content is JSON).
+        if not content.lstrip().startswith(("{", "[")):
+            try:
+                cfg = _parse_simple_yaml(content)
+                logger.info("PyYAML not installed — using built-in YAML parser.")
+                return cfg
+            except ValueError as e:
+                logger.warning(
+                    "PyYAML is not installed and the built-in YAML parser could "
+                    "not read the config (%s) — trying JSON…\n"
+                    "For full YAML support: pip install pyyaml "
+                    "(Termux may also need: pkg install clang)",
+                    e,
+                )
     except Exception as e:
         logger.warning("YAML parse failed (%s), trying JSON…", e)
 
@@ -184,10 +293,10 @@ def load_config(path: str) -> dict:
         stripped = content.lstrip()
         if not stripped.startswith(("{", "[")):
             logger.error(
-                "The config does not start like JSON. If it is YAML, PyYAML is "
-                "probably missing — install it with:\n"
-                "  Termux:  pkg install python-pyyaml\n"
-                "  macOS:   pip install pyyaml"
+                "The config does not start like JSON and the built-in YAML "
+                "parser could not read it either. Check the file for syntax "
+                "errors, or install full YAML support with: "
+                "pip install pyyaml (Termux may also need: pkg install clang)"
             )
         sys.exit(1)
 
