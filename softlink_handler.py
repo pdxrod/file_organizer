@@ -24,6 +24,11 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Built-in fallback defaults. The live lists come from config.yaml
+# (softlink_never_patterns / softlink_reproducible_patterns /
+# softlink_build_cache_patterns); these are used only when a config does not
+# define them.
+
 # Folders that MUST NOT be softlinked (would break their tools)
 _NEVER_SOFTLINK: set[str] = {
     ".git", ".hg", ".svn", ".cvs",
@@ -46,11 +51,22 @@ _BUILD_CACHE: set[str] = {
 }
 
 
+def _config_set(config, key: str, default: set[str]) -> set[str]:
+    """Read a folder-name set from config, falling back to built-in defaults."""
+    value = config.raw_config.get(key)
+    if isinstance(value, (list, tuple)):
+        return {str(v) for v in value}
+    return set(default)
+
+
 class SoftlinkHandler:
     """Handles soft-link folder patterns intelligently."""
 
     def __init__(self, config):
         self.config = config
+        self._never_softlink = _config_set(config, "softlink_never_patterns", _NEVER_SOFTLINK)
+        self._reproducible = _config_set(config, "softlink_reproducible_patterns", _REPRODUCIBLE)
+        self._build_cache = _config_set(config, "softlink_build_cache_patterns", _BUILD_CACHE)
         self._backup_base: Optional[Path] = None
         backup = config.raw_config.get("softlink_backup_base")
         if backup:
@@ -77,15 +93,15 @@ class SoftlinkHandler:
 
     def should_never_softlink(self, folder_name: str) -> bool:
         """Check if this folder should NEVER be softlinked."""
-        return folder_name in _NEVER_SOFTLINK
+        return folder_name in self._never_softlink
 
     def is_reproducible(self, folder_name: str) -> bool:
         """Check if this folder can be reproduced from lock files."""
-        return folder_name in _REPRODUCIBLE
+        return folder_name in self._reproducible
 
     def is_build_cache(self, folder_name: str) -> bool:
         """Check if this folder is just a build cache."""
-        return folder_name in _BUILD_CACHE
+        return folder_name in self._build_cache
 
     def backup_and_replace(self, folder: Path) -> bool:
         """

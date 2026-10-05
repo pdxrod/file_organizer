@@ -59,6 +59,27 @@ source_directories:
 # folders (mainly useful on macOS).
 target_directory: "/storage/emulated/0/file_organizer_staging"
 
+# ── Proton Drive candidate paths ─────────────────────────────────────────────
+# Where to look for the Proton Drive folder (`--find-proton` checks these).
+# Wildcards like * are allowed. Add your own paths here if Proton Drive
+# lives somewhere unusual; the built-in defaults are used for any paths
+# you don't override.
+proton_drive_paths:
+  # macOS
+  - "~/Library/CloudStorage/ProtonDrive-*"
+  # Android — shared storage
+  - "/storage/emulated/0/ProtonDrive"
+  - "/storage/emulated/0/Proton Drive"
+  - "/storage/emulated/0/Documents/ProtonDrive"
+  - "/storage/emulated/0/Download/ProtonDrive"
+  # Android — app media (scoped storage)
+  - "/storage/emulated/0/Android/media/com.protontech.android.drive"
+  # Android — app data (may need root)
+  - "/storage/emulated/0/Android/data/com.protontech.android.drive/files"
+  # Termux shared
+  - "~/storage/shared/ProtonDrive"
+  - "~/storage/shared/Proton Drive"
+
 # ── Grace period (minutes) ───────────────────────────────────────────────────
 # Files must be at least this old before the daemon will copy them.
 # This gives you time to delete unwanted photos BEFORE they get backed up
@@ -81,7 +102,9 @@ max_file_size_mb: 500
 # include_extensions: if non-empty, ONLY these extensions are copied.
 #   Example: [".jpg", ".png", ".pdf", ".txt", ".mp4", ".3gp"]
 #
-# exclude_extensions: these are NEVER copied (temporary/download-partial files).
+# exclude_extensions: these are NEVER copied (temporary/download-partial and
+# junk files). The built-in safety defaults (.tmp, .crypt14, .pyc, .log, …)
+# are always in force — your entries only ADD to them.
 #
 # Both lists are case-insensitive. Leave include_extensions empty to copy ALL types.
 include_extensions: []
@@ -92,10 +115,15 @@ exclude_extensions:
   - ".crdownload"
   - ".part"
   - ".download"
+  - ".crypt14"
+  - ".pyc"
+  - ".log"
 
 # ── Exclude patterns ─────────────────────────────────────────────────────────
 # Files or folders whose name contains any of these patterns are skipped.
 # Case-insensitive substring match. Useful for thumbnails, caches, etc.
+# The built-in safety defaults (.thumbnails, .DS_Store, …) are always in
+# force — your entries only ADD to them.
 exclude_patterns:
   - ".thumbnails"
   - ".thumbdata"
@@ -106,6 +134,59 @@ exclude_patterns:
   - "thumbdata"
   - ".cache"
   - ".tmp"
+  - ".DS_Store"
+  - ".Spotlight-V100"
+  - ".TemporaryItems"
+  - ".fseventsd"
+  - ".DocumentRevisions-V100"
+
+# ── Exclude folder names (exact match) ──────────────────────────────────────
+# Folders whose name EXACTLY matches one of these patterns are never copied —
+# neither their contents nor files in them. Unlike exclude_patterns above,
+# this is an exact match, so "build" skips a folder called "build" but NOT
+# one called "mybuildings". Matched case-insensitively against the folder
+# name and its path (so "priv/static" and "tmp/cache" work).
+# The built-in safety defaults (.git, .venv, node_modules, …) are always in
+# force — your entries only ADD to them.
+exclude_folder_names:
+  # Version control — back these up with git push, never file sync
+  - ".git"
+  - ".hg"
+  - ".svn"
+  - ".cvs"
+  # Environments and dependencies — recreate from lock files
+  - ".venv"
+  - "venv"
+  - "env"
+  - ".env"
+  - "node_modules"
+  - ".next"
+  - ".nuxt"
+  # Build output and caches
+  - "__pycache__"
+  - ".pytest_cache"
+  - ".mypy_cache"
+  - ".tox"
+  - ".cache"
+  - ".parcel-cache"
+  - "coverage"
+  - ".nyc_output"
+  - "elm-stuff"
+  - ".elixir_ls"
+  - ".stack-work"
+  - "_build"
+  - "deps"
+  - "ebin"
+  - "dist"
+  - "build"
+  - "target"
+  - ".bundle"
+  - "vendor"
+  - "bundle"
+  - "priv/static"
+  - ".gradle"
+  - ".m2"
+  - "tmp/cache"
 
 # ── Exclude folder patterns (folder NAMES only) ───────────────────────────────
 # Whole folders whose NAME contains any of these patterns are skipped —
@@ -129,6 +210,11 @@ delete_after_copy: false
 # SQLite database tracking which files have already been synced.
 # Uses content hashing so renames don't trigger re-copies.
 db_path: "~/.phone_daemon.db"
+
+# ── Prune stale entries after N days ────────────────────────────────────────
+# If a source file has been deleted for at least this many days, its DB entry
+# and its staged copy are removed so deleted files never get backed up.
+prune_max_age_days: 30
 
 # ── Log path ─────────────────────────────────────────────────────────────────
 log_path: "~/.phone_daemon.log"

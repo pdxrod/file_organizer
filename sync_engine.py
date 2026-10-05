@@ -38,13 +38,12 @@ class SyncEngine:
         if self._disable_mmap:
             args.append("--no-whole-file")
 
-        # Exclude patterns from config
+        # Exclude patterns from config. Version-control folders (.git etc.)
+        # are part of the built-in exclude_patterns safety defaults — they
+        # are always merged in by Config.load(), so no separate hard-coded
+        # list is needed here.
         for pat in self._exclude_patterns:
             args.extend(["--exclude", pat])
-
-        # VCS folders must NEVER be synced — hard-coded safety
-        for vcs in [".git", ".hg", ".svn", "CVS"]:
-            args.extend(["--exclude", vcs])
 
         # Additional args from config
         args.extend(self._additional_args)

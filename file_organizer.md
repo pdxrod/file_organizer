@@ -190,7 +190,7 @@ Incidentally, I got this list out of various files. I think everything like this
 
 9 - In both the phone app and the computer app, when they first start, if there is only a yaml config template file (config_template.yaml or phone_daemon_config.template.yaml), it creates a new config file, and tells the user if it will work, and how to edit it (for example, on the computer, if it has /Users/janedoe, and the user is not called Jane Doe, it explains how to edit config.yaml). Remind the user not to use tabs in a YAML file. It should be impossible to run the computer software without a config.yaml file, but the phone program can produce a new config file based on phone_daemon_config.template.yaml.
 
-10 - don't rename files with _1 at the end. Copying foo.png over foo.png, just overwrite it if it's later and a different size. In both the phone and computer software, look out for (1) files, renamed by the Mac or a phone - e.g. 'foo (1).png', or 'foo (2).png', or 'foo (1) (1).png', or 'foo (1) (2).png' etc.. Always find the latest, rename it foo.png, and delete all the files which end in (1), (2), etc.. 
+10 - don't rename files with _1 at the end. Copying foo.png over foo.png, just overwrite it if it's later and a different size. In both the phone and computer software, look out for (1) files, renamed by the Mac or a phone - e.g. 'foo (1).png', or 'foo (2).png', or 'foo (1) (1).png', or 'foo (1) (2).png' etc. or even 'foo (1) (1)_1.png'. Always find the latest, rename it foo.png, and delete all the files which end in (1), (2), etc.. 
 
 11. The organizer backing up to PROTON_DRIVE is a bit hit-and-miss.
 
@@ -207,3 +207,56 @@ It needs to be configurable so that any folder in /storage/emulated/0/file_organ
 13. Don't back up files YYYYMMDD_NNNNNN.jpg etc. Screenshot... ...etc.  wait til I've changed their names. Find examples. Normalise all dates at beginning of filenames to YYYYMMDD. This includes files like IMG-YYYYMMDD... any file which has been created by an app, which I have not yet given a meaningful name to.
 
 14. When the daemons are running, if an operation, e.g. bidirectional sync, dedup, auto_git results in no action, gradually increase the time the daemon sleeps between each operation.
+
+DeepSeek, 2026-10-04:
+I've read file_organizer.md and surveyed the codebase. Here's my report.
+
+Current state (relevant to ordering)
+Repo is clean; last commits are all in. Baseline: python3 -m unittest discover -s test → 9 tests, OK.
+Some items are already partially done, which changes their priority:
+Item 12 (staging) — the phone daemon already preserves folder structure in file_organizer_staging (phone_daemon.py ~line 686). What's missing is the Mac side: phone_pull.sh still flattens everything into ~/misc (~lines 287, 354). So half of 12 is done; the other half (staging→computer folder mapping) is open.
+Item 9 (first-run config) — partly exists: cli.py creates a starter config and exits when config.yaml is missing; the phone daemon already auto-generates its config from its template. What's missing is the quality of that experience: "will it work, and how do I edit it" messaging, the no-tabs warning, and the janedoe validation.
+Item 7 (janedoe) — janedoe appears only in config_template.yaml. Cleanup is small; the real work is the startup validation that detects template paths that don't exist on the user's machine and exits with instructions.
+Item 4 (hard-coded constants) — PROTON_CANDIDATES is still hard-coded in phone_daemon.py:50. A sweep is needed.
+Item 3 (exclusion lists) — lists exist in config.py DEFAULTS and both YAML templates, but not your full list, and they're duplicated across files. Needs consolidation, not invention.
+The 14 items, as I read them
+Android app / user-friendly phone experience
+Friendlier filenames — drop "daemon"
+Consolidate all exclusion lists into config files
+Move hard-coded constants (PROTON_CANDIDATES etc.) into config
+Maybe merge phone config + config_template.yaml into one file
+Route misc files to correct folders by date, then build meaningful-category soft links in ~/organized
+Remove janedoe references; validate and exit with instructions when template paths don't exist
+README + user guidance (TextEdit/Notepad/nano)
+First-run config creation on both platforms with clear "will it work / how to edit" messaging; no tabs in YAML; computer must not run without config.yaml
+No _1/(1) renames — overwrite if newer+different size; collapse foo (1).png families to the latest
+Fix PROTON_DRIVE backup being hit-and-miss 12a. Single organize entry point; everything else in a subdirectory 12b. Staging→computer folder mapping (Music→MAIN_DRIVE/Music, fallback misc)
+Don't back up app-generated names (Screenshot…, YYYYMMDD_NNNNNN.jpg) until renamed; normalise leading dates to YYYYMMDD
+Idle backoff: increase daemon sleep when a cycle does nothing
+Proposed order
+Phase 1 — Config foundation: items 3, 4, 7, then 5 (S–M each) Config touches everything: 9, 12b, 13, and the app all read it. Getting the patterns and constants into their final shape first means we never edit the same YAML twice. 7 is a natural pair with 3/4 (validation needs to know what a "template default" path looks like). 5 (config merge) comes last in this phase so the merged file is written once, in final form — but this needs your decision ("maybe"), since it affects every script and doc. My recommendation: yes — one config_template.yaml with shared:, computer:, phone: sections, but keep the two live configs separate (phone's is per-device and git-ignored).
+
+Phase 2 — First-run UX, docs, naming: items 9, 8, 2, 14 (S–M) 9 builds directly on Phase 1. 8 is the README rewrite. 2 (drop "daemon" from filenames/messages) must come before 12a so we restructure into final names once. 14 (idle backoff) is small and independent — a quick win to slot in here while we're in the daemon loops.
+
+Phase 3 — Single entry point: item 12a (L) Top-level organize that detects Android/Termux vs desktop and dispatches; --test-real, --scan, etc.; no args prints full usage. Everything else moves to a subdirectory. Riskiest structural change, so it comes after config/UX settle and after the rename. This also resolves the stray phone_pull.sh.bak at top level. Needs your confirmation on layout (organize + src/) and whether manage_*.sh stay or fold into organize.
+
+Phase 4 — Sync correctness: items 10, 12b, 13, 11 (M each, 11 unknown until diagnosed)
+
+10 first: copy-overwrite rule + (1)-family collapse. This is destructive (deletes the (1)/(2) siblings), so I'll build it dry-run-first and it needs care around the phone's SHA-256 SQLite tracking so renames don't re-copy.
+12b: make phone_pull.sh stop flattening; add the staging-subfolder→computer-folder mapping with misc fallback.
+13: filename gate (hold app-generated names until renamed) + date normalisation module with your real examples.
+11: this starts as diagnosis, not coding — run a verbose sync cycle, capture where PROTON_DRIVE copies go missing, then fix the actual cause (my suspects: rsync-vs-CloudStorage-mount timestamp/checksum quirks, partial-file handling, excluded hidden files). I won't promise a fix until we see logs.
+Phase 5 — Smart organisation: item 6 (XL, deliverable in slices) The misc→correct-folder router keyed on date prefixes (with "not all date-prefixed files" exception heuristics), then the meaningful-category soft-link tree. Biggest and most domain-specific; do it only after Phase 4 so its inputs are stable. I'd deliver it as: dry-run router first, then real moves behind an approval gate, then link naming.
+
+Phase 6 — Android app: item 1 (XL, last) Depends on 12a (entry point), 5 (config), 9 (first-run UX), 13 (don't back up junk), 2 (names). Decision needed: MVP as a Termux-friendly wrapper (termux-api notifications + widget, no APK, testable on your A20 immediately) vs a real APK (Kivy or Flutter, much bigger). My recommendation: Termux MVP first, evaluate an APK after.
+
+Working method throughout
+One item per commit; unittest tests added with every change (the suite is thin — 9 tests — so each phase also grows it).
+Destructive operations (10, 6, 13's deletes) always get --dry-run output you can approve before --REAL.
+manage_organizer.sh test as the pre-commit gate, plus --scan-once dry-runs on your real trees.
+Questions before I start
+Item 5: merge into one template (my recommendation), or keep two?
+Item 12a layout: organize at top level + src/ subdirectory, OK? Keep manage_*.sh?
+Item 1: Termux-based MVP app first, or go straight for an APK?
+Item 11: want me to instrument and run a verbose sync now so we have diagnosis data before Phase 4?
+If you approve this order, I'd start with Phase 1: items 3 and 4, then 7, then pause for your answer on the merge.

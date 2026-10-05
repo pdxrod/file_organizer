@@ -35,6 +35,7 @@ import sqlite3
 import logging
 import argparse
 import shutil
+import fnmatch
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Iterator
@@ -46,8 +47,15 @@ DEFAULT_DB = "~/.phone_daemon.db"
 DEFAULT_LOG = "~/.phone_daemon.log"
 DEFAULT_PID = "~/.phone_daemon.pid"
 
-# Common Proton Drive paths on various platforms
-PROTON_CANDIDATES = [
+# Built-in safety defaults. The live, editable copies of these lists live in
+# phone_daemon_config.template.yaml (proton_drive_paths, exclude_extensions,
+# exclude_patterns, exclude_folder_names). User config lists are MERGED on top
+# of these rather than replacing them, so junk never gets copied even with a
+# config file created before these rules existed.
+
+# Common Proton Drive paths on various platforms (fallback for the
+# proton_drive_paths config key).
+DEFAULT_PROTON_CANDIDATES = [
     # macOS
     "~/Library/CloudStorage/ProtonDrive-*",
     # Android — shared storage
@@ -63,6 +71,55 @@ PROTON_CANDIDATES = [
     "~/storage/shared/ProtonDrive",
     "~/storage/shared/Proton Drive",
 ]
+
+# Extensions never copied. Keep in sync with phone_daemon_config.template.yaml.
+DEFAULT_EXCLUDE_EXTENSIONS = [
+    ".tmp", ".temp", ".partial", ".crdownload", ".part", ".download",
+    ".crypt14", ".pyc", ".log",
+]
+
+# Substring patterns matched against file AND folder names.
+DEFAULT_EXCLUDE_PATTERNS = [
+    ".thumbnails", ".thumbdata", ".face", ".pending",
+    ".trashed", ".trash", "thumbdata", ".cache", ".tmp",
+    # Junk files (macOS leftovers end up on phones too)
+    ".DS_Store", ".Spotlight-V100", ".TemporaryItems",
+    ".fseventsd", ".DocumentRevisions-V100",
+]
+
+# Exact folder-name patterns (case-insensitive, fnmatch). Matched against the
+# folder name and its path relative to the source root, so "priv/static" and
+# "tmp/cache" work. Exact matching means "build" never hits a folder called
+# "mybuildings". Keep in sync with phone_daemon_config.template.yaml.
+DEFAULT_EXCLUDE_FOLDER_NAMES = [
+    # Version control — back these up with git push, never file sync
+    ".git", ".hg", ".svn", ".cvs",
+    # Environments and dependencies — recreate from lock files
+    ".venv", "venv", "env", ".env",
+    "node_modules", ".next", ".nuxt",
+    # Build output and caches
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".tox",
+    ".cache", ".parcel-cache", "coverage", ".nyc_output",
+    "elm-stuff", ".elixir_ls", ".stack-work", "_build",
+    "deps", "ebin", "dist", "build", "target",
+    ".bundle", "vendor", "bundle", "priv/static",
+    ".gradle", ".m2", "tmp/cache",
+]
+
+
+def _merged_list(*lists: list) -> list:
+    """Merge lists in order, dropping duplicates.
+
+    Built-in safety defaults come first; user config lists only ADD to them.
+    """
+    seen = set()
+    out = []
+    for lst in lists:
+        for item in lst or []:
+            if item not in seen:
+                seen.add(item)
+                out.append(item)
+    return out
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -332,14 +389,12 @@ def _default_config() -> dict:
         "scan_interval_seconds": 60,
         "max_file_size_mb": 500,
         "include_extensions": [],  # empty = all files
-        "exclude_extensions": [
-            ".tmp", ".temp", ".partial", ".crdownload", ".part",
-        ],
-        "exclude_patterns": [
-            ".thumbnails", ".thumbdata", ".face", ".pending",
-            ".trashed", ".trash", "thumbdata", ".cache",
-        ],
+        "exclude_extensions": list(DEFAULT_EXCLUDE_EXTENSIONS),
+        "exclude_patterns": list(DEFAULT_EXCLUDE_PATTERNS),
+        "exclude_folder_names": list(DEFAULT_EXCLUDE_FOLDER_NAMES),
         "exclude_folder_patterns": [],  # folder NAMES only — e.g. "line", "twitter"
+        "proton_drive_paths": list(DEFAULT_PROTON_CANDIDATES),
+        "prune_max_age_days": 30,
         "delete_after_copy": False,  # DANGER: only set true if you know what you're doing
         "db_path": DEFAULT_DB,
         "log_path": DEFAULT_LOG,
@@ -528,6 +583,7 @@ def scan_sources(
     exclude_extensions: list[str],
     exclude_patterns: list[str],
     exclude_folder_patterns: list[str],
+    exclude_folder_names: list[str],
     max_file_size_mb: int,
     min_age_seconds: float,
 ) -> Iterator[tuple[Path, float]]:
@@ -540,14 +596,18 @@ def scan_sources(
     - It's not too large
     - It's old enough (min_age_seconds)
 
-    exclude_patterns matches file names AND folder names;
+    exclude_patterns matches file names AND folder names (substring);
     exclude_folder_patterns matches FOLDER names only (used to skip whole
     app folders like LINE without dropping files whose names merely
-    contain the word).
+    contain the word);
+    exclude_folder_names matches folder names EXACTLY (case-insensitive,
+    fnmatch), against both the folder name and its path relative to the
+    source root, so nested patterns like "priv/static" work.
     """
     now = time.time()
     include_set = {e.lower() for e in include_extensions} if include_extensions else None
     exclude_set = {e.lower() for e in exclude_extensions}
+    folder_name_patterns = [p.lower() for p in (exclude_folder_names or [])]
 
     for src_dir in source_dirs:
         root = Path(src_dir).expanduser().resolve()
@@ -561,18 +621,27 @@ def scan_sources(
         for dirpath_str, dirnames, filenames in os.walk(root, followlinks=False):
             # Filter directory names in-place to skip excluded dirs.
             # exclude_patterns applies here too (thumbnails etc.);
-            # exclude_folder_patterns is folder-names-only.
-            dirnames[:] = [
-                d for d in dirnames
-                if not any(
-                    pat.lower() in d.lower()
-                    for pat in exclude_patterns
-                )
-                and not any(
-                    pat.lower() in d.lower()
-                    for pat in exclude_folder_patterns
-                )
-            ]
+            # exclude_folder_patterns is folder-names-only (substring);
+            # exclude_folder_names is exact-name matching.
+            kept = []
+            for d in dirnames:
+                lower_d = d.lower()
+                if any(pat.lower() in lower_d for pat in exclude_patterns):
+                    continue
+                if any(pat.lower() in lower_d for pat in exclude_folder_patterns):
+                    continue
+                if folder_name_patterns:
+                    rel_d = os.path.relpath(
+                        os.path.join(dirpath_str, d), root
+                    ).replace(os.sep, "/").lower()
+                    if any(
+                        fnmatch.fnmatch(lower_d, pat)
+                        or fnmatch.fnmatch(rel_d, pat)
+                        for pat in folder_name_patterns
+                    ):
+                        continue
+                kept.append(d)
+            dirnames[:] = kept
 
             for fname in filenames:
                 # Age check
@@ -608,12 +677,16 @@ def scan_sources(
 
 # ── Proton Drive finder ──────────────────────────────────────────────────────
 
-def find_proton_drive() -> list[Path]:
-    """Search common locations for Proton Drive folder. Returns list of found paths."""
+def find_proton_drive(candidates: Optional[list] = None) -> list[Path]:
+    """Search common locations for Proton Drive folder. Returns list of found paths.
+
+    candidates defaults to the built-in list; configs can override it with the
+    proton_drive_paths key.
+    """
     import glob as glob_mod
 
     found = []
-    for candidate in PROTON_CANDIDATES:
+    for candidate in (candidates if candidates is not None else DEFAULT_PROTON_CANDIDATES):
         expanded = os.path.expanduser(candidate)
         if "*" in expanded:
             matches = glob_mod.glob(expanded)
@@ -664,6 +737,14 @@ class PhoneDaemon:
         self.max_size_mb = self.config.get("max_file_size_mb", 500)
         self.exclude_folder_patterns = (
             self.config.get("exclude_folder_patterns", []) or []
+        )
+        # Safety defaults + user config lists, merged (user only adds).
+        self.exclude_folder_names = _merged_list(
+            DEFAULT_EXCLUDE_FOLDER_NAMES,
+            self.config.get("exclude_folder_names"),
+        )
+        self.prune_max_age_days = int(
+            self.config.get("prune_max_age_days", 30) or 30
         )
 
         signal.signal(signal.SIGINT, self._handle_signal)
@@ -773,12 +854,17 @@ class PhoneDaemon:
         stats = {"scanned": 0, "copied": 0, "skipped": 0, "errors": 0, "bytes": 0}
 
         include_ext = self.config.get("include_extensions", []) or []
-        exclude_ext = self.config.get("exclude_extensions", []) or []
-        exclude_pat = self.config.get("exclude_patterns", []) or []
+        # Merge built-in safety defaults with user config (user only adds).
+        exclude_ext = _merged_list(
+            DEFAULT_EXCLUDE_EXTENSIONS, self.config.get("exclude_extensions")
+        )
+        exclude_pat = _merged_list(
+            DEFAULT_EXCLUDE_PATTERNS, self.config.get("exclude_patterns")
+        )
 
         for filepath, mtime in scan_sources(
             self.source_dirs, include_ext, exclude_ext,
-            exclude_pat, self.exclude_folder_patterns,
+            exclude_pat, self.exclude_folder_patterns, self.exclude_folder_names,
             self.max_size_mb, self.min_age,
         ):
             stats["scanned"] += 1
@@ -829,7 +915,9 @@ class PhoneDaemon:
         )
 
         # Prune stale entries periodically (deletes staged copies too)
-        pruned = self.db.prune_missing(self.target_dir, max_age_days=30)
+        pruned = self.db.prune_missing(
+            self.target_dir, max_age_days=self.prune_max_age_days
+        )
         if pruned:
             logger.info("Pruned %d stale DB entries (files no longer exist)", pruned)
 
@@ -928,10 +1016,12 @@ def main():
     args = parser.parse_args()
     args.config = resolve_config_path(args.config)
 
-    # ── Special commands (no config needed) ──
+    # ── Special commands ──
 
     if args.find_proton:
-        found = find_proton_drive()
+        cfg = load_config(args.config)
+        candidates = cfg.get("proton_drive_paths") or DEFAULT_PROTON_CANDIDATES
+        found = find_proton_drive(candidates)
         if found:
             print(f"Found {len(found)} Proton Drive location(s):")
             for p in found:
@@ -939,9 +1029,10 @@ def main():
         else:
             print("No Proton Drive folder found at common locations.")
             print("Checked:")
-            for c in PROTON_CANDIDATES:
+            for c in candidates:
                 print(f"  {c}")
             print("\nTip: Manually set target_directory in phone_daemon_config.yaml")
+            print("Tip: Or add your path to proton_drive_paths in that file.")
         return
 
     if args.stats:

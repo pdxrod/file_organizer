@@ -1,0 +1,186 @@
+"""Tests for the consolidated exclusion lists (item 3) on the phone side.
+
+Covers:
+- Exact folder-name exclusion in scan_sources (build vs mybuildings).
+- Nested path patterns like priv/static and tmp/cache.
+- Extension exclusions (.crypt14 etc.).
+- Built-in safety defaults merged with (not replaced by) user config.
+- proton_drive_paths config key driving find_proton_drive.
+"""
+
+import os
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import phone_daemon  # noqa: E402
+
+import logging  # noqa: E402
+logging.getLogger("phone_daemon").addHandler(logging.NullHandler())
+
+
+class ScanExclusionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+        # Old files so min_age filtering does not interfere.
+        self.old = time.time() - 7200
+
+    def _write(self, rel: str) -> Path:
+        p = self.dir / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x")
+        os.utime(p, (self.old, self.old))
+        return p
+
+    def _scan(self, exclude_folder_names=None, exclude_extensions=None):
+        return [
+            str(p.relative_to(self.dir))
+            for p, _ in phone_daemon.scan_sources(
+                [str(self.dir)],
+                include_extensions=[],
+                exclude_extensions=(
+                    exclude_extensions
+                    if exclude_extensions is not None
+                    else list(phone_daemon.DEFAULT_EXCLUDE_EXTENSIONS)
+                ),
+                exclude_patterns=list(phone_daemon.DEFAULT_EXCLUDE_PATTERNS),
+                exclude_folder_patterns=[],
+                exclude_folder_names=(
+                    exclude_folder_names
+                    if exclude_folder_names is not None
+                    else list(phone_daemon.DEFAULT_EXCLUDE_FOLDER_NAMES)
+                ),
+                max_file_size_mb=500,
+                min_age_seconds=0,
+            )
+        ]
+
+    def test_exact_folder_names_excluded_but_lookalikes_kept(self):
+        self._write("build/out.bin")
+        self._write("mybuildings/photo.jpg")
+        self._write(".git/config")
+        found = self._scan()
+        self.assertNotIn("build/out.bin", found)
+        self.assertIn("mybuildings/photo.jpg", found)
+        self.assertNotIn(".git/config", found)
+
+    def test_nested_path_patterns_priv_static_and_tmp_cache(self):
+        self._write("priv/static/app.js")
+        self._write("priv/notes/note.txt")
+        self._write("tmp/cache/blob.bin")
+        self._write("tmp/pics/pic.jpg")
+        found = self._scan()
+        self.assertNotIn("priv/static/app.js", found)
+        self.assertIn("priv/notes/note.txt", found)
+        self.assertNotIn("tmp/cache/blob.bin", found)
+        self.assertIn("tmp/pics/pic.jpg", found)
+
+    def test_excluded_extensions(self):
+        self._write("chat.crypt14")
+        self._write("debug.log")
+        self._write("keep.png")
+        found = self._scan()
+        self.assertNotIn("chat.crypt14", found)
+        self.assertNotIn("debug.log", found)
+        self.assertIn("keep.png", found)
+
+    def test_build_cache_folders_excluded(self):
+        for rel in [
+            "node_modules/pkg/index.js",
+            ".venv/bin/python",
+            "__pycache__/mod.pyc",
+            "dist/app.js",
+            "Music/song.mp3",
+        ]:
+            self._write(rel)
+        found = self._scan()
+        for excluded in [
+            "node_modules/pkg/index.js",
+            ".venv/bin/python",
+            "__pycache__/mod.pyc",
+            "dist/app.js",
+        ]:
+            self.assertNotIn(excluded, found)
+        self.assertIn("Music/song.mp3", found)
+
+    def test_user_folder_names_are_added_to_defaults(self):
+        self._write("family-pics/photo.jpg")
+        found = self._scan(exclude_folder_names=["family-pics"])
+        self.assertNotIn("family-pics/photo.jpg", found)
+
+    def test_user_extensions_are_added_to_defaults(self):
+        # The merge happens in PhoneDaemon.scan_and_sync via _merged_list:
+        # even with a custom list, the built-in .crypt14 must still apply.
+        merged = phone_daemon._merged_list(
+            phone_daemon.DEFAULT_EXCLUDE_EXTENSIONS, [".custom"]
+        )
+        self.assertIn(".crypt14", merged)
+        self.assertIn(".custom", merged)
+        self._write("chat.crypt14")
+        self._write("thing.custom")
+        found = self._scan(exclude_extensions=merged)
+        self.assertNotIn("chat.crypt14", found)
+        self.assertNotIn("thing.custom", found)
+
+
+class ProtonCandidatesTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def test_find_proton_drive_uses_given_candidates(self):
+        (self.dir / "MyDrive").mkdir()
+        found = phone_daemon.find_proton_drive([str(self.dir / "MyDrive")])
+        self.assertEqual(found, [self.dir / "MyDrive"])
+
+    def test_config_proton_drive_paths_drives_finder(self):
+        config = self.dir / "phone_daemon_config.yaml"
+        config.write_text(
+            "proton_drive_paths:\n"
+            f"  - \"{self.dir}/MyDrive\"\n"
+        )
+        cfg = phone_daemon.load_config(str(config))
+        candidates = cfg.get("proton_drive_paths") or \
+            phone_daemon.DEFAULT_PROTON_CANDIDATES
+        self.assertEqual(candidates, [f"{self.dir}/MyDrive"])
+
+
+class PhoneDaemonMergeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def test_daemon_merges_safety_defaults_with_config(self):
+        config = self.dir / "phone_daemon_config.yaml"
+        config.write_text(
+            "target_directory: /tmp/staging\n"
+            "source_directories: []\n"
+            f"db_path: \"{self.dir}/db.sqlite\"\n"
+            "exclude_folder_names:\n"
+            "  - \"extra-folder\"\n"
+            "exclude_extensions:\n"
+            "  - \".custom\"\n"
+        )
+        daemon = phone_daemon.PhoneDaemon(str(config))
+        try:
+            names = daemon.exclude_folder_names
+            self.assertIn(".git", names)
+            self.assertIn("node_modules", names)
+            self.assertIn("extra-folder", names)
+        finally:
+            daemon.db.close()
+
+    def test_merged_list_orders_and_dedupes(self):
+        out = phone_daemon._merged_list(["a", "b"], ["b", "c"], None)
+        self.assertEqual(out, ["a", "b", "c"])
+
+
+if __name__ == "__main__":
+    unittest.main()

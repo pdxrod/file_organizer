@@ -22,10 +22,42 @@ DEFAULTS: Dict[str, Any] = {
     "organize_folders": [],  # folders to scan for ~/organized (defaults to source_folders)
     "organize_file_types": ["documents", "images", "music", "video"],  # which type categories to link
     "output_base": "~/organized",
+    # Safety defaults. User config lists are MERGED on top of these (see
+    # _union_list in load()) so junk like .git is never synced even with a
+    # config file created before these rules existed.
     "exclude_patterns": [
-        ".DS_Store", "*.pyc", "*.log",
+        # Junk files
+        ".DS_Store", "*.pyc", "*.pyo", "*.log", "*.crypt14",
         ".Spotlight-V100", ".TemporaryItems", ".fseventsd",
         ".DocumentRevisions-V100", ".Trash", ".Trashes", "*_files",
+        # Version control — back these up with git push, never file sync
+        ".git", ".hg", ".svn", ".cvs",
+        # Environments and dependencies — recreate from lock files
+        ".venv", "venv", "env", ".env",
+        "node_modules", ".next", ".nuxt",
+        "vendor", "bundle", ".bundle", "priv/static",
+        # Build output and caches
+        "__pycache__", ".pytest_cache", ".mypy_cache", ".tox",
+        ".cache", ".parcel-cache", "coverage", ".nyc_output",
+        "elm-stuff", ".elixir_ls", ".stack-work", "_build",
+        "deps", "ebin", "dist", "build", "target",
+        ".gradle", ".m2", "tmp/cache", ".tmp*",
+    ],
+    # Legacy softlink-handling classification (see softlink_handler.py).
+    # The modern behaviour is exclusion via exclude_patterns above; these
+    # lists only matter if softlink_folder_patterns is used.
+    "softlink_never_patterns": [".git", ".hg", ".svn", ".cvs"],
+    "softlink_reproducible_patterns": [
+        ".venv", "venv", "env", ".env",
+        "node_modules", ".next", ".nuxt",
+    ],
+    "softlink_build_cache_patterns": [
+        "__pycache__", ".pytest_cache", ".mypy_cache", ".tox",
+        ".cache", ".parcel-cache", "coverage", ".nyc_output",
+        "elm-stuff", ".elixir_ls", ".stack-work", "_build",
+        "deps", "ebin", "dist", "build", "target",
+        ".bundle", "vendor/bundle", "priv/static",
+        ".gradle", ".m2", "tmp/cache",
     ],
     "empty_folder_patterns": [
         "node_modules", "_build", "deps", "ebin", "dist", "build",
@@ -80,6 +112,7 @@ DEFAULTS: Dict[str, Any] = {
         "include_extensions": [],
         "exclude_extensions": [
             ".tmp", ".temp", ".partial", ".crdownload", ".part", ".download",
+            ".crypt14", ".pyc", ".log",
         ],
     },
 }
@@ -121,6 +154,13 @@ class Config:
         # Merge with defaults (user values take precedence)
         merged = dict(DEFAULTS)
         merged.update(self._raw)
+
+        # Exclusion safety: the built-in defaults must never be removable by
+        # an old or minimal config, so user lists are merged ON TOP of them.
+        merged["exclude_patterns"] = _union_list(
+            DEFAULTS["exclude_patterns"],
+            self._raw.get("exclude_patterns") or [],
+        )
 
         # Resolve drives
         self.drives = self._resolve_drives(merged.get("drives", {}))
@@ -375,6 +415,21 @@ class Config:
         )
 
         return str(target_path)
+
+
+def _union_list(base: List[str], extra: List[str]) -> List[str]:
+    """Return base items followed by any extra items not already present.
+
+    Used for exclusion lists: the built-in safety defaults must always be in
+    force, and user config only ever ADDS patterns on top of them.
+    """
+    seen = set()
+    out: List[str] = []
+    for item in list(base or []) + list(extra or []):
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
 
 
 def load_config(path: Optional[str] = None) -> Config:

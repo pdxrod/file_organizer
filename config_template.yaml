@@ -89,15 +89,63 @@ empty_folder_patterns:
   - "tmp/cache"
   - ".tmp*"
 
-# Files matching these patterns are excluded from sync. The output_base (~/organized) is always automatically excluded.
+# Files and folders matching these patterns are NEVER copied or synced.
+# A pattern matches any file or folder with that name, anywhere in the tree.
+# The output_base (~/organized) and softlink_backup_base are always excluded
+# automatically. The built-in safety defaults (.git etc.) are always in force
+# even if you shorten this list — your entries only ADD to them.
 exclude_patterns:
+  # Junk files
   - ".DS_Store"
   - "*.pyc"
+  - "*.pyo"
   - "*.log"
+  - "*.crypt14"
   - ".Spotlight-V100"
   - ".TemporaryItems"
   - ".fseventsd"
   - ".DocumentRevisions-V100"
+  - ".Trash"
+  - ".Trashes"
+  - ".tmp*"
+  # Version control — back these up with git push, never file sync
+  - ".git"
+  - ".hg"
+  - ".svn"
+  - ".cvs"
+  # Environments and dependencies — recreate from lock files
+  - ".venv"
+  - "venv"
+  - "env"
+  - ".env"
+  - "node_modules"
+  - ".next"
+  - ".nuxt"
+  - "vendor"
+  - "bundle"
+  - ".bundle"
+  - "priv/static"
+  # Build output and caches
+  - "__pycache__"
+  - ".pytest_cache"
+  - ".mypy_cache"
+  - ".tox"
+  - ".cache"
+  - ".parcel-cache"
+  - "coverage"
+  - ".nyc_output"
+  - "elm-stuff"
+  - ".elixir_ls"
+  - ".stack-work"
+  - "_build"
+  - "deps"
+  - "ebin"
+  - "dist"
+  - "build"
+  - "target"
+  - ".gradle"
+  - ".m2"
+  - "tmp/cache"
 
 # Where organized files are stored (with soft links). Use ~ for home directory.
 output_base: "~/organized"
@@ -107,8 +155,58 @@ output_base: "~/organized"
 log_path: "~/.file_organizer.log"
 pid_path: "/tmp/file_organizer.pid"
 
-# Where softlink folders (like .git, venv, etc.) are backed up before being replaced with soft links.
-# Use ~ for home directory. This maintains the full source path structure.
+# ── Legacy softlink-folder handling ────────────────────────────────────────
+# The old file_organiser backed these folders up to ~/organised and replaced
+# them with soft links. That breaks tools like git, so the current default is
+# simply to EXCLUDE them from sync (see exclude_patterns above).
+#
+# softlink_backup_base: where backups would go; leave empty to disable.
+# softlink_folder_patterns: folders that still use the legacy mechanism
+# (empty = off, which is recommended).
+softlink_backup_base: ""
+softlink_folder_patterns: []
+
+# Classification used only if the legacy softlink mechanism is enabled.
+# softlink_never_patterns: never replace with a soft link (breaks their tools)
+softlink_never_patterns:
+  - ".git"
+  - ".hg"
+  - ".svn"
+  - ".cvs"
+# softlink_reproducible_patterns: recreate from lock files instead of copying
+softlink_reproducible_patterns:
+  - ".venv"
+  - "venv"
+  - "env"
+  - ".env"
+  - "node_modules"
+  - ".next"
+  - ".nuxt"
+# softlink_build_cache_patterns: build caches — safe to delete or exclude
+softlink_build_cache_patterns:
+  - "__pycache__"
+  - ".pytest_cache"
+  - ".mypy_cache"
+  - ".tox"
+  - ".cache"
+  - ".parcel-cache"
+  - "coverage"
+  - ".nyc_output"
+  - "elm-stuff"
+  - ".elixir_ls"
+  - ".stack-work"
+  - "_build"
+  - "deps"
+  - "ebin"
+  - "dist"
+  - "build"
+  - "target"
+  - ".bundle"
+  - "vendor/bundle"
+  - "priv/static"
+  - ".gradle"
+  - ".m2"
+  - "tmp/cache"
 
 min_file_size: 1024
 max_file_size: 104857600
@@ -201,4 +299,7 @@ phone_pull:
     - ".crdownload"
     - ".part"
     - ".download"
+    - ".crypt14"
+    - ".pyc"
+    - ".log"
 

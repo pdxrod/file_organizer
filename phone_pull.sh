@@ -62,7 +62,7 @@ defaults = {
     'min_age_minutes': 5,
     'state_file': '~/.phone_pull_state',
     'include_extensions': [],
-    'exclude_extensions': ['.tmp', '.temp', '.partial', '.crdownload', '.part', '.download'],
+    'exclude_extensions': ['.tmp', '.temp', '.partial', '.crdownload', '.part', '.download', '.crypt14', '.pyc', '.log'],
 }
 local_stage = resolve(pp.get('local_stage') or defaults['local_stage'])
 print('LOCAL_STAGE=' + shlex.quote(local_stage))
