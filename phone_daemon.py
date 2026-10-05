@@ -121,6 +121,16 @@ def _merged_list(*lists: list) -> list:
                 out.append(item)
     return out
 
+
+# Template placeholders that mean "this config has not been personalised yet".
+# Keep in sync with TEMPLATE_PLACEHOLDER_MARKERS in config.py.
+PLACEHOLDER_MARKERS = (
+    "janedoe",
+    "yourexternaldrive",
+    "yourgoogledrive",
+    "yourname",
+)
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 
 logger = logging.getLogger("phone_daemon")
@@ -732,6 +742,10 @@ class PhoneDaemon:
             _expand_path(d) for d in self.config.get("source_directories", [])
         ]
 
+        # Fail fast if the config still holds unedited template placeholders
+        # (item 7).
+        self._validate_template_paths()
+
         self.min_age = self.config.get("min_age_minutes", 10) * 60
         self.scan_interval = self.config.get("scan_interval_seconds", 60)
         self.max_size_mb = self.config.get("max_file_size_mb", 500)
@@ -753,6 +767,37 @@ class PhoneDaemon:
     def _handle_signal(self, signum, frame):
         logger.info("Received signal %s — shutting down gracefully…", signum)
         self._running = False
+
+    def _validate_template_paths(self) -> None:
+        """Refuse to run with unedited template paths (item 7).
+
+        Real missing folders are skipped silently at scan time (they come
+        and go on phones). But a configured path that contains a template
+        placeholder (e.g. /Users/janedoe) and does not exist means the config
+        was never personalised — stop and tell the user to edit it.
+        """
+        problems = []
+        target = self.config.get("target_directory")
+        if target and not os.path.exists(_expand_path(target)) and any(
+            m in str(target).lower() for m in PLACEHOLDER_MARKERS
+        ):
+            problems.append(f"target_directory: {target}")
+        for raw in self.config.get("source_directories", []) or []:
+            if not os.path.exists(_expand_path(raw)) and any(
+                m in str(raw).lower() for m in PLACEHOLDER_MARKERS
+            ):
+                problems.append(f"source_directories: {raw}")
+        if problems:
+            msg = (
+                "\nERROR: your config still contains template placeholder "
+                "paths that do not exist on this device:\n  "
+                + "\n  ".join(problems)
+                + "\n\nEdit phone_daemon_config.yaml and set your real "
+                "paths, then run again.\n"
+            )
+            logger.error(msg)
+            print(msg, file=sys.stderr)
+            sys.exit(1)
 
     def _write_pid(self) -> None:
         pid_path = Path(_expand_path(self.config.get("pid_path", DEFAULT_PID)))

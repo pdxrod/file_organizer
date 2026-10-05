@@ -11,7 +11,9 @@
 
 # ── Source directories to monitor ────────────────────────────────────────────
 # On Android, these are under /storage/emulated/0/
-# On macOS, use absolute paths like /Users/rod/...
+# On macOS, use absolute paths like /Users/janedoe/... (replace janedoe with
+# your real user name — if a path contains a placeholder that does not exist,
+# the daemon stops and tells you to edit this file).
 #
 # Missing directories are skipped silently at scan time, so it is safe to
 # keep a generous list — the daemon only scans folders that actually exist.
@@ -38,8 +40,8 @@ source_directories:
   # - "/storage/emulated/0/Android/data/org.telegram.messenger"
   #
   # macOS example:
-  # - "/Users/rod/Desktop"
-  # - "/Users/rod/Downloads"
+  # - "/Users/janedoe/Desktop"
+  # - "/Users/janedoe/Downloads"
 
 # ── Target staging folder ────────────────────────────────────────────────────
 # Files are copied here, preserving relative folder structure.

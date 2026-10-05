@@ -154,5 +154,64 @@ class ScannerExclusionTests(unittest.TestCase):
         self.assertNotIn("note.crypt14", found)
 
 
+class TemplatePlaceholderTests(unittest.TestCase):
+    """A config copied from the template and never edited must fail fast
+    with instructions instead of silently doing nothing (item 7)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def _load(self, text: str):
+        path = self.dir / "config.yaml"
+        path.write_text(text)
+        return cfgmod.Config(str(path))
+
+    def test_missing_janedoe_drive_raises_with_instructions(self):
+        with self.assertRaises(cfgmod.ConfigError) as cm:
+            self._load(
+                "output_base: /tmp/never-created\n"
+                "drives:\n"
+                "  MAIN_DRIVE: \"/Users/janedoe\"\n"
+            )
+        msg = str(cm.exception)
+        self.assertIn("/Users/janedoe", msg)
+        self.assertIn("Edit config.yaml", msg)
+
+    def test_missing_placeholder_sync_pair_raises(self):
+        with self.assertRaises(cfgmod.ConfigError):
+            self._load(
+                "output_base: /tmp/never-created\n"
+                "sync_pairs:\n"
+                "  - folders:\n"
+                "      - \"/Users/janedoe/misc\"\n"
+                "      - \"/Users/janedoe/other\"\n"
+            )
+
+    def test_real_missing_drive_only_warns(self):
+        # A genuinely missing drive (unmounted volume) must NOT raise —
+        # only template placeholders are fatal.
+        cfg = self._load(
+            "output_base: /tmp/never-created\n"
+            "drives:\n"
+            "  EXTERNAL_DRIVE: \"/Volumes/definitely-not-mounted-xyz\"\n"
+        )
+        self.assertEqual(
+            cfg.drives["EXTERNAL_DRIVE"], "/Volumes/definitely-not-mounted-xyz"
+        )
+
+    def test_existing_placeholder_path_is_fine(self):
+        # If a path contains 'janedoe' but DOES exist, it is a real path.
+        real = self.dir / "janedoe"
+        real.mkdir()
+        cfg = self._load(
+            "output_base: /tmp/never-created\n"
+            "drives:\n"
+            f"  MAIN_DRIVE: \"{real}\"\n"
+        )
+        self.assertEqual(cfg.drives["MAIN_DRIVE"], str(real))
+
+
 if __name__ == "__main__":
     unittest.main()

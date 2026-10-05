@@ -182,5 +182,50 @@ class PhoneDaemonMergeTests(unittest.TestCase):
         self.assertEqual(out, ["a", "b", "c"])
 
 
+class PhonePlaceholderTests(unittest.TestCase):
+    """Unedited template placeholders must stop the daemon with instructions
+    (item 7)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def _daemon(self, extra: str):
+        config = self.dir / "phone_daemon_config.yaml"
+        config.write_text(
+            f"db_path: \"{self.dir}/db.sqlite\"\n" + extra
+        )
+        return phone_daemon.PhoneDaemon(str(config))
+
+    def test_janedoe_target_directory_exits_with_message(self):
+        with self.assertRaises(SystemExit):
+            self._daemon(
+                "target_directory: \"/Users/janedoe/misc\"\n"
+                "source_directories: []\n"
+            )
+
+    def test_janedoe_source_directory_exits_with_message(self):
+        with self.assertRaises(SystemExit):
+            self._daemon(
+                "target_directory: /tmp/staging\n"
+                "source_directories:\n"
+                "  - \"/Users/janedoe/Desktop\"\n"
+            )
+
+    def test_ordinary_missing_directories_are_allowed(self):
+        # Real phones/macs have folders that come and go; only placeholder
+        # paths are fatal.
+        daemon = self._daemon(
+            "target_directory: /tmp/staging\n"
+            "source_directories:\n"
+            "  - /storage/emulated/0/DCIM\n"
+        )
+        try:
+            self.assertIn("/storage/emulated/0/DCIM", daemon.source_dirs)
+        finally:
+            daemon.db.close()
+
+
 if __name__ == "__main__":
     unittest.main()

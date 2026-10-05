@@ -4,7 +4,7 @@
 import os, sys, argparse, logging, signal, time
 from pathlib import Path
 
-from file_organizer.config import Config, resolve_log_path
+from file_organizer.config import Config, ConfigError, resolve_log_path
 from file_organizer.scanner import FileScanner
 from file_organizer.analyzer import ContentAnalyzer
 from file_organizer.organizer import Organizer
@@ -147,7 +147,15 @@ def main():
         logger.info("Created %s — please edit it and run again.", config_path)
         return
 
-    config = Config(config_path)
+    try:
+        config = Config(config_path)
+    except ConfigError as e:
+        print(
+            f"\nERROR: {e}\n"
+            "\nFix the configuration and run again.\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     logger.info("Loaded config from %s", config_path)
 
     if args.create_test:

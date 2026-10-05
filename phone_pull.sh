@@ -65,8 +65,28 @@ defaults = {
     'exclude_extensions': ['.tmp', '.temp', '.partial', '.crdownload', '.part', '.download', '.crypt14', '.pyc', '.log'],
 }
 local_stage = resolve(pp.get('local_stage') or defaults['local_stage'])
+remote_stage = resolve(pp.get('remote_stage') or defaults['remote_stage'])
+
+# Fail fast if the config still contains unedited template placeholders
+# (item 7). Real missing paths are fine (drives come and go); placeholder
+# paths mean config.yaml was never personalised.
+markers = ('janedoe', 'yourexternaldrive', 'yourgoogledrive', 'yourname')
+problems = []
+for label, p in [('local_stage', local_stage), ('remote_stage', remote_stage)]:
+    if not os.path.exists(os.path.expanduser(p)) and any(
+        m in p.lower() for m in markers
+    ):
+        problems.append(f'{label}: {p}')
+if problems:
+    sys.stderr.write(
+        'ERROR: your config.yaml still contains template placeholder paths '
+        'that do not exist:\n  ' + '\n  '.join(problems) +
+        '\n\nEdit config.yaml and set your real paths, then run again.\n'
+    )
+    sys.exit(1)
+
 print('LOCAL_STAGE=' + shlex.quote(local_stage))
-print('REMOTE_STAGE=' + shlex.quote(resolve(pp.get('remote_stage') or defaults['remote_stage'])))
+print('REMOTE_STAGE=' + shlex.quote(remote_stage))
 print('ADB=' + shlex.quote(resolve(pp.get('adb_path') or defaults['adb_path'])))
 # Temp staging lives inside local_stage; relative values are joined onto it.
 ts = pp.get('temp_stage')
