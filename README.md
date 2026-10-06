@@ -1,492 +1,336 @@
-# File Organizer v2
+# File Organizer
 
-> **⚠️ WARNING — USE AT YOUR OWN RISK ⚠️**
+Copies, syncs, organizes, and optionally deduplicates your files — across
+your computer, cloud drives, and Android phone.
+
+> **⚠️ WARNING — USE AT YOUR OWN RISK**
 >
 > This tool copies, synchronizes, and can DELETE files across your system.
-> - Always keep current backups
-> - Start in **test mode** and review logs before using real data
-> - Review your `config.yaml` carefully
-> - Folder sync and deduplication can delete real files when misconfigured
-> - No warranty is provided — see LICENSE
+> - Always keep current backups.
+> - Start in **test mode** and review the logs before real runs.
+> - Review your config carefully — folder sync and deduplication can
+>   delete real files when misconfigured.
+> - No warranty is provided — see LICENSE.
 
 ---
 
-## Overview
+## What it does
 
-File Organizer has four main capabilities:
+| Capability | What happens |
+|------------|--------------|
+| **Organize** | Scans folders and builds a tree of **soft links** under `~/organized`, grouped by type, year, and content categories. Original files stay where they are. |
+| **Folder sync** | Bidirectionally or one-way synchronizes folder pairs (e.g. computer ↔ Proton Drive, computer → external disk) with `rsync`. |
+| **Phone sync** | Copies new files from your Android phone to a staging folder, from where they reach the cloud and your computer. Has a 10-minute grace period so photos you delete immediately are never backed up. |
+| **Deduplication** | Optionally finds and removes duplicate real files by content hash. |
+| **Auto Git** | Optionally runs `git init` in development folders that don't have one yet. |
 
-- **Organization**: Scans your files and creates a tree of **soft links** under `output_base` (e.g. `~/organized/`), grouped by type, year, and discovered content categories. **Original files stay where they are.**
-- **Folder Sync**: Bidirectionally or one-way synchronizes configured folder pairs (e.g. main drive ↔ Proton Drive, main drive → external backup).
-- **Deduplication**: Optionally finds and removes **duplicate real files** under configured `source_folders` by content hash.
-- **Auto Git**: Optionally initializes git repositories in development folders that don't have one yet.
-
-There are two primary ways to use it:
-
-- **Management script** (`./manage_organizer.sh`) — recommended; wraps all modes with start/stop/status commands.
-- **Command line** (`python3 -m file_organizer ...`) — for advanced use.
-- **Desktop app** (`./manage_organizer.sh gui`) — Tkinter-based GUI.
+The computer program runs on **macOS, Linux, and Windows** (rsync required for
+folder sync). The phone program runs on **Android via Termux**, or on macOS.
 
 ---
 
-## What's New in v2
+## One config file for everything
 
-| v1 (file_organiser) | v2 (file_organizer) |
-|---------------------|---------------------|
-| Categories included trivial words like `ready`, `wrote`, `that` | 610 stopwords + 1,369 common English words filtered + TF-IDF scoring (`df × log(N/df)²`) — distinctive words like `yugoslavia` outrank generic ones like `otherwise` |
-| `.git` folders were moved to `~/organised` and softlinked — **broke git** | `.git`, `.hg`, `.svn` simply excluded from sync |
-| `.venv`/`node_modules` softlinked during sync | Excluded from sync — reproducible from lock files. Tool reminds you to `pip freeze` if `requirements.txt` is missing |
-| Custom file-copy sync logic | Native `rsync` with checksum/size-only modes. Folder sync runs in background thread — organize step returns in ~30s |
-| Single monolithic file | Modular package: `config`, `scanner`, `analyzer`, `organizer`, `sync_engine`, `softlink_handler`, `auto_git`, `dedup` |
+Everything is configured from a single template: **`config_template.yaml`**,
+which has two sections:
+
+```
+config_template.yaml
+├── computer:   settings for the computer program
+└── phone:      settings for the phone program (phone_sync)
+```
+
+- On the **computer**, `config.yaml` is created automatically from the
+  `computer:` section the first time you run the program.
+- On the **phone**, `phone_sync_config.yaml` is created automatically from
+  the `phone:` section the first time you run `phone_sync`.
+- The template uses placeholder paths like `/Users/janedoe`. If you run the
+  program with an unedited config, it **stops and tells you exactly what to
+  edit** — it will not silently do nothing.
+
+### Editing a config file
+
+| Platform | Open it with |
+|----------|--------------|
+| macOS | **TextEdit** (plain text mode) |
+| Windows | **Notepad** |
+| Android / Termux | **nano** (`nano phone_sync_config.yaml`) |
+
+Two rules:
+
+1. **Never use TAB characters** in YAML — only spaces. (The programs catch
+   tabs and tell you plainly.)
+2. Replace every placeholder path (`janedoe`, `YourExternalDrive`) with your
+   real paths.
 
 ---
 
-## Quick Start
+## Quick start — macOS or Linux
 
 ```bash
 cd /path/to/file_organizer
 
-# 1. Create test environment with sample files
-./manage_organizer.sh create-test
-
-# 2. Dry run (safe — only creates soft links under test/organized/)
+# 1. First run: this creates config.yaml from the template and prints a
+#    "Will it work?" report telling you which paths exist and which
+#    placeholders you must edit.
 ./manage_organizer.sh test
 
-# 3. Review the output
-ls -la test/organized/
+# 2. Open config.yaml with TextEdit (macOS) or your favourite editor,
+#    replace the placeholder paths, then run the test again.
+./manage_organizer.sh test
 
-# 4. Run for real (one cycle)
+# 3. When the test looks right, run for real (one cycle):
 ./manage_organizer.sh test-real
 
-# Or wipe everything and do a fresh scan:
-./manage_organizer.sh clean
+# 4. Or run continuously in the background:
+./manage_organizer.sh start
 ```
+
+Watch what it does:
+
+```bash
+./manage_organizer.sh log        # tail the log (~/.file_organizer.log)
+./manage_organizer.sh status     # is it running?
+./manage_organizer.sh stop       # stop the background process
+```
+
+## Quick start — Windows
+
+1. Install **Python 3.9+**, and **rsync** (e.g. via WSL, Git for Windows, or
+   Cygwin).
+2. Open a terminal in the `file_organizer` folder and run:
+
+   ```
+   py -m file_organizer --scan-once
+   ```
+
+3. This creates `config.yaml` and prints the "Will it work?" report. Open
+   `config.yaml` with **Notepad**, replace the placeholder paths, and run the
+   command again.
+4. Symlinks in `~/organized` require Administrator rights or Windows
+   Developer Mode.
+
+## Quick start — Android (Termux)
+
+1. Install **Termux** from F-Droid (not the Play Store version).
+2. In Termux:
+
+   ```bash
+   termux-setup-storage
+   pkg install python rsync
+   ```
+
+3. Get the files onto the phone (pick one):
+
+   ```bash
+   # From a computer over USB:
+   adb push phone_sync.py config_template.yaml manage_phone.sh /sdcard/Download/
+   # then, in Termux:
+   cp ~/storage/shared/Download/phone_sync.py ~/
+   cp ~/storage/shared/Download/config_template.yaml ~/
+   cp ~/storage/shared/Download/manage_phone.sh ~/
+
+   # Or directly on the phone:
+   pkg install git
+   git clone https://github.com/pdxrod/file_organizer.git
+   ```
+
+4. First run — creates `phone_sync_config.yaml` from the template's
+   `phone:` section and prints a "Will it work?" report:
+
+   ```bash
+   python3 phone_sync.py --make-config
+   ```
+
+5. Edit the config with **nano** (spaces, never tabs):
+
+   ```bash
+   nano phone_sync_config.yaml
+   ```
+
+6. Test without copying anything:
+
+   ```bash
+   ./manage_phone.sh test
+   ```
+
+7. Run continuously:
+
+   ```bash
+   ./manage_phone.sh start
+   ```
+
+> On Samsung phones, a Termux session that stays in the foreground survives
+> best. See the note in the Android section below.
 
 ---
 
-## Management Script Reference
+## How the phone ↔ computer flow works
+
+```
+Phone (Termux)                         Computer                        Cloud
+┌───────────────────────┐   ┌───────────────────────────┐   ┌──────────────────┐
+│ phone_sync            │   │ file_organizer            │   │ Proton Drive /   │
+│                       │   │                           │   │ Google Drive     │
+│ DCIM/Camera ──────────┼──►│ ~/misc (via phone_pull.sh)│──►│ My Files/misc    │
+│ DCIM/Screenshots      │   │         │                 │   │                  │
+│ Pictures ─────────────┤   │         ▼                 │   │                  │
+│ Documents ────────────┤   │ ~/organized (soft links)  │   │                  │
+│ Download ─────────────┤   └───────────────────────────┘   └──────────────────┘
+│                       │
+│ ◄─ 10-minute grace ──►│  files younger than min_age_minutes are never copied,
+└───────────────────────┘  so photos you delete right away are never backed up
+```
+
+1. `phone_sync` scans the folders you configured, skips junk, waits out the
+   grace period, and copies new files into `/storage/emulated/0/file_organizer_staging`
+   (keeping their folder structure, e.g. `DCIM/Camera/IMG_001.jpg`).
+2. On the computer, `phone_pull.sh pull` fetches the staging folder over USB
+   (or wireless ADB) into `local_stage`.
+3. The computer's sync pairs then mirror that folder to Proton Drive, Google
+   Drive, or an external disk.
+4. `phone_pull.sh push` copies files from the cloud back to the phone.
+
+Deleting a photo on the phone during the grace period means it is never
+copied. Deleting it later removes it from staging on the next cleanup.
+
+---
+
+## Everyday commands — computer
 
 ```bash
 ./manage_organizer.sh {command}
 ```
 
 | Command | What it does |
-|---------|-------------|
-| `start` | Start daemon in background (production mode, continuous) |
-| `stop` | Stop all file_organizer processes |
-| `restart` | Stop then start |
-| `status` | Check if daemon is running |
-| `log` | Tail the log file (`~/.file_organizer.log`) |
-| `test` | Single dry-run scan (test mode — no real files touched) |
-| `test-real` | Single production scan (`--REAL --scan-once`) |
-| `sync` | Folder synchronization only (production mode) |
-| `dedupe` | Deduplication only (production mode) |
-| `cleanup` | Remove broken/excluded symlinks from `~/organized` |
-| `git-preview` | Show which folders would get `git init` (no changes made) |
-| `git-init` | Run `git init`, `.gitignore`, `git add`, `git commit` for real |
-| `gui` | Launch the desktop GUI application |
-| `create-test` | Create test environment with sample files |
-
----
-
-## CLI Reference
-
-```bash
-python3 -m file_organizer [OPTIONS]
-# or: python3 file_organizer.py [OPTIONS]
-```
-
-| Flag | Purpose |
-|------|---------|
-| `-R`, `--REAL` | Production mode (default: test/dry-run) |
-| `--scan-once` | Run a single cycle then exit |
-| `--sync-only` | Only synchronize folders |
-| `--dedupe-only` | Only run deduplication |
-| `--git-preview` | Show which folders would get `git init` (no changes) |
-| `--git-init` | Run `git init`, `.gitignore`, `git add`, `git commit` |
-| `--create-test` | Create test environment and exit |
-| `--config PATH` | Use a custom config file (default: `config.yaml`) |
-| `-v`, `--verbose` | Verbose logging |
-
-Typical flows:
-
-```bash
-# Safe test run
-python3 -m file_organizer --scan-once
-
-# One-shot real run
-python3 -m file_organizer --REAL --scan-once
-
-# Daemon (continuous real mode)
-python3 -m file_organizer --REAL
-
-# Just sync
-python3 -m file_organizer --REAL --sync-only
-
-# Just dedupe
-python3 -m file_organizer --REAL --dedupe-only
-```
-
-Logs are written to `~/.file_organizer.log`:
-
-```bash
-tail -f ~/.file_organizer.log
-```
-
----
-
-## Configuration (`config.yaml`)
-
-### Drives
-
-Define shortcuts used throughout the config. Nested references are supported:
-
-```yaml
-drives:
-  MAIN_DRIVE: "/Users/yourname"
-  PROTON_DRIVE: "MAIN_DRIVE/Library/CloudStorage/ProtonDrive..."
-  GOOGLE_DRIVE: "MAIN_DRIVE/GoogleDrive/MyFiles"
-  EXTERNAL_DRIVE: "/Volumes/YourDrive"
-```
-
-### Sync Pairs
-
-**Bidirectional** (two-way): files copy in either direction, newest wins.
-
-```yaml
-sync_pairs:
-  - folders:
-      - "MAIN_DRIVE/Documents"
-      - "PROTON_DRIVE/Documents"
-```
-
-**One-way**: files only copy from source to target, never back.
-
-```yaml
-one_way_pairs:
-  - folders:
-      - "PROTON_DRIVE/Music"
-      - "MAIN_DRIVE/Music"
-```
-
-### Source Folders (for deduplication)
-
-```yaml
-source_folders:
-  - "MAIN_DRIVE/Documents"
-  - "MAIN_DRIVE/Pictures"
-enable_duplicate_detection: true
-```
-
-### Pattern Handling
-
-Three types of patterns control what happens to matching folders:
-
-| Pattern | What it does |
-|---------|-------------|
-| `exclude_patterns` | Files/folders skipped entirely during scan and sync |
-| `empty_folder_patterns` | Contents deleted (leaving empty folder) — for build caches like `node_modules`, `__pycache__` |
-| `exclude_patterns` | Files/folders excluded from scan and sync |
-
-### Content Analysis
-
-```yaml
-enable_content_analysis: true
-ml_content_analysis:
-  enabled: true
-  min_keyword_frequency: 10     # keyword must appear in at least 10 files
-  min_category_size: 5           # only create categories with 5+ files
-  max_categories: 9999           # cap total categories
-  min_word_length: 5             # skip words shorter than this
-  stop_words_enabled: true       # filter out common English words
-```
-
-### Auto Git
-
-```yaml
-# Defaults to false for safety — set to true to enable
-auto_git: true
-auto_git_folders:
-  - "MAIN_DRIVE/dev"
-```
-
-Scans folders under `auto_git_folders` and, for those that contain source code but no existing `.git` folder, runs:
-1. `git init`
-2. Writes a `.gitignore` (excluding `node_modules/`, `.venv/`, `__pycache__/`, IDE files, etc.)
-3. `git add .`
-4. `git commit -m "Initial commit (auto-git)"`
-
-Skips data directories, build outputs, collection folders, and nested dependencies.
-
-**Workflow**:
-```bash
-# 1. Preview what will happen (safe, no changes)
-./manage_organizer.sh git-preview
-
-# 2. Run it for real
-./manage_organizer.sh git-init
-```
-
-### Full Options Reference
-
-See `config_template.yaml` for every available option with explanatory comments.
-
----
-
-## How It Works
-
-### Organization Step
-
-1. **Scan**: Walks `source_folders`, applying exclude/empty/softlink patterns
-2. **Analyze**: Extracts keywords from filenames and (optionally) text file contents
-3. **Filter**: Removes stopwords, short words, and low-frequency keywords
-4. **Build**: Creates soft links under `~/organized/{category}/` pointing to original files
-5. **Cleanup**: Removes stale links to files that no longer exist
-
-### Folder Sync Step
-
-Uses `rsync` with:
-- `--checksum` or `--size-only` or timestamp-based comparison (configurable)
-- `--exclude` patterns from config
-- `--no-whole-file` for network/cloud drives (configurable)
-- Per-pair timeout (default 60 minutes)
-
-For **bidirectional** pairs: runs rsync A→B then B→A.  
-For **one-way** pairs: runs rsync source→target only.
-
-### `.git` and Development Folders Strategy
-
-| Folder | Approach |
-|--------|----------|
-| `.git`, `.hg`, `.svn` | **Excluded from sync entirely**. Never softlinked. Back up via `git push`. |
-| `.venv`, `venv`, `env` | Excluded from sync. Regenerate from `requirements.txt` / `Pipfile`. |
-| `node_modules` | Excluded from sync. Regenerate from `package.json`. |
-| `__pycache__`, build caches | Contents deleted (empty_folder_patterns). |
-
-### Deduplication Step
-
-1. Group files by size
-2. For groups with multiple files of the same size: compute SHA-256 hash
-3. Files with identical hash: keep the newest (by mtime), delete the rest
-4. Small files (< 4KB): dedup by size alone
-5. Large files (> 64KB): hash first 64KB for quick comparison
-
----
-
-## `~/organized`
-
-| Directory | Purpose | Who needs it |
-|-----------|---------|-------------|
-| `~/organized` | Soft-link tree of your files, browsable by type, year, and topic | Everyone |
-| `~/organised` | Legacy backup location for development folders (`.git`, `__pycache__`, `.venv`) | No longer needed in v2 — these are excluded from sync |
-
-> Contains soft links to your files, organized by type, year, and content category.
-
----
-
-## Safety Checklist
-
-Before running in production mode with real files:
-
-- **Backups**: You have current backups of anything important.
-- **Tested**: You have run at least one full cycle in test mode and reviewed `test/organized/`.
-- **Config reviewed**: `config.yaml` is valid YAML (no tabs, proper indentation) and `drives`, `sync_pairs`, and (if used) `source_folders` point only to locations you are comfortable modifying.
-- **Dedup clarity**: Dedup deletes **real files under `source_folders`**, not just soft links.
-- **Logs monitored**: You know how to watch `~/.file_organizer.log` and stop the process if something looks wrong.
-
-If any of the above is unclear, stay in test mode or run with `enable_duplicate_detection: false`.
-
----
-
-## Platform Support
-
-| Platform | Status |
-|----------|--------|
-| macOS | Full support (primary development platform) |
-| Linux | Full support |
-| Windows | Supported (symlinks require admin or Developer Mode; rsync via WSL or cygwin) |
-| Android | Supported — see [Phone Daemon](#phone-daemon) below |
-| iOS | Not currently planned |
-
----
-
-## Phone Daemon
-
-The phone daemon solves **two problems** with Proton Drive's built-in Android backup:
-
-1. **Under-backup**: Proton Drive only backs up camera photos. It misses screenshots,
-   .txt files, downloaded images, and files in folders like DCIM/Screenshots or Documents.
-
-2. **Over-eager backup**: Photos are backed up immediately — including ones you'll delete
-   seconds later. Now you have to delete them in two (or three) places.
-
-### Solution: `phone_sync.py`
-
-A lightweight Python daemon that runs on your Android phone (via **Termux**) or macOS.
-It monitors configurable source directories and copies **only files that have survived
-a grace period** into a staging folder on the phone's shared storage. The Mac then
-pulls that staging folder (via `phone_pull.sh` over USB or wireless debugging) and
-mirrors it to Proton Drive from the desktop.
-
-> **Why staging + pull?** Proton Drive's Android app has no continuously-synced local
-> folder (unlike the desktop app), so the phone cannot upload to Proton Drive directly.
-> The daemon does the grace-period filtering and content-hash dedup on the phone; the
-> Mac does the cloud upload.
-
-```mermaid
-flowchart LR
-    A[Phone: new photo<br/>in DCIM/Camera] -->|waits 10 min| B{Still exists?}
-    B -->|yes| C[Copy to phone staging<br/>/storage/emulated/0/file_organizer_staging]
-    B -->|no: deleted| D[Skipped — never backed up]
-    C --> E[phone_pull.sh pulls<br/>staging over USB/WiFi]
-    E --> F[Mac sync engine →<br/>Proton Drive desktop → cloud]
-```
-
-### Quick Start — Phone Daemon
-
-```bash
-# 1. On your phone, install Termux from F-Droid (or the current Play Store build)
-# 2. In Termux, grant storage access:
-termux-setup-storage
-#    (on Android 11+ also enable All files access for Termux in
-#     Settings → Apps → Termux → Permissions)
-
-# 3. Install Python. PyYAML is OPTIONAL: the daemon has a built-in parser
-#    for the config format, and Termux no longer ships python-pyyaml anyway.
-#    Only install it (pip install pyyaml, needs clang) if you want full YAML.
-pkg install python procps
-
-# 4. Get the daemon and config (via ADB or git clone):
-#    adb push phone_sync.py config_template.yaml manage_phone.sh /sdcard/Download/
-#    or, in Termux: git clone https://github.com/pdxrod/file_organizer.git
-
-# 5. In Termux, put the files in your working directory:
-cp ~/storage/shared/Download/phone_sync.py ~/file_organizer/ 2>/dev/null || true
-cp ~/storage/shared/Download/config_template.yaml ~/file_organizer/ 2>/dev/null || true
-
-# 6. Create your own config — the daemon does this automatically from the
-#    phone: section of config_template.yaml (the live config is git-ignored,
-#    so your edits never conflict with git pull):
-python3 phone_sync.py --make-config
-
-# 7. Edit the config: set target_directory to a staging folder on shared
-#    storage (NOT inside DCIM/Pictures/Documents/Download — the daemon scans
-#    those, and staging inside them would loop):
-#      target_directory: "/storage/emulated/0/file_organizer_staging"
-
-# 8. Test without copying:
-python3 phone_sync.py --scan-once --dry-run
-
-# 9. Run for real (foreground session in Termux survives best on Samsung):
-python3 phone_sync.py
-```
-
-### Phone Daemon Commands
+|---------|--------------|
+| `start` | Start in the background (production mode, continuous) |
+| `stop` / `restart` / `status` | Control the background process |
+| `log` | Tail `~/.file_organizer.log` |
+| `test` | Single **dry-run** cycle — nothing real is changed |
+| `test-real` | Single production cycle |
+| `sync` | Folder synchronization only |
+| `dedupe` | Deduplication only |
+| `clean` | Wipe `~/organized` and the log, then a fresh scan |
+| `cleanup` | Remove broken/stale soft links from `~/organized` |
+| `git-preview` / `git-init` | Preview or run auto-git |
+| `gui` | Desktop GUI |
+| `create-test` | Create a sample test environment |
+
+## Everyday commands — phone
 
 ```bash
 ./manage_phone.sh {command}
 ```
 
 | Command | What it does |
-|---------|-------------|
-| `start` | Start daemon in background |
-| `stop` | Stop the daemon |
-| `restart` | Stop then start |
-| `status` | Check if daemon is running |
-| `log` | Tail the log file |
-| `stats` | Show sync database statistics |
-| `test` | Single dry-run scan (no files copied) |
-| `test-real` | Single production scan |
-| `find-proton` | Search for Proton Drive folder on device |
+|---------|--------------|
+| `start` / `stop` / `restart` / `status` | Control phone sync |
+| `log` | Tail the log |
+| `stats` | Show the sync database statistics |
+| `test` | Single **dry-run** scan — no files copied |
+| `scan` | Single production scan |
+| `find-proton` | Locate the Proton Drive folder on the device |
+| `setup` | First-time setup wizard |
 
-### Key Configuration (`phone_sync_config.yaml`)
+## Phone ↔ computer over USB (`phone_pull.sh`)
 
-| Setting | Default | Purpose |
-|---------|---------|---------|
-| `source_directories` | DCIM, Pictures, Documents, Download | Folders to monitor |
-| `target_directory` | `/storage/emulated/0/file_organizer_staging` | Staging folder on the phone's shared storage (NOT a source dir) |
-| `min_age_minutes` | 10 | **Grace period** — files younger than this are skipped. Gives you time to delete unwanted photos before they're backed up |
-| `scan_interval_seconds` | 60 | How often to check for new files |
-| `max_file_size_mb` | 500 | Skip files larger than this |
-| `include_extensions` | [] (all) | Only copy these extensions, e.g. `[".jpg", ".png", ".pdf"]` |
-| `exclude_extensions` | .tmp, .temp, .partial, … | Never copy these |
+```bash
+./phone_pull.sh pull                    # phone → computer (all phones)
+./phone_pull.sh push                    # cloud → phone
+./phone_pull.sh list                    # connected devices and stats
+./phone_pull.sh pull --device ID        # one specific phone
+./phone_pull.sh pull --dry-run          # show what would transfer
+```
 
-### How It Works
-
-1. **Scan**: Every N seconds, walks `source_directories`, skipping excluded patterns
-   and files younger than `min_age_minutes`.
-2. **Hash**: Computes SHA-256 hash of each candidate file (content-based tracking).
-3. **Check DB**: Looks up hash+path in a local SQLite database — if already synced, skip.
-4. **Copy**: Copies new files to `target_directory` atomically (`.partial` temp name +
-   rename), preserving relative folder structure
-   (e.g. `DCIM/Camera/IMG_001.jpg` → `file_organizer_staging/DCIM/Camera/IMG_001.jpg`).
-5. **Record**: Marks the file as synced in the database, storing the exact staged path.
-6. **Cleanup**: Periodically prunes database entries for files that no longer exist —
-   and deletes their staged copies, so photos deleted on the phone are never backed up.
-
-The content-hash tracking means you can rename or move a file and it won't be re-copied.
+All paths come from the `phone_pull:` section of `config.yaml`. On macOS,
+install ADB with `brew install android-platform-tools` and enable USB
+Debugging in the phone's Developer Options.
 
 ---
 
-## Phone Sync via ADB (`phone_pull.sh`)
+## Test mode
 
-For when your phone is **connected via USB**, `phone_pull.sh` provides fast,
-streaming sync using ADB. Useful for bulk transfers or when Termux isn't available.
+`./manage_organizer.sh create-test` builds a small environment with sample
+files under `test/`. `./manage_organizer.sh test` then runs a full dry-run
+cycle against it, so you can see exactly what the program would do before
+you let it near your real files. Nothing outside the test folders is touched.
 
-All paths are driven by `config.yaml` — nothing is hardcoded in the script.
-
-```yaml
-# In config.yaml:
-phone_pull:
-  local_stage: "MAIN_DRIVE/misc"          # phone files land here (flat)
-  remote_stage: "PROTON_DRIVE/My Files/misc"  # push-mode source / cloud folder
-  adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
-  phone_source_dirs:                      # folders pulled from the phone
-    - "file_organizer_staging"            #   (relative to /storage/emulated/0)
-  phone_push_dir: "file_organizer_staging"  # where push mode puts files
-```
-
-```bash
-# Pull from all connected phones → local_stage (flat, no subdirectories)
-./phone_pull.sh pull
-
-# Push from remote_stage → phone
-./phone_pull.sh push
-
-# List connected devices and their stats
-./phone_pull.sh list
-
-# Pull from a specific device
-./phone_pull.sh pull --device R5GL11RL4ML
-
-# Dry-run (show what would transfer without copying)
-./phone_pull.sh pull --dry-run
-```
-
-**Pull flow**: Phone → (ADB tar stream) → temp staging → flattened into `local_stage` →
-file_organizer picks it up (via `source_folders`) → sync engine mirrors to
-`remote_stage` and any other configured drives.
-
-Normally you pull from `file_organizer_staging` — the phone daemon's filtered,
-deduped output — rather than the raw DCIM/Pictures folders, so deleted junk
-never reaches the Mac. (If you don't run the phone daemon, set
-`phone_source_dirs` to the raw folders and `phone_pull.sh` applies its own
-5-minute grace period and mtime-based dedup.)
-
-**Push flow**: `remote_stage` files → (ADB) → Phone's `phone_push_dir`.
-
-To set up ADB:
-```bash
-# On macOS:
-brew install android-platform-tools
-# Or set adb_path in config.yaml to your SDK location
-
-# Enable USB Debugging on your phone (Developer Options)
-# Then verify:
-adb devices
-```
+The phone equivalent is `./manage_phone.sh test` (dry-run scan of the real
+folders — it copies nothing).
 
 ---
 
-## License
+## What gets organized / synced — and what never does
 
-MIT License — see LICENSE file.
+`~/organized` contains only **soft links** — your original files stay put.
+Links are grouped by file type, year, and meaningful content categories
+(short common words like "ready" or "wrote" are filtered out; distinctive
+words like "yugoslavia" become categories).
+
+A shared never-copy list lives in the config (both sections). Highlights:
+
+| Kind | Examples | What happens |
+|------|----------|--------------|
+| Version control | `.git`, `.hg`, `.svn` | Never synced — back these up with `git push` |
+| Environments | `.venv`, `venv`, `node_modules` | Never synced — recreate from lock files |
+| Build output | `__pycache__`, `dist`, `build`, `.gradle` | Never synced |
+| Junk files | `.DS_Store`, `*.pyc`, `*.log`, `*.crypt14`, `.Spotlight-V100` | Never synced |
+
+These safety defaults are always in force — your config can only **add** to
+them, never remove them.
+
+## Configuration reference
+
+Everything is documented with comments inside `config_template.yaml`. The
+highlights:
+
+**`computer:` section**
+
+| Key | Purpose |
+|-----|---------|
+| `drives` | Shortcuts like `MAIN_DRIVE`, `PROTON_DRIVE` used elsewhere |
+| `sync_pairs` | Bidirectional folder pairs (newest file wins) |
+| `one_way_pairs` | One-way pairs (source → target only) |
+| `source_folders` / `organize_folders` | Folders scanned for dedup / the `~/organized` tree |
+| `exclude_patterns` | Never-copy list (always merged with the built-in defaults) |
+| `scan_interval` | How often the background process runs (seconds) |
+| `idle_backoff_factor` / `idle_backoff_max_multiplier` | Sleep longer when cycles change nothing |
+| `enable_folder_sync`, `enable_duplicate_detection`, `auto_git` | Feature switches (safe defaults off where dangerous) |
+| `phone_pull` | Where phone files land and where push mode reads from |
+
+**`phone:` section**
+
+| Key | Purpose |
+|-----|---------|
+| `source_directories` | Folders on the phone to monitor |
+| `target_directory` | Staging folder (`/storage/emulated/0/file_organizer_staging`) |
+| `min_age_minutes` | Grace period before a new file is copied |
+| `scan_interval_seconds` | How often to check for new files |
+| `include_extensions` / `exclude_extensions` | Extension filters |
+| `exclude_patterns` / `exclude_folder_names` | Never-copy lists (merged with defaults) |
+| `proton_drive_paths` | Where `--find-proton` looks |
+
+## Safety checklist before real runs
+
+- [ ] You have current backups of anything important.
+- [ ] You ran a dry-run (`test`) and reviewed the output.
+- [ ] `config.yaml` has your real paths — no `janedoe` placeholders — and no TABs.
+- [ ] Dedup is off, or you understand it deletes **real files** under `source_folders`.
+- [ ] You know how to watch the log and stop the process.
+
+If anything is unclear, stay in test mode.
+
+## Platform support
+
+| Platform | Status |
+|----------|--------|
+| macOS | Full support (primary platform) |
+| Linux | Full support |
+| Windows | Supported (symlinks need Developer Mode; rsync via WSL) |
+| Android | Supported via Termux (phone sync + staging) |
+| iOS | Not planned |
+
+---
+
+License: MIT — see LICENSE file.
