@@ -166,7 +166,9 @@ class Config:
 
         if os.path.exists(target):
             with open(target, "r") as f:
-                loaded = yaml.safe_load(f) or {}
+                content = f.read()
+            _check_no_tabs(content, target)
+            loaded = yaml.safe_load(content) or {}
             # Since the single-template merge (item 5), config.yaml is
             # generated from the `computer:` section of config_template.yaml.
             # Accept both the sectioned format and legacy flat configs.
@@ -507,6 +509,62 @@ def _union_list(base: List[str], extra: List[str]) -> List[str]:
             seen.add(item)
             out.append(item)
     return out
+
+
+def _check_no_tabs(content: str, path: str) -> None:
+    """YAML forbids TAB characters in indentation, and the resulting parser
+    errors are cryptic. Detect tabs early and say it in plain language
+    (item 9)."""
+    for i, line in enumerate(content.splitlines(), start=1):
+        # Leading whitespace (spaces AND tabs) — tabs anywhere in it are fatal.
+        indent = line[:len(line) - len(line.lstrip())]
+        if "\t" in indent:
+            raise ConfigError(
+                f"{path} line {i}: TAB characters are not allowed in YAML "
+                f"indentation. Use SPACES instead. Open the file in "
+                f"TextEdit/Notepad/nano and replace the tabs with spaces, "
+                f"then run again."
+            )
+
+
+def report_first_run(config_path: str) -> None:
+    """Print a 'will it work?' report for a freshly created config (item 9).
+
+    Reads the config file (which may still contain template placeholders),
+    and for every drive explains whether the path exists, is a placeholder
+    that must be edited, or is simply not currently available.
+    Never raises.
+    """
+    try:
+        with open(config_path, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+        if isinstance(cfg, dict) and isinstance(cfg.get("computer"), dict):
+            cfg = cfg["computer"]
+    except Exception:
+        return
+
+    drives = cfg.get("drives", {}) or {}
+    print("\nWill it work? Checking the drive paths in your new config:", file=sys.stderr)
+    for key, raw in drives.items():
+        path = os.path.expanduser(str(raw))
+        if os.path.exists(path):
+            print(f"  ✓ {key}: {path} exists", file=sys.stderr)
+        elif any(m in str(raw).lower() for m in TEMPLATE_PLACEHOLDER_MARKERS):
+            print(f"  ✗ {key}: {path} — template placeholder, "
+                  f"replace it with your real path", file=sys.stderr)
+        else:
+            print(f"  ? {key}: {path} — not available right now "
+                  f"(drive not plugged in?); it will be skipped", file=sys.stderr)
+    print(
+        "\nTo finish setup:\n"
+        f"  1. Open {config_path} with TextEdit (Mac), Notepad (Windows) "
+        f"or nano (Termux).\n"
+        "  2. Replace the placeholder paths (anything with 'janedoe' or\n"
+        "     'YourExternalDrive') with YOUR real paths.\n"
+        "  3. Use SPACES for indentation — YAML does not allow TABs.\n"
+        "  4. Run again: ./manage_organizer.sh test\n",
+        file=sys.stderr,
+    )
 
 
 def load_config(path: Optional[str] = None) -> Config:

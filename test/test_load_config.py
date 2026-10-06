@@ -226,6 +226,36 @@ class LoadConfigTests(unittest.TestCase):
                 sys.modules["yaml"] = orig_yaml
         self.assertEqual(cfg["target_directory"], "/tmp/staging")
 
+    def test_tab_indentation_exits_with_plain_message(self):
+        """Item 9: tabs in YAML indentation must produce a clear 'use spaces'
+        message instead of a cryptic parser error."""
+        self.config.write_text(
+            "target_directory: /tmp/staging\n"
+            "source_directories:\n\t  - /tmp\n"
+        )
+        with self.assertRaises(SystemExit):
+            phone_daemon.load_config(str(self.config))
+
+    def test_first_run_report_runs_on_template_creation(self):
+        """The will-it-work report must not raise when the config is freshly
+        created from the merged template (it prints to stderr)."""
+        import io
+        from contextlib import redirect_stderr
+        self.template.write_text(
+            "phone:\n"
+            "  target_directory: /tmp/staging\n"
+            "  source_directories:\n"
+            "    - /storage/emulated/0/DCIM\n"
+        )
+        self.template.rename(self.dir / "config_template.yaml")
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            cfg = phone_daemon.load_config(str(self.config))
+        self.assertEqual(cfg["target_directory"], "/tmp/staging")
+        out = buf.getvalue()
+        self.assertIn("Will it work?", out)
+        self.assertIn("SPACES", out)
+
 
 if __name__ == "__main__":
     unittest.main()

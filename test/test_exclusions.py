@@ -332,5 +332,53 @@ class SyncChangeCountTests(unittest.TestCase):
         self.assertEqual(engine.last_change_count - before, 0)
 
 
+class FirstRunUxTests(unittest.TestCase):
+    """Item 9: tabs must be caught with a plain message, and the first-run
+    report must explain which paths will work."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def test_tab_indentation_raises_clear_error(self):
+        path = self.dir / "config.yaml"
+        path.write_text("output_base: /tmp/never-created\n"
+                        "drives:\n\t  MAIN_DRIVE: /tmp\n")
+        with self.assertRaises(cfgmod.ConfigError) as cm:
+            cfgmod.Config(str(path))
+        msg = str(cm.exception)
+        self.assertIn("TAB", msg)
+        self.assertIn("SPACES", msg)
+
+    def test_tabs_inside_values_are_allowed(self):
+        # Only indentation tabs are fatal; tabs inside quoted strings are fine.
+        path = self.dir / "config.yaml"
+        path.write_text("output_base: /tmp/never-created\n"
+                        "note: \"a\tb\"\n")
+        cfg = cfgmod.Config(str(path))
+        self.assertEqual(cfg.raw_config["note"], "a\tb")
+
+    def test_first_run_report_flags_placeholders(self):
+        import io
+        from contextlib import redirect_stderr
+        path = self.dir / "config.yaml"
+        path.write_text(
+            "computer:\n"
+            "  drives:\n"
+            "    MAIN_DRIVE: \"/Users/janedoe\"\n"
+            f"    EXTERNAL_DRIVE: \"{self.dir}\"\n"
+        )
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            cfgmod.report_first_run(str(path))
+        out = buf.getvalue()
+        self.assertIn("Will it work?", out)
+        self.assertIn("janedoe", out)
+        self.assertIn("exists", out)   # the temp drive exists
+        self.assertIn("TextEdit", out)
+        self.assertIn("TAB", out)
+
+
 if __name__ == "__main__":
     unittest.main()

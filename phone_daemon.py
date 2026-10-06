@@ -358,6 +358,58 @@ def _make_phone_config_from_template(template: Path, config_path: Path) -> None:
         shutil.copy2(template, config_path)
 
 
+def _check_no_tabs(content: str, path: str) -> None:
+    """YAML forbids TAB characters in indentation, and the parser errors
+    are cryptic. Detect tabs early and say it in plain language (item 9)."""
+    for i, line in enumerate(content.splitlines(), start=1):
+        # Leading whitespace (spaces AND tabs) — tabs anywhere in it are fatal.
+        indent = line[:len(line) - len(line.lstrip())]
+        if "\t" in indent:
+            msg = (
+                f"\nERROR: {path} line {i}: TAB characters are not allowed "
+                f"in YAML indentation. Use SPACES instead. Open the file "
+                f"with nano, replace the tabs with spaces, then run again.\n"
+            )
+            logger.error(msg)
+            print(msg, file=sys.stderr)
+            sys.exit(1)
+
+
+def _report_phone_first_run(config_path: Path, content: str) -> None:
+    """Item 9: after the phone config was just created from the template,
+    tell the user whether the paths will work on this device."""
+    try:
+        cfg = _parse_simple_yaml(_extract_phone_section(content))
+    except Exception:
+        return
+    print("\nWill it work? Checking the paths in your new config:",
+          file=sys.stderr)
+    target = cfg.get("target_directory")
+    if target:
+        t_path = _expand_path(str(target))
+        if os.path.exists(t_path):
+            print(f"  ✓ target_directory: {target} exists", file=sys.stderr)
+        else:
+            print(f"  ? target_directory: {target} does not exist yet — "
+                  f"it will be created on first copy, or edit it",
+                  file=sys.stderr)
+    for raw in cfg.get("source_directories", []) or []:
+        p = _expand_path(str(raw))
+        if os.path.exists(p):
+            print(f"  ✓ source: {raw} exists", file=sys.stderr)
+        elif any(m in str(raw).lower() for m in PLACEHOLDER_MARKERS):
+            print(f"  ✗ source: {raw} — template placeholder, "
+                  f"replace it with your real path", file=sys.stderr)
+        else:
+            print(f"  ? source: {raw} — not found right now "
+                  f"(skipped until it exists)", file=sys.stderr)
+    print(
+        f"\nEdit {config_path} with nano (use SPACES, never tabs) and "
+        f"run again.\n",
+        file=sys.stderr,
+    )
+
+
 def load_config(path: str) -> dict:
     """Load config from YAML (preferred) or JSON file. Returns dict.
 
@@ -367,11 +419,13 @@ def load_config(path: str) -> dict:
     its `phone:` section) so the daemon has a real, editable config.
     """
     config_path = Path(path).expanduser().resolve()
+    created_from_template = False
 
     if not config_path.exists():
         template = _find_template(config_path)
         if template is not None:
             _make_phone_config_from_template(template, config_path)
+            created_from_template = True
             logger.warning(
                 "No config found at %s — created it from %s. "
                 "Review source_directories and target_directory, then re-run.",
@@ -388,6 +442,7 @@ def load_config(path: str) -> dict:
             return _default_config()
 
     content = config_path.read_text(encoding="utf-8")
+    _check_no_tabs(content, str(config_path))
 
     # An existing-but-empty config (truncated copy, stray `touch`, …) would
     # otherwise die later with a JSON decode error at "line 1 column 1".
@@ -397,6 +452,7 @@ def load_config(path: str) -> dict:
         if template is not None:
             _make_phone_config_from_template(template, config_path)
             content = config_path.read_text(encoding="utf-8")
+            created_from_template = True
             logger.warning(
                 "Config at %s was empty — replaced it from %s. "
                 "Review source_directories and target_directory, then re-run.",
@@ -410,6 +466,11 @@ def load_config(path: str) -> dict:
                 config_path,
             )
             return _default_config()
+
+    # First-run UX (item 9): if we just created the config, tell the user
+    # whether the paths will work on this device.
+    if created_from_template:
+        _report_phone_first_run(config_path, content)
 
     # Try YAML first
     try:

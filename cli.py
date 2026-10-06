@@ -4,7 +4,7 @@
 import os, sys, argparse, logging, signal, time
 from pathlib import Path
 
-from file_organizer.config import Config, ConfigError, resolve_log_path
+from file_organizer.config import Config, ConfigError, report_first_run, resolve_log_path
 from file_organizer.scanner import FileScanner
 from file_organizer.analyzer import ContentAnalyzer
 from file_organizer.organizer import Organizer
@@ -177,6 +177,9 @@ def main():
         logger.info("No config.yaml found. Creating starter config...")
         Config.create_starter(config_path)
         logger.info("Created %s — please edit it and run again.", config_path)
+        # First-run UX (item 9): tell the user whether the template paths
+        # will work and exactly how to finish editing.
+        report_first_run(str(config_path))
         return
 
     try:
@@ -184,7 +187,8 @@ def main():
     except ConfigError as e:
         print(
             f"\nERROR: {e}\n"
-            "\nFix the configuration and run again.\n",
+            "\nOpen your config file in TextEdit (Mac), Notepad (Windows) "
+            "or nano (Termux), fix the problem above, then run again.\n",
             file=sys.stderr,
         )
         sys.exit(1)
