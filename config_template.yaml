@@ -251,6 +251,11 @@ computer:
   enable_folder_sync: true
 
   scan_interval: 3600
+  # Idle backoff: when a daemon cycle changes nothing, the next sleep is
+  # longer. Each idle cycle multiplies scan_interval by idle_backoff_factor,
+  # up to scan_interval * idle_backoff_max_multiplier.
+  idle_backoff_factor: 2
+  idle_backoff_max_multiplier: 8
   flaky_volume_retries: 3
   retry_delay: 5
   use_rsync: true
@@ -434,6 +439,14 @@ phone:
   # Shorter = more responsive but uses more battery.
   # Recommended: 60-300 seconds on phone (300 saves battery), 30-60 on desktop.
   scan_interval_seconds: 300
+
+  # ── Idle backoff ──────────────────────────────────────────────────────────
+  # When a scan cycle copies nothing, the next sleep is longer: each idle
+  # cycle multiplies scan_interval_seconds by idle_backoff_factor, up to
+  # scan_interval_seconds * idle_backoff_max_multiplier. Saves battery when
+  # there is nothing to sync.
+  idle_backoff_factor: 2
+  idle_backoff_max_multiplier: 8
 
   # ── Maximum file size (MB) ─────────────────────────────────────────────────
   # Files larger than this are skipped. 0 = no limit.

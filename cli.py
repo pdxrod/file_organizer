@@ -28,8 +28,35 @@ def setup_logging(verbose: bool = False, config_path: str = "config.yaml"):
         ],
     )
 
+def compute_idle_sleep(base: int, factor: int, max_multiplier: int, streak: int) -> int:
+    """Sleep duration for a daemon cycle after `streak` idle cycles.
+
+    Each idle cycle multiplies the base interval by `factor`, capped at
+    base * max_multiplier. Any action resets the streak to 0 (item 14).
+    Kept in sync with phone_daemon.compute_idle_sleep.
+    """
+    if streak <= 0 or factor <= 1:
+        return base
+    multiplier = min(factor ** min(streak, 12), max_multiplier)
+    return base * multiplier
+
+
 def run_full_cycle(config: Config, dry_run: bool = False):
-    """Run a full organization + sync + dedup cycle."""
+    """Run a full organization + sync + dedup cycle.
+
+    Returns (actions, sync_thread):
+      actions      — dict counting real changes (links, sync transfers,
+                     dedup removals, git inits) for idle detection.
+      sync_thread  — the background sync thread, or None if no sync ran.
+    """
+    actions = {
+        "links_created": 0,
+        "orphans_removed": 0,
+        "sync_changes": 0,
+        "dedup_removed": 0,
+        "git_initialized": 0,
+    }
+    sync_thread = None
     scanner = FileScanner(config)
     analyzer = ContentAnalyzer(config)
     organizer = Organizer(config)
@@ -85,9 +112,10 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     entries = [(sf.path, sf.mtime, file_cat_map.get(sf.path, [])) for sf in scanned]
     stats = organizer.organize(entries, dry_run=dry_run)
     logger.info('Links created: %s', stats)
+    actions["links_created"] += stats.get("links_created", 0)
     valid_files = {sf.path for sf in scanned}
     if not dry_run:
-        organizer.clean_orphaned_links(valid_files)
+        actions["orphans_removed"] += organizer.clean_orphaned_links(valid_files)
 
     # 4. Sync — run in background thread so slow ProtonDrive/external
     # drives don't block the fast scan + organize work
@@ -97,11 +125,12 @@ def run_full_cycle(config: Config, dry_run: bool = False):
         def background_sync():
             try:
                 summary = sync_engine.run_all_sync_pairs()
+                actions["sync_changes"] = sync_engine.last_change_count
                 logger.info("Background sync complete: %s", summary)
             except Exception as e:
                 logger.error("Background sync failed: %s", e)
-        t = threading.Thread(target=background_sync, daemon=True)
-        t.start()
+        sync_thread = threading.Thread(target=background_sync, daemon=True)
+        sync_thread.start()
 
     # 5. Softlink handling (exclude patterns for rsync)
     exclude_for_rsync = softlink_handler.get_rsync_exclude_patterns()
@@ -113,14 +142,17 @@ def run_full_cycle(config: Config, dry_run: bool = False):
         logger.info("Auto-git scan...")
         git_summary = auto_git.scan_and_init()
         logger.info("Auto-git: %s", git_summary)
+        actions["git_initialized"] += git_summary.get("initialized", 0)
 
     # 7. Dedup
     if config.raw_config.get("enable_duplicate_detection", False):
         logger.info("Running deduplication...")
         dedup_summary = dedup.run(dry_run=dry_run)
         logger.info("Dedup: %s", dedup_summary)
+        actions["dedup_removed"] += dedup_summary.get("removed", 0)
 
     logger.info("=== Cycle complete ===")
+    return actions, sync_thread
 
 def main():
     parser = argparse.ArgumentParser(description="File Organizer v2")
@@ -233,23 +265,46 @@ def main():
             print("Check %s for details." % resolve_log_path(args.config))
         return
 
-    # Full cycle
+    # Daemon mode
+    if real_mode and not args.scan_once:
+        logger.info("Entering daemon mode (Ctrl+C to stop)...")
+        interval = config.raw_config.get("scan_interval", 3600)
+        backoff_factor = int(config.raw_config.get("idle_backoff_factor", 2) or 2)
+        backoff_max = int(
+            config.raw_config.get("idle_backoff_max_multiplier", 8) or 8
+        )
+        idle_streak = 0
+        try:
+            while True:
+                # Run the cycle, then wait for the background sync so two
+                # rsyncs never overlap (cloud drives dislike that) and the
+                # action counts are complete.
+                actions, sync_thread = run_full_cycle(config, dry_run=False)
+                if sync_thread is not None:
+                    sync_thread.join(timeout=max(interval, 60))
+                total = sum(actions.values())
+                if total == 0:
+                    idle_streak += 1
+                else:
+                    idle_streak = 0
+                sleep_for = compute_idle_sleep(
+                    interval, backoff_factor, backoff_max, idle_streak
+                )
+                logger.info(
+                    "Cycle actions: %s. Sleeping %ds (idle streak %d).",
+                    actions, sleep_for, idle_streak,
+                )
+                time.sleep(sleep_for)
+        except KeyboardInterrupt:
+            logger.info("Daemon stopped.")
+        return
+
+    # One-shot cycle
     try:
         run_full_cycle(config, dry_run=not real_mode)
     except KeyboardInterrupt:
         logger.info("Interrupted by user. Exiting.")
         return
-
-    # Daemon mode
-    if real_mode and not args.scan_once:
-        logger.info("Entering daemon mode (Ctrl+C to stop)...")
-        interval = config.raw_config.get("scan_interval", 3600)
-        try:
-            while True:
-                time.sleep(interval)
-                run_full_cycle(config, dry_run=False)
-        except KeyboardInterrupt:
-            logger.info("Daemon stopped.")
 
 if __name__ == "__main__":
     main()

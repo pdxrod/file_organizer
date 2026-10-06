@@ -227,5 +227,30 @@ class PhonePlaceholderTests(unittest.TestCase):
             daemon.db.close()
 
 
+class IdleBackoffTests(unittest.TestCase):
+    """Item 14: idle cycles must sleep progressively longer, capped, and any
+    action must reset the streak."""
+
+    def test_streak_zero_uses_base_interval(self):
+        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 0), 100)
+
+    def test_doubles_per_idle_cycle(self):
+        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 1), 200)
+        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 2), 400)
+        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 3), 800)
+
+    def test_capped_at_max_multiplier(self):
+        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 10), 800)
+        self.assertEqual(phone_daemon.compute_idle_sleep(300, 2, 8, 100), 2400)
+
+    def test_factor_one_disables_backoff(self):
+        self.assertEqual(phone_daemon.compute_idle_sleep(100, 1, 8, 50), 100)
+
+    def test_default_config_has_backoff_keys(self):
+        cfg = phone_daemon._default_config()
+        self.assertIn("idle_backoff_factor", cfg)
+        self.assertIn("idle_backoff_max_multiplier", cfg)
+
+
 if __name__ == "__main__":
     unittest.main()

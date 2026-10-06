@@ -262,5 +262,75 @@ class SectionedConfigTests(unittest.TestCase):
         self.assertFalse(starter["ml_content_analysis"]["enabled"])
 
 
+class IdleBackoffTests(unittest.TestCase):
+    """Item 14: the computer daemon's backoff helper must match the phone
+    daemon's exactly (they are intentionally duplicated)."""
+
+    def test_cli_backoff_matches_phone_daemon(self):
+        import phone_daemon
+        # cli.py lives in the file_organizer package, whose parent is two
+        # levels above this file.
+        repo_parent = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+        sys.path.insert(0, repo_parent)
+        from file_organizer.cli import compute_idle_sleep
+        for streak in range(0, 10):
+            self.assertEqual(
+                compute_idle_sleep(300, 2, 8, streak),
+                phone_daemon.compute_idle_sleep(300, 2, 8, streak),
+            )
+
+    def test_defaults_include_backoff_keys(self):
+        self.assertIn("idle_backoff_factor", cfgmod.DEFAULTS)
+        self.assertIn("idle_backoff_max_multiplier", cfgmod.DEFAULTS)
+
+
+class SyncChangeCountTests(unittest.TestCase):
+    """rsync --itemize-changes output must be counted so idle cycles can be
+    detected (item 14)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def _engine(self):
+        class _StubConfig:
+            raw_config = {
+                "exclude_patterns": [],
+                "use_rsync": True,
+                "rsync_disable_mmap": True,
+            }
+        return sync_engine.SyncEngine(_StubConfig())
+
+    def test_count_itemized_lines(self):
+        engine = self._engine()
+        out = (
+            b">f+++++++++ a.txt\n"
+            b".d..t...... subdir/\n"
+            b"sent 120 bytes  received 35 bytes\n"
+        )
+        self.assertEqual(engine._count_itemized_changes(out), 2)
+        self.assertEqual(engine._count_itemized_changes(b"sent 120 bytes\n"), 0)
+        self.assertEqual(engine._count_itemized_changes(None), 0)
+
+    def test_real_rsync_first_run_counts_second_run_counts_nothing(self):
+        import shutil
+        if shutil.which("rsync") is None:
+            self.skipTest("rsync not installed")
+        src = self.dir / "src"
+        dst = self.dir / "dst"
+        src.mkdir()
+        (src / "a.txt").write_text("hello")
+        engine = self._engine()
+        self.assertTrue(engine._run_rsync(src, dst))
+        first = engine.last_change_count
+        self.assertGreaterEqual(first, 1)
+        before = engine.last_change_count
+        self.assertTrue(engine._run_rsync(src, dst))
+        self.assertEqual(engine.last_change_count - before, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

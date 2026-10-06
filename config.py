@@ -72,6 +72,11 @@ DEFAULTS: Dict[str, Any] = {
     "enable_duplicate_detection": False,
     "enable_folder_sync": True,
     "scan_interval": 3600,
+    # Idle backoff (item 14): after cycles that change nothing, the daemon
+    # sleeps longer — each idle cycle multiplies scan_interval by the
+    # factor, never exceeding scan_interval * idle_backoff_max_multiplier.
+    "idle_backoff_factor": 2,
+    "idle_backoff_max_multiplier": 8,
     "flaky_volume_retries": 3,
     "retry_delay": 5,
     "use_rsync": True,

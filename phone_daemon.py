@@ -123,6 +123,19 @@ def _merged_list(*lists: list) -> list:
     return out
 
 
+def compute_idle_sleep(base: int, factor: int, max_multiplier: int, streak: int) -> int:
+    """Sleep duration for a daemon cycle after `streak` idle cycles.
+
+    Each idle cycle multiplies the base interval by `factor`, capped at
+    base * max_multiplier. Any action resets the streak to 0 (item 14).
+    Kept in sync with file_organizer.cli.compute_idle_sleep.
+    """
+    if streak <= 0 or factor <= 1:
+        return base
+    multiplier = min(factor ** min(streak, 12), max_multiplier)
+    return base * multiplier
+
+
 # Template placeholders that mean "this config has not been personalised yet".
 # Keep in sync with TEMPLATE_PLACEHOLDER_MARKERS in config.py.
 PLACEHOLDER_MARKERS = (
@@ -469,6 +482,8 @@ def _default_config() -> dict:
         "target_directory": "/storage/emulated/0/file_organizer_staging",
         "min_age_minutes": 10,
         "scan_interval_seconds": 60,
+        "idle_backoff_factor": 2,
+        "idle_backoff_max_multiplier": 8,
         "max_file_size_mb": 500,
         "include_extensions": [],  # empty = all files
         "exclude_extensions": list(DEFAULT_EXCLUDE_EXTENSIONS),
@@ -821,6 +836,14 @@ class PhoneDaemon:
         self.min_age = self.config.get("min_age_minutes", 10) * 60
         self.scan_interval = self.config.get("scan_interval_seconds", 60)
         self.max_size_mb = self.config.get("max_file_size_mb", 500)
+        # Idle backoff (item 14).
+        self.backoff_factor = int(
+            self.config.get("idle_backoff_factor", 2) or 2
+        )
+        self.backoff_max = int(
+            self.config.get("idle_backoff_max_multiplier", 8) or 8
+        )
+        self.idle_streak = 0
         self.exclude_folder_patterns = (
             self.config.get("exclude_folder_patterns", []) or []
         )
@@ -1064,9 +1087,24 @@ class PhoneDaemon:
                     db_stats["total_files"],
                 )
 
+                # Idle backoff (item 14): cycles that copy nothing sleep
+                # progressively longer, up to scan_interval * backoff_max.
+                if stats["copied"] == 0:
+                    self.idle_streak += 1
+                else:
+                    self.idle_streak = 0
+                sleep_for = compute_idle_sleep(
+                    self.scan_interval, self.backoff_factor,
+                    self.backoff_max, self.idle_streak,
+                )
+                logger.info(
+                    "Sleeping %ds (idle streak %d)",
+                    sleep_for, self.idle_streak,
+                )
+
                 # Sleep in small increments so we can respond to signals
                 if self._running:
-                    for _ in range(self.scan_interval):
+                    for _ in range(sleep_for):
                         if not self._running:
                             break
                         time.sleep(1)

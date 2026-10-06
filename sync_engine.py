@@ -23,10 +23,17 @@ class SyncEngine:
         self._timeout: int = (config.raw_config.get("sync_timeout_minutes", 60) or 60) * 60
         self._chunk_subfolders: int = config.raw_config.get("sync_chunk_subfolders", 30)
         self._exclude_patterns: list[str] = config.raw_config.get("exclude_patterns", []) or []
+        # Number of files/dirs rsync actually transferred in the most recent
+        # run_all_sync_pairs() call. Used for idle backoff (item 14).
+        self.last_change_count: int = 0
 
     def _build_rsync_args(self, source: Path, target: Path, delete: bool = False) -> list[str]:
         """Build rsync argument list."""
         args = ["rsync", "-av", "--progress"]
+
+        # One line per transferred/updated item — used to detect whether a
+        # sync actually did anything (idle backoff, item 14).
+        args.append("--itemize-changes")
 
         # Checksum mode
         if self._checksum_mode == "checksum":
@@ -76,7 +83,10 @@ class SyncEngine:
                 timeout=self._timeout,
             )
             if result.returncode == 0:
-                logger.debug("Sync complete: %s → %s", source, target)
+                changed = self._count_itemized_changes(result.stdout)
+                self.last_change_count += changed
+                logger.debug("Sync complete: %s → %s (%d changes)",
+                             source, target, changed)
                 return True
             else:
                 stderr_text = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
@@ -90,6 +100,20 @@ class SyncEngine:
         except FileNotFoundError:
             logger.error("rsync not found — please install rsync")
             return False
+
+    def _count_itemized_changes(self, stdout: bytes) -> int:
+        """Count rsync --itemize-changes lines in captured output.
+
+        Itemize lines start with < > c h . or * (e.g. ">f+++++++++ file").
+        Summary lines ("sent …", "total size …") start with letters and are
+        ignored.
+        """
+        text = stdout.decode("utf-8", errors="replace") if stdout else ""
+        count = 0
+        for line in text.splitlines():
+            if line and line[0] in "<>ch.*":
+                count += 1
+        return count
 
     def sync_bidirectional(self, folder_a: Path, folder_b: Path) -> dict:
         """Bidirectional sync: copy new/changed files in both directions."""
@@ -109,6 +133,7 @@ class SyncEngine:
 
     def run_all_sync_pairs(self) -> dict:
         """Run all configured sync pairs. Returns summary dict."""
+        self.last_change_count = 0
         summary = {
             "bidirectional": [],
             "one_way": [],
