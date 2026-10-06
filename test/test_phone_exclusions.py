@@ -16,10 +16,10 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import phone_daemon  # noqa: E402
+import phone_sync  # noqa: E402
 
 import logging  # noqa: E402
-logging.getLogger("phone_daemon").addHandler(logging.NullHandler())
+logging.getLogger("phone_sync").addHandler(logging.NullHandler())
 
 
 class ScanExclusionTests(unittest.TestCase):
@@ -40,20 +40,20 @@ class ScanExclusionTests(unittest.TestCase):
     def _scan(self, exclude_folder_names=None, exclude_extensions=None):
         return [
             str(p.relative_to(self.dir))
-            for p, _ in phone_daemon.scan_sources(
+            for p, _ in phone_sync.scan_sources(
                 [str(self.dir)],
                 include_extensions=[],
                 exclude_extensions=(
                     exclude_extensions
                     if exclude_extensions is not None
-                    else list(phone_daemon.DEFAULT_EXCLUDE_EXTENSIONS)
+                    else list(phone_sync.DEFAULT_EXCLUDE_EXTENSIONS)
                 ),
-                exclude_patterns=list(phone_daemon.DEFAULT_EXCLUDE_PATTERNS),
+                exclude_patterns=list(phone_sync.DEFAULT_EXCLUDE_PATTERNS),
                 exclude_folder_patterns=[],
                 exclude_folder_names=(
                     exclude_folder_names
                     if exclude_folder_names is not None
-                    else list(phone_daemon.DEFAULT_EXCLUDE_FOLDER_NAMES)
+                    else list(phone_sync.DEFAULT_EXCLUDE_FOLDER_NAMES)
                 ),
                 max_file_size_mb=500,
                 min_age_seconds=0,
@@ -114,10 +114,10 @@ class ScanExclusionTests(unittest.TestCase):
         self.assertNotIn("family-pics/photo.jpg", found)
 
     def test_user_extensions_are_added_to_defaults(self):
-        # The merge happens in PhoneDaemon.scan_and_sync via _merged_list:
+        # The merge happens in PhoneSync.scan_and_sync via _merged_list:
         # even with a custom list, the built-in .crypt14 must still apply.
-        merged = phone_daemon._merged_list(
-            phone_daemon.DEFAULT_EXCLUDE_EXTENSIONS, [".custom"]
+        merged = phone_sync._merged_list(
+            phone_sync.DEFAULT_EXCLUDE_EXTENSIONS, [".custom"]
         )
         self.assertIn(".crypt14", merged)
         self.assertIn(".custom", merged)
@@ -136,29 +136,29 @@ class ProtonCandidatesTests(unittest.TestCase):
 
     def test_find_proton_drive_uses_given_candidates(self):
         (self.dir / "MyDrive").mkdir()
-        found = phone_daemon.find_proton_drive([str(self.dir / "MyDrive")])
+        found = phone_sync.find_proton_drive([str(self.dir / "MyDrive")])
         self.assertEqual(found, [self.dir / "MyDrive"])
 
     def test_config_proton_drive_paths_drives_finder(self):
-        config = self.dir / "phone_daemon_config.yaml"
+        config = self.dir / "phone_sync_config.yaml"
         config.write_text(
             "proton_drive_paths:\n"
             f"  - \"{self.dir}/MyDrive\"\n"
         )
-        cfg = phone_daemon.load_config(str(config))
+        cfg = phone_sync.load_config(str(config))
         candidates = cfg.get("proton_drive_paths") or \
-            phone_daemon.DEFAULT_PROTON_CANDIDATES
+            phone_sync.DEFAULT_PROTON_CANDIDATES
         self.assertEqual(candidates, [f"{self.dir}/MyDrive"])
 
 
-class PhoneDaemonMergeTests(unittest.TestCase):
+class PhoneSyncMergeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.dir = Path(self.tmp.name).resolve()
 
     def test_daemon_merges_safety_defaults_with_config(self):
-        config = self.dir / "phone_daemon_config.yaml"
+        config = self.dir / "phone_sync_config.yaml"
         config.write_text(
             "target_directory: /tmp/staging\n"
             "source_directories: []\n"
@@ -168,7 +168,7 @@ class PhoneDaemonMergeTests(unittest.TestCase):
             "exclude_extensions:\n"
             "  - \".custom\"\n"
         )
-        daemon = phone_daemon.PhoneDaemon(str(config))
+        daemon = phone_sync.PhoneSync(str(config))
         try:
             names = daemon.exclude_folder_names
             self.assertIn(".git", names)
@@ -178,7 +178,7 @@ class PhoneDaemonMergeTests(unittest.TestCase):
             daemon.db.close()
 
     def test_merged_list_orders_and_dedupes(self):
-        out = phone_daemon._merged_list(["a", "b"], ["b", "c"], None)
+        out = phone_sync._merged_list(["a", "b"], ["b", "c"], None)
         self.assertEqual(out, ["a", "b", "c"])
 
 
@@ -192,11 +192,11 @@ class PhonePlaceholderTests(unittest.TestCase):
         self.dir = Path(self.tmp.name).resolve()
 
     def _daemon(self, extra: str):
-        config = self.dir / "phone_daemon_config.yaml"
+        config = self.dir / "phone_sync_config.yaml"
         config.write_text(
             f"db_path: \"{self.dir}/db.sqlite\"\n" + extra
         )
-        return phone_daemon.PhoneDaemon(str(config))
+        return phone_sync.PhoneSync(str(config))
 
     def test_janedoe_target_directory_exits_with_message(self):
         with self.assertRaises(SystemExit):
@@ -232,22 +232,22 @@ class IdleBackoffTests(unittest.TestCase):
     action must reset the streak."""
 
     def test_streak_zero_uses_base_interval(self):
-        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 0), 100)
+        self.assertEqual(phone_sync.compute_idle_sleep(100, 2, 8, 0), 100)
 
     def test_doubles_per_idle_cycle(self):
-        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 1), 200)
-        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 2), 400)
-        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 3), 800)
+        self.assertEqual(phone_sync.compute_idle_sleep(100, 2, 8, 1), 200)
+        self.assertEqual(phone_sync.compute_idle_sleep(100, 2, 8, 2), 400)
+        self.assertEqual(phone_sync.compute_idle_sleep(100, 2, 8, 3), 800)
 
     def test_capped_at_max_multiplier(self):
-        self.assertEqual(phone_daemon.compute_idle_sleep(100, 2, 8, 10), 800)
-        self.assertEqual(phone_daemon.compute_idle_sleep(300, 2, 8, 100), 2400)
+        self.assertEqual(phone_sync.compute_idle_sleep(100, 2, 8, 10), 800)
+        self.assertEqual(phone_sync.compute_idle_sleep(300, 2, 8, 100), 2400)
 
     def test_factor_one_disables_backoff(self):
-        self.assertEqual(phone_daemon.compute_idle_sleep(100, 1, 8, 50), 100)
+        self.assertEqual(phone_sync.compute_idle_sleep(100, 1, 8, 50), 100)
 
     def test_default_config_has_backoff_keys(self):
-        cfg = phone_daemon._default_config()
+        cfg = phone_sync._default_config()
         self.assertIn("idle_backoff_factor", cfg)
         self.assertIn("idle_backoff_max_multiplier", cfg)
 

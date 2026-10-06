@@ -33,7 +33,7 @@ def compute_idle_sleep(base: int, factor: int, max_multiplier: int, streak: int)
 
     Each idle cycle multiplies the base interval by `factor`, capped at
     base * max_multiplier. Any action resets the streak to 0 (item 14).
-    Kept in sync with phone_daemon.compute_idle_sleep.
+    Kept in sync with phone_sync.compute_idle_sleep.
     """
     if streak <= 0 or factor <= 1:
         return base

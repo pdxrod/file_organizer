@@ -132,7 +132,7 @@ class ConfigError(Exception):
 # paths like /Users/janedoe or /Volumes/YourExternalDrive. If such a path
 # does not exist at startup, file_organizer stops and tells the user to edit
 # the config instead of silently doing nothing. Keep in sync with the
-# PLACEHOLDER_MARKERS list in phone_daemon.py.
+# PLACEHOLDER_MARKERS list in phone_sync.py.
 TEMPLATE_PLACEHOLDER_MARKERS = (
     "janedoe",
     "yourexternaldrive",

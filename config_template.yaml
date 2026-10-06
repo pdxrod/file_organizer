@@ -8,11 +8,11 @@
 #               manage_organizer.sh). Copy this file to config.yaml and edit
 #               the computer: section.
 #
-#   phone:      settings for the phone program (phone_daemon.py, runs on
+#   phone:      settings for the phone program (phone_sync.py, runs on
 #               Android via Termux or on macOS). You do NOT copy or edit a
 #               second template file — when the phone program finds no
-#               phone_daemon_config.yaml it creates one automatically from
-#               this phone: section. Edit phone_daemon_config.yaml on the
+#               phone_sync_config.yaml it creates one automatically from
+#               this phone: section. Edit phone_sync_config.yaml on the
 #               phone for per-device changes.
 #
 # RULES
@@ -314,12 +314,12 @@ computer:
     remote_stage: "PROTON_DRIVE/My Files/misc"
     adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
     # Directories on the phone to pull (relative to /storage/emulated/0).
-    # The phone daemon stages grace-period-filtered, deduped files into
+    # The phone program stages grace-period-filtered, deduped files into
     # file_organizer_staging, so pull from there rather than the raw folders.
     phone_source_dirs:
       - "file_organizer_staging"
     # Where push mode places files on the phone (also relative). Use a folder
-    # the daemon does NOT scan to avoid copy loops.
+    # phone_sync does NOT scan to avoid copy loops.
     phone_push_dir: "file_organizer_staging"
     # Temp staging folder used during pulls. Relative values are joined onto
     # local_stage. Created and removed on every run.
@@ -345,10 +345,10 @@ computer:
       - ".log"
 
 # =============================================================================
-# phone: — settings for the phone program (phone_daemon.py)
+# phone: — settings for the phone program (phone_sync.py)
 # =============================================================================
 # The phone program reads only this section. When it finds no
-# phone_daemon_config.yaml next to it, it creates one from this section
+# phone_sync_config.yaml next to it, it creates one from this section
 # automatically, so there is only ONE template file to maintain.
 # =============================================================================
 phone:
@@ -401,7 +401,7 @@ phone:
   # On macOS (running the daemon on the Mac itself):
   #   /Users/YOURNAME/Library/CloudStorage/ProtonDrive-.../My Files/misc
   #
-  # TIP: Run `python3 phone_daemon.py --find-proton` to locate Proton Drive
+  # TIP: Run `python3 phone_sync.py --find-proton` to locate Proton Drive
   # folders (mainly useful on macOS).
   target_directory: "/storage/emulated/0/file_organizer_staging"
 
@@ -564,7 +564,7 @@ phone:
   # ── Database path ──────────────────────────────────────────────────────────
   # SQLite database tracking which files have already been synced.
   # Uses content hashing so renames don't trigger re-copies.
-  db_path: "~/.phone_daemon.db"
+  db_path: "~/.phone_sync.db"
 
   # ── Prune stale entries after N days ──────────────────────────────────────
   # If a source file has been deleted for at least this many days, its DB entry
@@ -572,7 +572,7 @@ phone:
   prune_max_age_days: 30
 
   # ── Log path ───────────────────────────────────────────────────────────────
-  log_path: "~/.phone_daemon.log"
+  log_path: "~/.phone_sync.log"
 
   # ── PID file path ──────────────────────────────────────────────────────────
-  pid_path: "~/.phone_daemon.pid"
+  pid_path: "~/.phone_sync.pid"

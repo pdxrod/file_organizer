@@ -3,7 +3,7 @@
 # phone_pull.sh — bidirectional phone sync via ADB
 # =============================================================================
 # Pulls files from Android phones to the Mac (default), or pushes from Mac to
-# the phone. Designed as a companion to phone_daemon.py for when phones are
+# the phone. Designed as a companion to phone_sync.py for when phones are
 # connected via USB.
 #
 # Usage:

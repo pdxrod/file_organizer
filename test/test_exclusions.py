@@ -266,8 +266,8 @@ class IdleBackoffTests(unittest.TestCase):
     """Item 14: the computer daemon's backoff helper must match the phone
     daemon's exactly (they are intentionally duplicated)."""
 
-    def test_cli_backoff_matches_phone_daemon(self):
-        import phone_daemon
+    def test_cli_backoff_matches_phone_sync(self):
+        import phone_sync
         # cli.py lives in the file_organizer package, whose parent is two
         # levels above this file.
         repo_parent = os.path.dirname(
@@ -278,7 +278,7 @@ class IdleBackoffTests(unittest.TestCase):
         for streak in range(0, 10):
             self.assertEqual(
                 compute_idle_sleep(300, 2, 8, streak),
-                phone_daemon.compute_idle_sleep(300, 2, 8, streak),
+                phone_sync.compute_idle_sleep(300, 2, 8, streak),
             )
 
     def test_defaults_include_backoff_keys(self):

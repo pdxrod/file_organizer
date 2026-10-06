@@ -319,7 +319,7 @@ The phone daemon solves **two problems** with Proton Drive's built-in Android ba
 2. **Over-eager backup**: Photos are backed up immediately — including ones you'll delete
    seconds later. Now you have to delete them in two (or three) places.
 
-### Solution: `phone_daemon.py`
+### Solution: `phone_sync.py`
 
 A lightweight Python daemon that runs on your Android phone (via **Termux**) or macOS.
 It monitors configurable source directories and copies **only files that have survived
@@ -356,17 +356,17 @@ termux-setup-storage
 pkg install python procps
 
 # 4. Get the daemon and config (via ADB or git clone):
-#    adb push phone_daemon.py config_template.yaml manage_phone_daemon.sh /sdcard/Download/
+#    adb push phone_sync.py config_template.yaml manage_phone.sh /sdcard/Download/
 #    or, in Termux: git clone https://github.com/pdxrod/file_organizer.git
 
 # 5. In Termux, put the files in your working directory:
-cp ~/storage/shared/Download/phone_daemon.py ~/file_organizer/ 2>/dev/null || true
+cp ~/storage/shared/Download/phone_sync.py ~/file_organizer/ 2>/dev/null || true
 cp ~/storage/shared/Download/config_template.yaml ~/file_organizer/ 2>/dev/null || true
 
 # 6. Create your own config — the daemon does this automatically from the
 #    phone: section of config_template.yaml (the live config is git-ignored,
 #    so your edits never conflict with git pull):
-python3 phone_daemon.py --make-config
+python3 phone_sync.py --make-config
 
 # 7. Edit the config: set target_directory to a staging folder on shared
 #    storage (NOT inside DCIM/Pictures/Documents/Download — the daemon scans
@@ -374,16 +374,16 @@ python3 phone_daemon.py --make-config
 #      target_directory: "/storage/emulated/0/file_organizer_staging"
 
 # 8. Test without copying:
-python3 phone_daemon.py --scan-once --dry-run
+python3 phone_sync.py --scan-once --dry-run
 
 # 9. Run for real (foreground session in Termux survives best on Samsung):
-python3 phone_daemon.py
+python3 phone_sync.py
 ```
 
 ### Phone Daemon Commands
 
 ```bash
-./manage_phone_daemon.sh {command}
+./manage_phone.sh {command}
 ```
 
 | Command | What it does |
@@ -398,7 +398,7 @@ python3 phone_daemon.py
 | `test-real` | Single production scan |
 | `find-proton` | Search for Proton Drive folder on device |
 
-### Key Configuration (`phone_daemon_config.yaml`)
+### Key Configuration (`phone_sync_config.yaml`)
 
 | Setting | Default | Purpose |
 |---------|---------|---------|

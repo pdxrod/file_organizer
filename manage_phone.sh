@@ -1,30 +1,30 @@
 #!/bin/bash
 # ============================================================================
-# manage_phone_daemon.sh — start, stop, status, and test the phone daemon.
+# manage_phone.sh — start, stop, status, and test phone sync.
 #
 # Usage:
-#   ./manage_phone_daemon.sh start        Start daemon in background
-#   ./manage_phone_daemon.sh stop         Stop the daemon
-#   ./manage_phone_daemon.sh restart      Stop then start
-#   ./manage_phone_daemon.sh status       Check if running
-#   ./manage_phone_daemon.sh test         Dry-run scan (no files copied)
-#   ./manage_phone_daemon.sh scan         One-shot real scan
-#   ./manage_phone_daemon.sh log          Tail the log
-#   ./manage_phone_daemon.sh stats        Show sync database statistics
-#   ./manage_phone_daemon.sh find-proton  Locate Proton Drive folder
-#   ./manage_phone_daemon.sh setup        First-time setup wizard
+#   ./manage_phone.sh start        Start phone sync in the background
+#   ./manage_phone.sh stop         Stop phone sync
+#   ./manage_phone.sh restart      Stop then start
+#   ./manage_phone.sh status       Check if running
+#   ./manage_phone.sh test         Dry-run scan (no files copied)
+#   ./manage_phone.sh scan         One-shot real scan
+#   ./manage_phone.sh log          Tail the log
+#   ./manage_phone.sh stats        Show sync database statistics
+#   ./manage_phone.sh find-proton  Locate Proton Drive folder
+#   ./manage_phone.sh setup        First-time setup wizard
 # ============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DAEMON_SCRIPT="$SCRIPT_DIR/phone_daemon.py"
-CONFIG_FILE="$SCRIPT_DIR/phone_daemon_config.yaml"
+PHONE_SCRIPT="$SCRIPT_DIR/phone_sync.py"
+CONFIG_FILE="$SCRIPT_DIR/phone_sync_config.yaml"  # legacy phone_daemon_config.yaml still works
 
-# Default log/pid/db paths — overridden by phone_daemon_config.yaml
-LOG_FILE="$HOME/.phone_daemon.log"
-PID_FILE="$HOME/.phone_daemon.pid"
-DB_FILE="$HOME/.phone_daemon.db"
+# Default log/pid/db paths — overridden by the config file
+LOG_FILE="$HOME/.phone_sync.log"
+PID_FILE="$HOME/.phone_sync.pid"
+DB_FILE="$HOME/.phone_sync.db"
 
 if [ -f "$CONFIG_FILE" ] && command -v python3 >/dev/null 2>&1; then
     eval "$(python3 - "$CONFIG_FILE" <<'PYEOF'
@@ -35,9 +35,9 @@ except ImportError:
     sys.exit(0)
 cfg = yaml.safe_load(open(sys.argv[1])) or {}
 defaults = {
-    "log_path": "~/.phone_daemon.log",
-    "pid_path": "~/.phone_daemon.pid",
-    "db_path": "~/.phone_daemon.db",
+    "log_path": "~/.phone_sync.log",
+    "pid_path": "~/.phone_sync.pid",
+    "db_path": "~/.phone_sync.db",
 }
 for key in ("log_path", "pid_path", "db_path"):
     val = str(cfg.get(key, defaults[key]))
@@ -66,7 +66,7 @@ NC='\033[0m' # No Color
 
 banner() {
     echo -e "${CYAN}╔════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║        📱 Phone Daemon Manager         ║${NC}"
+    echo -e "${CYAN}║          📱 Phone Sync Manager          ║${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════╝${NC}"
     echo
 }
@@ -79,14 +79,14 @@ check_config() {
         echo
         echo "Creating starter config from the phone: section of config_template.yaml..."
         if [ -f "$SCRIPT_DIR/config_template.yaml" ] || [ -f "$SCRIPT_DIR/phone_daemon_config.template.yaml" ]; then
-            $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --make-config
+            $PYTHON "$PHONE_SCRIPT" --config "$CONFIG_FILE" --make-config
             echo -e "${GREEN}✔ Created $CONFIG_FILE from the template — includes common Android folders.${NC}"
             echo
             echo -e "${YELLOW}⚠  Review $CONFIG_FILE before running:${NC}"
             echo "  - source_directories lists DCIM/Pictures/Documents/Download plus app media"
             echo "  - Missing folders are skipped automatically — no need to trim the list"
             echo "  - On Android: target_directory = /storage/emulated/0/file_organizer_staging"
-            echo "  - On macOS: run './manage_phone_daemon.sh find-proton' to locate Proton Drive"
+            echo "  - On macOS: run './manage_phone.sh find-proton' to locate Proton Drive"
         else
             echo -e "${RED}✗ Template not found. Run from the file_organizer directory.${NC}"
             exit 1
@@ -95,7 +95,7 @@ check_config() {
     fi
 }
 
-# ── Daemon running? ──────────────────────────────────────────────────────
+# ── Phone sync running? ──────────────────────────────────────────────────────
 
 is_running() {
     if [ -f "$PID_FILE" ]; then
@@ -106,7 +106,7 @@ is_running() {
         fi
     fi
     # Also check via pgrep as fallback
-    if pgrep -f "phone_daemon.py" > /dev/null 2>&1; then
+    if pgrep -f "phone_sync.py" > /dev/null 2>&1; then
         return 0
     fi
     return 1
@@ -118,21 +118,21 @@ cmd_start() {
     check_config
 
     if is_running; then
-        echo -e "${YELLOW}⚠  Phone daemon is already running.${NC}"
+        echo -e "${YELLOW}⚠  Phone sync is already running.${NC}"
         cmd_status
         return 1
     fi
 
-    echo -e "${GREEN}Starting phone daemon in background…${NC}"
+    echo -e "${GREEN}Starting phone sync in the background…${NC}"
     cd "$SCRIPT_DIR"
-    $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --daemon
+    $PYTHON "$PHONE_SCRIPT" --config "$CONFIG_FILE" --background
 
     sleep 2
     if is_running; then
-        echo -e "${GREEN}✔ Daemon started successfully.${NC}"
+        echo -e "${GREEN}✔ Phone sync started successfully.${NC}"
         cmd_status
     else
-        echo -e "${RED}✗ Daemon failed to start. Check log:${NC}"
+        echo -e "${RED}✗ Phone sync failed to start. Check log:${NC}"
         echo "  tail -f $LOG_FILE"
         return 1
     fi
@@ -140,13 +140,13 @@ cmd_start() {
 
 cmd_stop() {
     if ! is_running; then
-        echo -e "${YELLOW}Daemon is not running.${NC}"
+        echo -e "${YELLOW}Phone sync is not running.${NC}"
         # Clean up stale PID file
         rm -f "$PID_FILE"
         return 0
     fi
 
-    echo "Stopping phone daemon…"
+    echo "Stopping phone sync…"
 
     # Try graceful stop first
     if [ -f "$PID_FILE" ]; then
@@ -157,7 +157,7 @@ cmd_stop() {
             # Wait up to 10 seconds
             for i in $(seq 1 10); do
                 if ! kill -0 "$pid" 2>/dev/null; then
-                    echo -e "${GREEN}✔ Daemon stopped (PID $pid)${NC}"
+                    echo -e "${GREEN}✔ Phone sync stopped (PID $pid)${NC}"
                     rm -f "$PID_FILE"
                     return 0
                 fi
@@ -170,10 +170,10 @@ cmd_stop() {
     fi
 
     # Also try via the script's own --stop
-    $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --stop 2>/dev/null || true
+    $PYTHON "$PHONE_SCRIPT" --config "$CONFIG_FILE" --stop 2>/dev/null || true
 
     rm -f "$PID_FILE"
-    echo -e "${GREEN}✔ Daemon stopped.${NC}"
+    echo -e "${GREEN}✔ Phone sync stopped.${NC}"
 }
 
 cmd_restart() {
@@ -189,17 +189,17 @@ cmd_status() {
             pid=$(cat "$PID_FILE" 2>/dev/null || true)
         fi
         if [ -z "$pid" ]; then
-            pid=$(pgrep -f "phone_daemon.py" | head -1)
+            pid=$(pgrep -f "phone_sync.py" | head -1)
         fi
-        echo -e "${GREEN}● Phone daemon is RUNNING${NC} (PID: ${pid:-unknown})"
+        echo -e "${GREEN}● Phone sync is RUNNING${NC} (PID: ${pid:-unknown})"
 
         # Show stats from DB
         if [ -f "$DB_FILE" ]; then
             echo
-            $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --stats 2>/dev/null || true
+            $PYTHON "$PHONE_SCRIPT" --config "$CONFIG_FILE" --stats 2>/dev/null || true
         fi
     else
-        echo -e "${RED}○ Phone daemon is STOPPED${NC}"
+        echo -e "${RED}○ Phone sync is STOPPED${NC}"
     fi
 }
 
@@ -208,10 +208,10 @@ cmd_test() {
     echo -e "${CYAN}Running DRY-RUN scan (no files will be copied)…${NC}"
     echo
     cd "$SCRIPT_DIR"
-    $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --scan-once --dry-run --verbose
+    $PYTHON "$PHONE_SCRIPT" --config "$CONFIG_FILE" --scan-once --dry-run --verbose
     echo
     echo -e "${GREEN}✔ Dry-run complete. Review the log above.${NC}"
-    echo "  If everything looks right, run: ./manage_phone_daemon.sh scan"
+    echo "  If everything looks right, run: ./manage_phone.sh scan"
 }
 
 cmd_scan() {
@@ -220,7 +220,7 @@ cmd_scan() {
     echo "  Press Ctrl+C to cancel within 3 seconds…"
     sleep 3
     cd "$SCRIPT_DIR"
-    $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --scan-once --verbose
+    $PYTHON "$PHONE_SCRIPT" --config "$CONFIG_FILE" --scan-once --verbose
     echo
     echo -e "${GREEN}✔ Scan complete.${NC}"
 }
@@ -236,14 +236,14 @@ cmd_log() {
 cmd_stats() {
     check_config
     cd "$SCRIPT_DIR"
-    $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --stats
+    $PYTHON "$PHONE_SCRIPT" --config "$CONFIG_FILE" --stats
 }
 
 cmd_find_proton() {
     echo -e "${CYAN}Searching for Proton Drive folder…${NC}"
     echo
     cd "$SCRIPT_DIR"
-    $PYTHON "$DAEMON_SCRIPT" --find-proton
+    $PYTHON "$PHONE_SCRIPT" --find-proton
     echo
     echo "Tip: On macOS set that path as target_directory; on Android use"
     echo "     /storage/emulated/0/file_organizer_staging instead."
@@ -251,7 +251,7 @@ cmd_find_proton() {
 
 cmd_setup() {
     banner
-    echo "This wizard helps you set up the phone daemon for the first time."
+    echo "This wizard helps you set up phone sync for the first time."
     echo
 
     # 1. Check Python
@@ -262,14 +262,14 @@ cmd_setup() {
     # 2. Find Proton Drive
     echo "Searching for Proton Drive…"
     cd "$SCRIPT_DIR"
-    $PYTHON "$DAEMON_SCRIPT" --find-proton
+    $PYTHON "$PHONE_SCRIPT" --find-proton
     echo
 
     # 3. Config
     if [ -f "$CONFIG_FILE" ]; then
         echo -e "${GREEN}✔ Config exists at $CONFIG_FILE${NC}"
     else
-        $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --make-config
+        $PYTHON "$PHONE_SCRIPT" --config "$CONFIG_FILE" --make-config
         echo -e "${GREEN}✔ Created $CONFIG_FILE from the phone: section of config_template.yaml${NC}"
     fi
 
@@ -281,9 +281,9 @@ cmd_setup() {
     echo "     - On Android: target_directory = /storage/emulated/0/file_organizer_staging"
     echo "     - On macOS: set the Proton Drive path (see find-proton)"
     echo "     - Adjust source_directories if needed"
-    echo "  2. Run a dry-run test:  ./manage_phone_daemon.sh test"
-    echo "  3. Run a real scan:     ./manage_phone_daemon.sh scan"
-    echo "  4. Start the daemon:    ./manage_phone_daemon.sh start"
+    echo "  2. Run a dry-run test:  ./manage_phone.sh test"
+    echo "  3. Run a real scan:     ./manage_phone.sh scan"
+    echo "  4. Start phone sync:    ./manage_phone.sh start"
     echo
 }
 
@@ -326,10 +326,10 @@ case "${1:-}" in
         echo "Usage: $0 {start|stop|restart|status|test|scan|log|stats|find-proton|setup}"
         echo
         echo "Commands:"
-        echo "  start         Start daemon in background"
-        echo "  stop          Stop the daemon"
+        echo "  start         Start phone sync in the background"
+        echo "  stop          Stop phone sync"
         echo "  restart       Stop then start"
-        echo "  status        Check if daemon is running"
+        echo "  status        Check if phone sync is running"
         echo "  test          Dry-run scan (safe — no files copied)"
         echo "  scan          One-shot production scan"
         echo "  log           Tail the log file"

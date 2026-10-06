@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Phone Daemon — lightweight file monitor and sync for Android (Termux) or macOS.
+Phone Sync — lightweight file monitor and sync for Android (Termux) or macOS.
 
 Monitors configured source directories and copies new/changed files to a
 target Proton Drive folder. Tracks copied files by content hash (SHA-256)
@@ -13,15 +13,15 @@ Key features:
 - Configurable source directories and target path
 - Dry-run mode for safe testing
 - Runs on Android via Termux, or on macOS
-- PID-file daemon management for start/stop/status
+- PID-file management for start/stop/status
 
 Usage:
-    python3 phone_daemon.py              # start daemon (foreground)
-    python3 phone_daemon.py --daemon     # start daemon (background)
-    python3 phone_daemon.py --scan-once  # single scan then exit
-    python3 phone_daemon.py --dry-run    # scan but don't copy
-    python3 phone_daemon.py --find-proton  # locate Proton Drive folder
-    python3 phone_daemon.py --config /path/to/config.yaml
+    python3 phone_sync.py              # start in the foreground
+    python3 phone_sync.py --background # start in the background
+    python3 phone_sync.py --scan-once  # single scan then exit
+    python3 phone_sync.py --dry-run    # scan but don't copy
+    python3 phone_sync.py --find-proton  # locate Proton Drive folder
+    python3 phone_sync.py --config /path/to/config.yaml
 """
 
 import os
@@ -42,10 +42,10 @@ from typing import Optional, Iterator
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-DEFAULT_CONFIG = "phone_daemon_config.yaml"
-DEFAULT_DB = "~/.phone_daemon.db"
-DEFAULT_LOG = "~/.phone_daemon.log"
-DEFAULT_PID = "~/.phone_daemon.pid"
+DEFAULT_CONFIG = "phone_sync_config.yaml"
+DEFAULT_DB = "~/.phone_sync.db"
+DEFAULT_LOG = "~/.phone_sync.log"
+DEFAULT_PID = "~/.phone_sync.pid"
 
 # Built-in safety defaults. The live, editable copies of these lists live in
 # the phone: section of config_template.yaml (proton_drive_paths,
@@ -147,7 +147,7 @@ PLACEHOLDER_MARKERS = (
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
-logger = logging.getLogger("phone_daemon")
+logger = logging.getLogger("phone_sync")
 
 
 def setup_logging(log_path: str, verbose: bool = False) -> None:
@@ -186,7 +186,8 @@ def _find_template(config_path: Path) -> Optional[Path]:
 
     Since the single-template merge (item 5) the canonical template is
     config_template.yaml, whose `phone:` section is extracted. The legacy
-    phone_daemon_config.template.yaml is still honoured if present.
+    phone_daemon_config.template.yaml (pre-rename) is still honoured
+    if present.
     """
     candidates = [
         config_path.parent / "config_template.yaml",
@@ -266,7 +267,7 @@ def _parse_simple_scalar(token: str):
 
 
 def _parse_simple_yaml(content: str) -> dict:
-    """Parse the flat YAML subset used by phone_daemon_config.yaml.
+    """Parse the flat YAML subset used by phone_sync_config.yaml.
 
     Used when PyYAML is not installed (Termux no longer ships python-pyyaml,
     and a pip install would need the clang toolchain). Supports:
@@ -342,7 +343,7 @@ def _make_phone_config_from_template(template: Path, config_path: Path) -> None:
 
     The merged config_template.yaml contributes only its `phone:` section
     (de-dented, so it stays inside the built-in parser's flat subset). A
-    legacy flat phone_daemon_config.template.yaml is copied verbatim.
+    pre-rename flat phone_daemon_config.template.yaml is copied verbatim.
     """
     content = template.read_text(encoding="utf-8")
     if template.name == "config_template.yaml":
@@ -519,8 +520,12 @@ def resolve_config_path(requested: str) -> str:
 
     If the path is a bare relative filename that does not exist in the
     current working directory, fall back to the same filename next to this
-    script. This lets `python3 /path/to/phone_daemon.py` find a config that
+    script. This lets `python3 /path/to/phone_sync.py` find a config that
     ships alongside the script regardless of where it is launched from.
+
+    Also falls back to the pre-rename legacy name phone_daemon_config.yaml
+    when the new phone_sync_config.yaml is absent, so existing phone
+    setups keep their settings.
     """
     p = Path(requested)
     if p.is_absolute() or p.exists():
@@ -528,6 +533,14 @@ def resolve_config_path(requested: str) -> str:
     candidate = Path(__file__).resolve().parent / requested
     if candidate.exists():
         return str(candidate)
+    # Legacy name (pre item-2 rename).
+    if requested == DEFAULT_CONFIG:
+        legacy = Path(__file__).resolve().parent / "phone_daemon_config.yaml"
+        if legacy.exists():
+            return str(legacy)
+        cwd_legacy = Path.cwd() / "phone_daemon_config.yaml"
+        if cwd_legacy.exists():
+            return str(cwd_legacy)
     return requested
 
 
@@ -567,6 +580,18 @@ class SyncDB:
 
     def __init__(self, db_path: str):
         self.db_path = Path(db_path).expanduser().resolve()
+        # Migration from the pre-rename default (~/.phone_daemon.db): keep
+        # using the old database if the new one does not exist yet, so the
+        # sync history survives the phone_sync rename (item 2).
+        if not self.db_path.exists():
+            legacy = self.db_path.with_name(
+                self.db_path.name.replace("phone_sync", "phone_daemon")
+            )
+            if legacy.exists():
+                logger.info(
+                    "Using existing sync database from the old name: %s", legacy
+                )
+                self.db_path = legacy
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: Optional[sqlite3.Connection] = None
 
@@ -870,7 +895,7 @@ def find_proton_drive(candidates: Optional[list] = None) -> list[Path]:
 
 # ── Main daemon ──────────────────────────────────────────────────────────────
 
-class PhoneDaemon:
+class PhoneSync:
     """Monitors phone directories and syncs new files to Proton Drive."""
 
     def __init__(self, config_path: str):
@@ -948,7 +973,7 @@ class PhoneDaemon:
                 "\nERROR: your config still contains template placeholder "
                 "paths that do not exist on this device:\n  "
                 + "\n  ".join(problems)
-                + "\n\nEdit phone_daemon_config.yaml and set your real "
+                + "\n\nEdit phone_sync_config.yaml and set your real "
                 "paths, then run again.\n"
             )
             logger.error(msg)
@@ -1101,7 +1126,7 @@ class PhoneDaemon:
     def run_once(self, dry_run: bool = False) -> dict:
         """Run a single scan cycle. Returns stats."""
         mode = "DRY-RUN" if dry_run else "PRODUCTION"
-        logger.info("=== Phone Daemon scan (%s) ===", mode)
+        logger.info("=== Phone Sync scan (%s) ===", mode)
         logger.info("Source dirs: %s", self.source_dirs)
         logger.info("Target dir:  %s", self.target_dir)
         logger.info("Min age:     %d minutes", self.min_age // 60)
@@ -1127,7 +1152,7 @@ class PhoneDaemon:
     def run_daemon(self) -> None:
         """Run continuously with a polling interval."""
         self._write_pid()
-        logger.info("Phone Daemon started (PID %d)", os.getpid())
+        logger.info("Phone Sync started (PID %d)", os.getpid())
         logger.info("Scan interval: %d seconds", self.scan_interval)
 
         try:
@@ -1171,11 +1196,11 @@ class PhoneDaemon:
                         time.sleep(1)
 
         except Exception as e:
-            logger.exception("Daemon error: %s", e)
+            logger.exception("Phone sync error: %s", e)
         finally:
             self._remove_pid()
             self.db.close()
-            logger.info("Phone Daemon stopped. Total copied: %d files, %s",
+            logger.info("Phone Sync stopped. Total copied: %d files, %s",
                         self._total_copied, human_bytes(self._total_bytes))
 
 
@@ -1183,14 +1208,14 @@ class PhoneDaemon:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Phone Daemon - monitor and sync phone files to Proton Drive",
+        description="Phone Sync - monitor and sync phone files to Proton Drive",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python3 phone_daemon.py --scan-once --dry-run   # test without copying
-  python3 phone_daemon.py --scan-once             # one-shot real run
-  python3 phone_daemon.py --daemon                # start background daemon
-  python3 phone_daemon.py --find-proton           # locate Proton Drive folder
-  python3 phone_daemon.py --config my_config.yaml # use custom config
+  python3 phone_sync.py --scan-once --dry-run     # test without copying
+  python3 phone_sync.py --scan-once               # one-shot real run
+  python3 phone_sync.py --background              # start in the background
+  python3 phone_sync.py --find-proton             # locate Proton Drive folder
+  python3 phone_sync.py --config my_config.yaml # use custom config
         """,
     )
     parser.add_argument(
@@ -1202,8 +1227,9 @@ def main():
         help="Run a single scan cycle then exit",
     )
     parser.add_argument(
-        "--daemon", action="store_true",
-        help="Start as background daemon (forks to background)",
+        "--background", "--daemon", dest="background", action="store_true",
+        help="Start as a background process (forks to background). "
+             "--daemon is the old name and still works.",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -1219,15 +1245,15 @@ def main():
     )
     parser.add_argument(
         "--status", action="store_true",
-        help="Check if daemon is running and exit",
+        help="Check if phone sync is running and exit",
     )
     parser.add_argument(
         "--stop", action="store_true",
-        help="Stop a running daemon",
+        help="Stop a running phone sync",
     )
     parser.add_argument(
         "--make-config", action="store_true",
-        help="Create phone_daemon_config.yaml from the template if missing, then exit",
+        help="Create phone_sync_config.yaml from the template if missing, then exit",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true",
@@ -1257,7 +1283,7 @@ def main():
             print("Checked:")
             for c in candidates:
                 print(f"  {c}")
-            print("\nTip: Manually set target_directory in phone_daemon_config.yaml")
+            print("\nTip: Manually set target_directory in phone_sync_config.yaml")
             print("Tip: Or add your path to proton_drive_paths in that file.")
         return
 
@@ -1276,12 +1302,12 @@ def main():
             try:
                 pid = int(pid_path.read_text().strip())
                 os.kill(pid, 0)  # signal 0 = check existence
-                print(f"Daemon is running (PID {pid})")
+                print(f"Phone sync is running (PID {pid})")
             except (OSError, ValueError):
-                print("Daemon is NOT running (stale PID file)")
+                print("Phone sync is NOT running (stale PID file)")
                 pid_path.unlink(missing_ok=True)
         else:
-            print("Daemon is NOT running")
+            print("Phone sync is NOT running")
         return
 
     if args.stop:
@@ -1298,12 +1324,12 @@ def main():
                     os.kill(pid, signal.SIGKILL)
                     print(f"Force-killed PID {pid}")
                 except OSError:
-                    print(f"Daemon stopped (PID {pid})")
+                    print(f"Phone sync stopped (PID {pid})")
             except (OSError, ValueError):
                 print("Stale PID file — removing")
             pid_path.unlink(missing_ok=True)
         else:
-            print("No PID file found — daemon is not running")
+            print("No PID file found — phone sync is not running")
         return
 
     # ── Normal operation ──
@@ -1313,15 +1339,15 @@ def main():
         verbose=args.verbose,
     )
 
-    daemon = PhoneDaemon(args.config)
+    sync = PhoneSync(args.config)
 
     if args.scan_once:
-        daemon.run_once(dry_run=args.dry_run)
-    elif args.daemon:
+        sync.run_once(dry_run=args.dry_run)
+    elif args.background:
         # Fork to background
         pid = os.fork()
         if pid > 0:
-            print(f"Daemon started (PID {pid})")
+            print(f"Phone sync started (PID {pid})")
             sys.exit(0)
         # Child continues
         os.setsid()
@@ -1333,10 +1359,10 @@ def main():
         for h in logger.handlers[:]:
             if isinstance(h, logging.StreamHandler) and h.stream in (sys.stdout, sys.stderr):
                 logger.removeHandler(h)
-        daemon.run_daemon()
+        sync.run_daemon()
     else:
-        # Foreground daemon (default)
-        daemon.run_daemon()
+        # Foreground (default)
+        sync.run_daemon()
 
 
 if __name__ == "__main__":
