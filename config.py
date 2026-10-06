@@ -161,7 +161,14 @@ class Config:
 
         if os.path.exists(target):
             with open(target, "r") as f:
-                self._raw = yaml.safe_load(f) or {}
+                loaded = yaml.safe_load(f) or {}
+            # Since the single-template merge (item 5), config.yaml is
+            # generated from the `computer:` section of config_template.yaml.
+            # Accept both the sectioned format and legacy flat configs.
+            if isinstance(loaded, dict) and isinstance(loaded.get("computer"), dict):
+                self._raw = loaded["computer"]
+            else:
+                self._raw = loaded
         else:
             self._raw = {}
 
@@ -433,7 +440,15 @@ class Config:
             )
 
         with open(template_path, "r") as f:
-            starter = yaml.safe_load(f) or {}
+            template = yaml.safe_load(f) or {}
+
+        # The merged template has computer:/phone: sections — the computer
+        # program uses only the computer: part (item 5). Legacy flat
+        # templates are accepted as-is.
+        if isinstance(template, dict) and isinstance(template.get("computer"), dict):
+            starter = template["computer"]
+        else:
+            starter = template
 
         # ── turn off almost everything for a safe starter config ──
         starter["enable_content_analysis"] = False
@@ -505,6 +520,8 @@ def resolve_log_path(config_path: Optional[str] = None) -> str:
     try:
         with open(target, "r") as f:
             cfg = yaml.safe_load(f) or {}
+        if isinstance(cfg, dict) and isinstance(cfg.get("computer"), dict):
+            cfg = cfg["computer"]
         val = cfg.get("log_path")
         if val:
             return os.path.expanduser(str(val))

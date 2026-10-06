@@ -213,5 +213,54 @@ class TemplatePlaceholderTests(unittest.TestCase):
         self.assertEqual(cfg.drives["MAIN_DRIVE"], str(real))
 
 
+class SectionedConfigTests(unittest.TestCase):
+    """Since the single-template merge (item 5), config.yaml is generated
+    from the computer: section of config_template.yaml — but legacy flat
+    configs must keep working."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def test_load_accepts_computer_section(self):
+        path = self.dir / "config.yaml"
+        path.write_text(
+            "computer:\n"
+            "  output_base: /tmp/never-created\n"
+            "  exclude_patterns:\n"
+            "    - \"*.zzz\"\n"
+            "phone:\n"
+            "  target_directory: /storage/emulated/0/staging\n"
+        )
+        cfg = cfgmod.Config(str(path))
+        self.assertEqual(cfg.raw_config["output_base"], "/tmp/never-created")
+        self.assertNotIn("phone", cfg.raw_config)
+        self.assertNotIn("target_directory", cfg.raw_config)
+        # Exclusion union still applies to the sectioned format.
+        patterns = cfg.raw_config["exclude_patterns"]
+        self.assertIn("*.zzz", patterns)
+        self.assertIn(".git", patterns)
+
+    def test_load_accepts_legacy_flat_config(self):
+        path = self.dir / "config.yaml"
+        path.write_text("output_base: /tmp/never-created\n")
+        cfg = cfgmod.Config(str(path))
+        self.assertEqual(cfg.raw_config["output_base"], "/tmp/never-created")
+
+    def test_create_starter_writes_computer_section_only(self):
+        import yaml as pyyaml
+        path = self.dir / "config.yaml"
+        cfgmod.Config.create_starter(str(path))
+        starter = pyyaml.safe_load(path.read_text())
+        self.assertIn("output_base", starter)
+        self.assertNotIn("phone", starter)
+        # create_starter turns the dangerous features off.
+        self.assertFalse(starter["enable_folder_sync"])
+        self.assertFalse(starter["auto_git"])
+        self.assertFalse(starter["enable_duplicate_detection"])
+        self.assertFalse(starter["ml_content_analysis"]["enabled"])
+
+
 if __name__ == "__main__":
     unittest.main()

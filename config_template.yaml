@@ -1,296 +1,453 @@
-# Template configuration file - Copy to config.yaml and customize
-
-drives:
-  # Define drive shortcuts here. You can use these names in sync_pairs and source_folders below. If a drive is not available, the program will skip it gracefully.
-  MAIN_DRIVE: "/Users/janedoe"
-  EXTERNAL_DRIVE: "/Volumes/YourExternalDrive"
-  PROTON_DRIVE: "/Users/janedoe/ProtonDrive"
-  GOOGLE_DRIVE: "/Users/janedoe/GoogleDrive/MyFiles"
-
-sync_pairs:
-  # Example: Using drive placeholders (recommended)
-  - folders:
-      - "MAIN_DRIVE/dev"
-      - "EXTERNAL_DRIVE/dev"
-  
-  # Example: Using drive placeholders with cloud storage
-  - folders:
-      - "MAIN_DRIVE/Documents"
-      - "GOOGLE_DRIVE/Documents"
-  
-  # Example: You can also use direct paths
-  - folders:
-      - "/Users/janedoe/Pictures"
-      - "/Volumes/YourExternalDrive/Pictures"
-  
-  # Note: Folders A and B are interchangeable. Files sync bidirectionally based on:
-  #   1. If file exists in A but not B → copy from A to B
-  #   2. If file exists in B but not A → copy from B to A
-  #   3. If file exists in both but A is newer → copy from A to B
-  #   4. If file exists in both but B is newer → copy from B to A
-
-one_way_pairs:
-  # Example: One-way backups (source → target). Files only copy from A to B.
-  - folders:
-      - "MAIN_DRIVE/Music"
-      - "PROTON_DRIVE/Music"
-  
-  # Example: One-way backups to external drive
-  - folders:
-      - "MAIN_DRIVE/Pictures"
-      - "EXTERNAL_DRIVE/Pictures"
-
-# Optional: roots to scan for duplicate detection when enable_duplicate_detection is true. 
-# You can use drive placeholders here (e.g. MAIN_DRIVE/Documents).
-source_folders:
-  - "MAIN_DRIVE/Documents"
-  - "MAIN_DRIVE/Pictures"
-
-# Folders to scan for creating the ~/organized soft-link tree.
-# Only documents, images, music, and video files are linked (see organize_file_types).
-# If empty, falls back to source_folders above.
-organize_folders:
-  - "MAIN_DRIVE/Documents"
-  - "MAIN_DRIVE/Music"
-  - "MAIN_DRIVE/Pictures"
-
-# Which file type categories to include in ~/organized.
-# Options: documents, images, music, video, code, archives, other
-organize_file_types:
-  - documents
-  - images
-  - music
-  - video
-
-# Folders matching these patterns have their contents deleted (leaving empty folders) every time file_organizer.py finds them.
-empty_folder_patterns:
-  - "node_modules"
-  - "_build"
-  - "deps"
-  - "ebin"
-  - "dist"
-  - "build"
-  - "target"
-  - ".next"
-  - ".nuxt"
-  - ".cache"
-  - ".parcel-cache"
-  - "coverage"
-  - ".nyc_output"
-  - "elm-stuff"
-  - ".elixir_ls"
-  - ".stack-work"
-  - ".bundle"
-  - "vendor"
-  - "bundle"
-  - "priv/static"
-  - ".gradle"
-  - ".m2"
-  - "tmp/cache"
-  - ".tmp*"
-
-# Files and folders matching these patterns are NEVER copied or synced.
-# A pattern matches any file or folder with that name, anywhere in the tree.
-# The output_base (~/organized) and softlink_backup_base are always excluded
-# automatically. The built-in safety defaults (.git etc.) are always in force
-# even if you shorten this list — your entries only ADD to them.
-exclude_patterns:
-  # Junk files
-  - ".DS_Store"
-  - "*.pyc"
-  - "*.pyo"
-  - "*.log"
-  - "*.crypt14"
-  - ".Spotlight-V100"
-  - ".TemporaryItems"
-  - ".fseventsd"
-  - ".DocumentRevisions-V100"
-  - ".Trash"
-  - ".Trashes"
-  - ".tmp*"
-  # Version control — back these up with git push, never file sync
-  - ".git"
-  - ".hg"
-  - ".svn"
-  - ".cvs"
-  # Environments and dependencies — recreate from lock files
-  - ".venv"
-  - "venv"
-  - "env"
-  - ".env"
-  - "node_modules"
-  - ".next"
-  - ".nuxt"
-  - "vendor"
-  - "bundle"
-  - ".bundle"
-  - "priv/static"
-  # Build output and caches
-  - "__pycache__"
-  - ".pytest_cache"
-  - ".mypy_cache"
-  - ".tox"
-  - ".cache"
-  - ".parcel-cache"
-  - "coverage"
-  - ".nyc_output"
-  - "elm-stuff"
-  - ".elixir_ls"
-  - ".stack-work"
-  - "_build"
-  - "deps"
-  - "ebin"
-  - "dist"
-  - "build"
-  - "target"
-  - ".gradle"
-  - ".m2"
-  - "tmp/cache"
-
-# Where organized files are stored (with soft links). Use ~ for home directory.
-output_base: "~/organized"
-
-# Log and PID files for the organizer daemon (used by manage_organizer.sh,
-# cli.py, web_app.py, desktop_app.py).
-log_path: "~/.file_organizer.log"
-pid_path: "/tmp/file_organizer.pid"
-
-# ── Legacy softlink-folder handling ────────────────────────────────────────
-# The old file_organiser backed these folders up to ~/organised and replaced
-# them with soft links. That breaks tools like git, so the current default is
-# simply to EXCLUDE them from sync (see exclude_patterns above).
+# =============================================================================
+# file_organizer — ONE config template for both computer and phone
+# =============================================================================
 #
-# softlink_backup_base: where backups would go; leave empty to disable.
-# softlink_folder_patterns: folders that still use the legacy mechanism
-# (empty = off, which is recommended).
-softlink_backup_base: ""
-softlink_folder_patterns: []
+# This single file has two sections:
+#
+#   computer:   settings for the computer program (file_organizer / cli.py /
+#               manage_organizer.sh). Copy this file to config.yaml and edit
+#               the computer: section.
+#
+#   phone:      settings for the phone program (phone_daemon.py, runs on
+#               Android via Termux or on macOS). You do NOT copy or edit a
+#               second template file — when the phone program finds no
+#               phone_daemon_config.yaml it creates one automatically from
+#               this phone: section. Edit phone_daemon_config.yaml on the
+#               phone for per-device changes.
+#
+# RULES
+# - Never use TABS in this file — YAML requires spaces.
+# - Placeholder paths like /Users/janedoe or /Volumes/YourExternalDrive must
+#   be replaced with your real paths. If the program finds a placeholder
+#   path that does not exist, it stops and tells you to edit the config.
+# - The exclusion lists in the two sections should be kept in sync. Even if
+#   you shorten them, the built-in safety defaults (.git, node_modules, …)
+#   always stay in force — your entries only ADD to them.
 
-# Classification used only if the legacy softlink mechanism is enabled.
-# softlink_never_patterns: never replace with a soft link (breaks their tools)
-softlink_never_patterns:
-  - ".git"
-  - ".hg"
-  - ".svn"
-  - ".cvs"
-# softlink_reproducible_patterns: recreate from lock files instead of copying
-softlink_reproducible_patterns:
-  - ".venv"
-  - "venv"
-  - "env"
-  - ".env"
-  - "node_modules"
-  - ".next"
-  - ".nuxt"
-# softlink_build_cache_patterns: build caches — safe to delete or exclude
-softlink_build_cache_patterns:
-  - "__pycache__"
-  - ".pytest_cache"
-  - ".mypy_cache"
-  - ".tox"
-  - ".cache"
-  - ".parcel-cache"
-  - "coverage"
-  - ".nyc_output"
-  - "elm-stuff"
-  - ".elixir_ls"
-  - ".stack-work"
-  - "_build"
-  - "deps"
-  - "ebin"
-  - "dist"
-  - "build"
-  - "target"
-  - ".bundle"
-  - "vendor/bundle"
-  - "priv/static"
-  - ".gradle"
-  - ".m2"
-  - "tmp/cache"
+# =============================================================================
+# computer: — settings for the desktop/laptop program
+# =============================================================================
+computer:
 
-min_file_size: 1024
-max_file_size: 104857600
-enable_content_analysis: true
-# If set true, this will delete duplicate files. See 'source_folders:' above. Use with care. 
-enable_duplicate_detection: false
-# 'enable_folder_sync: true' = sync folders, 'enable_folder_sync: false' = only organize files. See 'sync_pairs' and 'one_way_pairs' above.
-enable_folder_sync: true
+  drives:
+    # Define drive shortcuts here. You can use these names in sync_pairs and
+    # source_folders below. If a drive is not available, the program will
+    # skip it gracefully.
+    MAIN_DRIVE: "/Users/janedoe"
+    EXTERNAL_DRIVE: "/Volumes/YourExternalDrive"
+    PROTON_DRIVE: "/Users/janedoe/ProtonDrive"
+    GOOGLE_DRIVE: "/Users/janedoe/GoogleDrive/MyFiles"
 
-scan_interval: 3600
-flaky_volume_retries: 3
-retry_delay: 5
-use_rsync: true
-rsync_checksum_mode: "timestamp"
+  sync_pairs:
+    # Example: Using drive placeholders (recommended)
+    - folders:
+        - "MAIN_DRIVE/dev"
+        - "EXTERNAL_DRIVE/dev"
 
-# checksum = thorough but SLOW. timestamp = fast (recommended)
-rsync_size_only: false
-rsync_additional_args: []
-# Disable mmap if you see "mmap: Operation canceled" during rsync.
-rsync_disable_mmap: true
-max_drive_usage_percent: 90
-sync_chunk_subfolders: 30
-sync_chunk_concurrency: 1
-sync_timeout_minutes: 60
+    # Example: Using drive placeholders with cloud storage
+    - folders:
+        - "MAIN_DRIVE/Documents"
+        - "GOOGLE_DRIVE/Documents"
 
-# Large folders sync in chunks. Each chunk times out after 60 min to prevent infinite hangs.
-max_soft_links_per_file: 6
+    # Example: You can also use direct paths
+    - folders:
+        - "/Users/janedoe/Pictures"
+        - "/Volumes/YourExternalDrive/Pictures"
 
-# Limit how many categories a single file can be linked to. Prevents over-categorization.
+    # Note: Folders A and B are interchangeable. Files sync bidirectionally based on:
+    #   1. If file exists in A but not B → copy from A to B
+    #   2. If file exists in B but not A → copy from B to A
+    #   3. If file exists in both but A is newer → copy from A to B
+    #   4. If file exists in both but B is newer → copy from B to A
 
-# Semantic categorization: groups keyword categories into ~30 broad categories
-# (e.g. "london" -> "Cities & Places", "subpoena" -> "Legal & Justice")
-# Uses a small sentence-embedding model (~80MB, downloaded on first use).
-enable_semantic_categories: true
-semantic_confidence_threshold: 0.35
-# Lower threshold = more files categorized but less accurate. Range: 0.2 - 0.5
+  one_way_pairs:
+    # Example: One-way backups (source → target). Files only copy from A to B.
+    - folders:
+        - "MAIN_DRIVE/Music"
+        - "PROTON_DRIVE/Music"
 
-ml_content_analysis:
-  enabled: true
-  min_keyword_frequency: 10
-  min_category_size: 5
-  max_categories: 150
-  # min_word_length: 5 avoids short common words. Higher max_categories discovers more topics. 
-  min_word_length: 5
-  stop_words_enabled: true
-# use_clip: false by default (very slow on CPU, ~30min first load)
-  use_clip: false
+    # Example: One-way backups to external drive
+    - folders:
+        - "MAIN_DRIVE/Pictures"
+        - "EXTERNAL_DRIVE/Pictures"
 
-# If 'auto_git' is true, for any folder underneath the auto_git_folders folders which do not have a .git folder in it,
-# do a git init, write a .gitignore, git add ., and git commit. Defaults to false for safety.
-# Use './manage_organizer.sh git-preview' to see which folders would be affected.
-# Use './manage_organizer.sh git-init' to actually run it.
-auto_git: false
-auto_git_folders:
-  - "MAIN_DRIVE/dev"
+  # Optional: roots to scan for duplicate detection when
+  # enable_duplicate_detection is true.
+  # You can use drive placeholders here (e.g. MAIN_DRIVE/Documents).
+  source_folders:
+    - "MAIN_DRIVE/Documents"
+    - "MAIN_DRIVE/Pictures"
 
-# ── Phone pull (ADB-based sync) ──────────────────────────────────────────────
-# Used by phone_pull.sh.  local_stage is where phone files land on this machine
-# (flat, no subdirectories).  remote_stage is what gets synced back to the
-# phone in push mode.  Both resolve drive: references like MAIN_DRIVE, etc.
-# Change these to whatever cloud drive or external disk you use.
-phone_pull:
-  local_stage: "MAIN_DRIVE/misc"
-  remote_stage: "PROTON_DRIVE/My Files/misc"
-  adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
-  # Directories on the phone to pull (relative to /storage/emulated/0).
-  # The phone daemon stages grace-period-filtered, deduped files into
-  # file_organizer_staging, so pull from there rather than the raw folders.
-  phone_source_dirs:
-    - "file_organizer_staging"
-  # Where push mode places files on the phone (also relative). Use a folder
-  # the daemon does NOT scan to avoid copy loops.
-  phone_push_dir: "file_organizer_staging"
-  # Temp staging folder used during pulls. Relative values are joined onto
-  # local_stage. Created and removed on every run.
-  temp_stage: ".tmp_pull"
-  # Android shared-storage root on the phone (Termux: /storage/emulated/0).
-  android_base: "/storage/emulated/0"
-  # Skip files younger than this many minutes (grace period to delete junk
-  # before it gets pulled).
-  min_age_minutes: 5
-  # Where phone_pull.sh remembers per-file mtimes (avoids re-copying).
-  state_file: "~/.phone_pull_state"
-  # Extension filters for pull/push (case-insensitive, dots included).
+  # Folders to scan for creating the ~/organized soft-link tree.
+  # Only documents, images, music, and video files are linked (see
+  # organize_file_types). If empty, falls back to source_folders above.
+  organize_folders:
+    - "MAIN_DRIVE/Documents"
+    - "MAIN_DRIVE/Music"
+    - "MAIN_DRIVE/Pictures"
+
+  # Which file type categories to include in ~/organized.
+  # Options: documents, images, music, video, code, archives, other
+  organize_file_types:
+    - documents
+    - images
+    - music
+    - video
+
+  # Folders matching these patterns have their contents deleted (leaving
+  # empty folders) every time the organizer finds them.
+  empty_folder_patterns:
+    - "node_modules"
+    - "_build"
+    - "deps"
+    - "ebin"
+    - "dist"
+    - "build"
+    - "target"
+    - ".next"
+    - ".nuxt"
+    - ".cache"
+    - ".parcel-cache"
+    - "coverage"
+    - ".nyc_output"
+    - "elm-stuff"
+    - ".elixir_ls"
+    - ".stack-work"
+    - ".bundle"
+    - "vendor"
+    - "bundle"
+    - "priv/static"
+    - ".gradle"
+    - ".m2"
+    - "tmp/cache"
+    - ".tmp*"
+
+  # Files and folders matching these patterns are NEVER copied or synced.
+  # A pattern matches any file or folder with that name, anywhere in the tree.
+  # The output_base (~/organized) and softlink_backup_base are always excluded
+  # automatically. The built-in safety defaults (.git etc.) are always in force
+  # even if you shorten this list — your entries only ADD to them.
+  exclude_patterns:
+    # Junk files
+    - ".DS_Store"
+    - "*.pyc"
+    - "*.pyo"
+    - "*.log"
+    - "*.crypt14"
+    - ".Spotlight-V100"
+    - ".TemporaryItems"
+    - ".fseventsd"
+    - ".DocumentRevisions-V100"
+    - ".Trash"
+    - ".Trashes"
+    - ".tmp*"
+    # Version control — back these up with git push, never file sync
+    - ".git"
+    - ".hg"
+    - ".svn"
+    - ".cvs"
+    # Environments and dependencies — recreate from lock files
+    - ".venv"
+    - "venv"
+    - "env"
+    - ".env"
+    - "node_modules"
+    - ".next"
+    - ".nuxt"
+    - "vendor"
+    - "bundle"
+    - ".bundle"
+    - "priv/static"
+    # Build output and caches
+    - "__pycache__"
+    - ".pytest_cache"
+    - ".mypy_cache"
+    - ".tox"
+    - ".cache"
+    - ".parcel-cache"
+    - "coverage"
+    - ".nyc_output"
+    - "elm-stuff"
+    - ".elixir_ls"
+    - ".stack-work"
+    - "_build"
+    - "deps"
+    - "ebin"
+    - "dist"
+    - "build"
+    - "target"
+    - ".gradle"
+    - ".m2"
+    - "tmp/cache"
+
+  # Where organized files are stored (with soft links). Use ~ for home directory.
+  output_base: "~/organized"
+
+  # Log and PID files for the organizer daemon (used by manage_organizer.sh,
+  # cli.py, web_app.py, desktop_app.py).
+  log_path: "~/.file_organizer.log"
+  pid_path: "/tmp/file_organizer.pid"
+
+  # ── Legacy softlink-folder handling ──────────────────────────────────────
+  # The old file_organiser backed these folders up to ~/organised and replaced
+  # them with soft links. That breaks tools like git, so the current default is
+  # simply to EXCLUDE them from sync (see exclude_patterns above).
+  #
+  # softlink_backup_base: where backups would go; leave empty to disable.
+  # softlink_folder_patterns: folders that still use the legacy mechanism
+  # (empty = off, which is recommended).
+  softlink_backup_base: ""
+  softlink_folder_patterns: []
+
+  # Classification used only if the legacy softlink mechanism is enabled.
+  # softlink_never_patterns: never replace with a soft link (breaks their tools)
+  softlink_never_patterns:
+    - ".git"
+    - ".hg"
+    - ".svn"
+    - ".cvs"
+  # softlink_reproducible_patterns: recreate from lock files instead of copying
+  softlink_reproducible_patterns:
+    - ".venv"
+    - "venv"
+    - "env"
+    - ".env"
+    - "node_modules"
+    - ".next"
+    - ".nuxt"
+  # softlink_build_cache_patterns: build caches — safe to delete or exclude
+  softlink_build_cache_patterns:
+    - "__pycache__"
+    - ".pytest_cache"
+    - ".mypy_cache"
+    - ".tox"
+    - ".cache"
+    - ".parcel-cache"
+    - "coverage"
+    - ".nyc_output"
+    - "elm-stuff"
+    - ".elixir_ls"
+    - ".stack-work"
+    - "_build"
+    - "deps"
+    - "ebin"
+    - "dist"
+    - "build"
+    - "target"
+    - ".bundle"
+    - "vendor/bundle"
+    - "priv/static"
+    - ".gradle"
+    - ".m2"
+    - "tmp/cache"
+
+  min_file_size: 1024
+  max_file_size: 104857600
+  enable_content_analysis: true
+  # If set true, this will delete duplicate files. See 'source_folders:' above. Use with care.
+  enable_duplicate_detection: false
+  # 'enable_folder_sync: true' = sync folders, 'enable_folder_sync: false' = only organize files.
+  # See 'sync_pairs' and 'one_way_pairs' above.
+  enable_folder_sync: true
+
+  scan_interval: 3600
+  flaky_volume_retries: 3
+  retry_delay: 5
+  use_rsync: true
+  rsync_checksum_mode: "timestamp"
+
+  # checksum = thorough but SLOW. timestamp = fast (recommended)
+  rsync_size_only: false
+  rsync_additional_args: []
+  # Disable mmap if you see "mmap: Operation canceled" during rsync.
+  rsync_disable_mmap: true
+  max_drive_usage_percent: 90
+  sync_chunk_subfolders: 30
+  sync_chunk_concurrency: 1
+  sync_timeout_minutes: 60
+
+  # Large folders sync in chunks. Each chunk times out after 60 min to prevent
+  # infinite hangs.
+  max_soft_links_per_file: 6
+
+  # Limit how many categories a single file can be linked to. Prevents over-categorization.
+
+  # Semantic categorization: groups keyword categories into ~30 broad categories
+  # (e.g. "london" -> "Cities & Places", "subpoena" -> "Legal & Justice")
+  # Uses a small sentence-embedding model (~80MB, downloaded on first use).
+  enable_semantic_categories: true
+  semantic_confidence_threshold: 0.35
+  # Lower threshold = more files categorized but less accurate. Range: 0.2 - 0.5
+
+  ml_content_analysis:
+    enabled: true
+    min_keyword_frequency: 10
+    min_category_size: 5
+    max_categories: 150
+    # min_word_length: 5 avoids short common words. Higher max_categories discovers more topics.
+    min_word_length: 5
+    stop_words_enabled: true
+    # use_clip: false by default (very slow on CPU, ~30min first load)
+    use_clip: false
+
+  # If 'auto_git' is true, for any folder underneath the auto_git_folders
+  # folders which does not have a .git folder in it, do a git init, write a
+  # .gitignore, git add ., and git commit. Defaults to false for safety.
+  # Use './manage_organizer.sh git-preview' to see which folders would be affected.
+  # Use './manage_organizer.sh git-init' to actually run it.
+  auto_git: false
+  auto_git_folders:
+    - "MAIN_DRIVE/dev"
+
+  # ── Phone pull (ADB-based sync) ────────────────────────────────────────────
+  # Used by phone_pull.sh.  local_stage is where phone files land on this
+  # machine.  remote_stage is what gets synced back to the phone in push
+  # mode.  Both resolve drive: references like MAIN_DRIVE, etc.
+  # Change these to whatever cloud drive or external disk you use.
+  phone_pull:
+    local_stage: "MAIN_DRIVE/misc"
+    remote_stage: "PROTON_DRIVE/My Files/misc"
+    adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
+    # Directories on the phone to pull (relative to /storage/emulated/0).
+    # The phone daemon stages grace-period-filtered, deduped files into
+    # file_organizer_staging, so pull from there rather than the raw folders.
+    phone_source_dirs:
+      - "file_organizer_staging"
+    # Where push mode places files on the phone (also relative). Use a folder
+    # the daemon does NOT scan to avoid copy loops.
+    phone_push_dir: "file_organizer_staging"
+    # Temp staging folder used during pulls. Relative values are joined onto
+    # local_stage. Created and removed on every run.
+    temp_stage: ".tmp_pull"
+    # Android shared-storage root on the phone (Termux: /storage/emulated/0).
+    android_base: "/storage/emulated/0"
+    # Skip files younger than this many minutes (grace period to delete junk
+    # before it gets pulled).
+    min_age_minutes: 5
+    # Where phone_pull.sh remembers per-file mtimes (avoids re-copying).
+    state_file: "~/.phone_pull_state"
+    # Extension filters for pull/push (case-insensitive, dots included).
+    include_extensions: []
+    exclude_extensions:
+      - ".tmp"
+      - ".temp"
+      - ".partial"
+      - ".crdownload"
+      - ".part"
+      - ".download"
+      - ".crypt14"
+      - ".pyc"
+      - ".log"
+
+# =============================================================================
+# phone: — settings for the phone program (phone_daemon.py)
+# =============================================================================
+# The phone program reads only this section. When it finds no
+# phone_daemon_config.yaml next to it, it creates one from this section
+# automatically, so there is only ONE template file to maintain.
+# =============================================================================
+phone:
+
+  # ── Source directories to monitor ──────────────────────────────────────────
+  # On Android, these are under /storage/emulated/0/
+  # On macOS, use absolute paths like /Users/janedoe/... (replace janedoe with
+  # your real user name — if a path contains a placeholder that does not exist,
+  # the daemon stops and tells you to edit this file).
+  #
+  # Missing directories are skipped silently at scan time, so it is safe to
+  # keep a generous list — the daemon only scans folders that actually exist.
+  #
+  # Note: the Files app's "Images" is a virtual MediaStore collection, not a
+  # real folder. The physical folders behind it are listed below.
+  source_directories:
+    # ── Core Android folders (the four roots of your renamed files) ──
+    # DCIM covers Camera AND (on Samsung) DCIM/Screenshots.
+    - "/storage/emulated/0/DCIM"
+    # Pictures covers Pictures/Screenshots on devices that put them there.
+    - "/storage/emulated/0/Pictures"
+    - "/storage/emulated/0/Documents"
+    - "/storage/emulated/0/Download"
+    # Optional extras — uncomment if you want them:
+    # - "/storage/emulated/0/Movies"
+    # - "/storage/emulated/0/Music"
+    # - "/storage/emulated/0/WhatsApp/Media"
+    # - "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media"
+    # - "/storage/emulated/0/Telegram/Telegram Images"
+    # - "/storage/emulated/0/Android/media/jp.naver.line.android"
+    # Android/data app folders are readable on Android 10 and older only:
+    # - "/storage/emulated/0/Android/data/jp.naver.line.android/storage"
+    # - "/storage/emulated/0/Android/data/org.telegram.messenger"
+    #
+    # macOS example:
+    # - "/Users/janedoe/Desktop"
+    # - "/Users/janedoe/Downloads"
+
+  # ── Target staging folder ──────────────────────────────────────────────────
+  # Files are copied here, preserving relative folder structure.
+  #
+  # On Android: Proton Drive's app has NO continuously-synced local folder, so
+  # files are staged on shared storage and the Mac pulls them later via
+  # phone_pull.sh (USB or wireless debugging) and uploads to Proton Drive.
+  #
+  # IMPORTANT: the staging folder must NOT be inside any source_directories
+  # above (DCIM/Pictures/Documents/Download), or the daemon would re-copy its
+  # own output every scan.
+  #
+  # On macOS (running the daemon on the Mac itself):
+  #   /Users/YOURNAME/Library/CloudStorage/ProtonDrive-.../My Files/misc
+  #
+  # TIP: Run `python3 phone_daemon.py --find-proton` to locate Proton Drive
+  # folders (mainly useful on macOS).
+  target_directory: "/storage/emulated/0/file_organizer_staging"
+
+  # ── Proton Drive candidate paths ───────────────────────────────────────────
+  # Where to look for the Proton Drive folder (`--find-proton` checks these).
+  # Wildcards like * are allowed. Add your own paths here if Proton Drive
+  # lives somewhere unusual; the built-in defaults are used for any paths
+  # you don't override.
+  proton_drive_paths:
+    # macOS
+    - "~/Library/CloudStorage/ProtonDrive-*"
+    # Android — shared storage
+    - "/storage/emulated/0/ProtonDrive"
+    - "/storage/emulated/0/Proton Drive"
+    - "/storage/emulated/0/Documents/ProtonDrive"
+    - "/storage/emulated/0/Download/ProtonDrive"
+    # Android — app media (scoped storage)
+    - "/storage/emulated/0/Android/media/com.protontech.android.drive"
+    # Android — app data (may need root)
+    - "/storage/emulated/0/Android/data/com.protontech.android.drive/files"
+    # Termux shared
+    - "~/storage/shared/ProtonDrive"
+    - "~/storage/shared/Proton Drive"
+
+  # ── Grace period (minutes) ─────────────────────────────────────────────────
+  # Files must be at least this old before the daemon will copy them.
+  # This gives you time to delete unwanted photos BEFORE they get backed up
+  # — solving the Proton Drive "too eager" backup problem.
+  #
+  # Set to 0 to copy immediately. Recommended: 5-10 minutes.
+  min_age_minutes: 10
+
+  # ── Scan interval (seconds) ────────────────────────────────────────────────
+  # How often the daemon checks for new files.
+  # Shorter = more responsive but uses more battery.
+  # Recommended: 60-300 seconds on phone (300 saves battery), 30-60 on desktop.
+  scan_interval_seconds: 300
+
+  # ── Maximum file size (MB) ─────────────────────────────────────────────────
+  # Files larger than this are skipped. 0 = no limit.
+  max_file_size_mb: 500
+
+  # ── Extension filters ──────────────────────────────────────────────────────
+  # include_extensions: if non-empty, ONLY these extensions are copied.
+  #   Example: [".jpg", ".png", ".pdf", ".txt", ".mp4", ".3gp"]
+  #
+  # exclude_extensions: these are NEVER copied (temporary/download-partial and
+  # junk files). The built-in safety defaults (.tmp, .crypt14, .pyc, .log, …)
+  # are always in force — your entries only ADD to them.
+  #
+  # Both lists are case-insensitive. Leave include_extensions empty to copy ALL types.
   include_extensions: []
   exclude_extensions:
     - ".tmp"
@@ -303,3 +460,106 @@ phone_pull:
     - ".pyc"
     - ".log"
 
+  # ── Exclude patterns ───────────────────────────────────────────────────────
+  # Files or folders whose name contains any of these patterns are skipped.
+  # Case-insensitive substring match. Useful for thumbnails, caches, etc.
+  # The built-in safety defaults (.thumbnails, .DS_Store, …) are always in
+  # force — your entries only ADD to them.
+  exclude_patterns:
+    - ".thumbnails"
+    - ".thumbdata"
+    - ".face"
+    - ".pending"
+    - ".trashed"
+    - ".trash"
+    - "thumbdata"
+    - ".cache"
+    - ".tmp"
+    - ".DS_Store"
+    - ".Spotlight-V100"
+    - ".TemporaryItems"
+    - ".fseventsd"
+    - ".DocumentRevisions-V100"
+
+  # ── Exclude folder names (exact match) ────────────────────────────────────
+  # Folders whose name EXACTLY matches one of these patterns are never copied —
+  # neither their contents nor files in them. Unlike exclude_patterns above,
+  # this is an exact match, so "build" skips a folder called "build" but NOT
+  # one called "mybuildings". Matched case-insensitively against the folder
+  # name and its path (so "priv/static" and "tmp/cache" work).
+  # The built-in safety defaults (.git, .venv, node_modules, …) are always in
+  # force — your entries only ADD to them.
+  # Keep in sync with computer.exclude_patterns above.
+  exclude_folder_names:
+    # Version control — back these up with git push, never file sync
+    - ".git"
+    - ".hg"
+    - ".svn"
+    - ".cvs"
+    # Environments and dependencies — recreate from lock files
+    - ".venv"
+    - "venv"
+    - "env"
+    - ".env"
+    - "node_modules"
+    - ".next"
+    - ".nuxt"
+    # Build output and caches
+    - "__pycache__"
+    - ".pytest_cache"
+    - ".mypy_cache"
+    - ".tox"
+    - ".cache"
+    - ".parcel-cache"
+    - "coverage"
+    - ".nyc_output"
+    - "elm-stuff"
+    - ".elixir_ls"
+    - ".stack-work"
+    - "_build"
+    - "deps"
+    - "ebin"
+    - "dist"
+    - "build"
+    - "target"
+    - ".bundle"
+    - "vendor"
+    - "bundle"
+    - "priv/static"
+    - ".gradle"
+    - ".m2"
+    - "tmp/cache"
+
+  # ── Exclude folder patterns (folder NAMES only) ────────────────────────────
+  # Whole folders whose NAME contains any of these patterns are skipped —
+  # but FILES with these words in their names are still copied. This is how
+  # messenger folders (LINE, Twitter, etc.) are excluded without losing a
+  # file like airline-ticket.pdf. Case-insensitive substring match.
+  exclude_folder_patterns:
+    - "line"
+    - "twitter"
+    - "gmail"
+    - "whatsapp"
+    - "telegram"
+
+  # ── Delete after copy? ─────────────────────────────────────────────────────
+  # DANGER: If true, the daemon DELETES the original file after copying.
+  # This keeps your phone clean but you lose the original.
+  # Strongly recommended: keep this FALSE.
+  delete_after_copy: false
+
+  # ── Database path ──────────────────────────────────────────────────────────
+  # SQLite database tracking which files have already been synced.
+  # Uses content hashing so renames don't trigger re-copies.
+  db_path: "~/.phone_daemon.db"
+
+  # ── Prune stale entries after N days ──────────────────────────────────────
+  # If a source file has been deleted for at least this many days, its DB entry
+  # and its staged copy are removed so deleted files never get backed up.
+  prune_max_age_days: 30
+
+  # ── Log path ───────────────────────────────────────────────────────────────
+  log_path: "~/.phone_daemon.log"
+
+  # ── PID file path ──────────────────────────────────────────────────────────
+  pid_path: "~/.phone_daemon.pid"

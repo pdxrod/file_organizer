@@ -122,17 +122,95 @@ class LoadConfigTests(unittest.TestCase):
 
     def test_builtin_parser_matches_pyyaml_on_real_template(self):
         """Parity guard: the built-in parser must produce exactly the same
-        config dict as PyYAML for the shipped template. If this fails, the
-        template has outgrown the supported subset."""
+        phone config dict as PyYAML for the shipped merged template. If this
+        fails, the phone: section has outgrown the supported subset."""
         import yaml as pyyaml
 
         repo_root = Path(__file__).resolve().parent.parent
         template_text = (
-            repo_root / "phone_daemon_config.template.yaml"
+            repo_root / "config_template.yaml"
         ).read_text(encoding="utf-8")
-        expected = pyyaml.safe_load(template_text)
-        actual = phone_daemon._parse_simple_yaml(template_text)
+        expected = pyyaml.safe_load(template_text)["phone"]
+        extracted = phone_daemon._extract_phone_section(template_text)
+        actual = phone_daemon._parse_simple_yaml(extracted)
         self.assertEqual(actual, expected)
+
+    def test_extract_phone_section_leaves_flat_configs_alone(self):
+        flat = "target_directory: /tmp/staging\nmin_age_minutes: 5\n"
+        self.assertEqual(phone_daemon._extract_phone_section(flat), flat)
+
+    def test_extract_phone_section_takes_only_phone_part(self):
+        merged = (
+            "computer:\n"
+            "  output_base: /tmp/organized\n"
+            "  exclude_patterns:\n"
+            "    - \"*.zzz\"\n"
+            "phone:\n"
+            "  target_directory: /tmp/staging\n"
+            "  min_age_minutes: 5\n"
+        )
+        extracted = phone_daemon._extract_phone_section(merged)
+        self.assertIn("target_directory: /tmp/staging", extracted)
+        self.assertNotIn("computer:", extracted)
+        self.assertNotIn("output_base", extracted)
+
+    def test_missing_config_created_from_merged_template_phone_section(self):
+        """With the merged config_template.yaml next to the daemon, a missing
+        phone config must be created from the phone: section only."""
+        merged = self.dir / "config_template.yaml"
+        merged.write_text(
+            "computer:\n"
+            "  output_base: /tmp/organized\n"
+            "phone:\n"
+            "  target_directory: /storage/emulated/0/staging\n"
+            "  min_age_minutes: 7\n"
+        )
+        cfg = phone_daemon.load_config(str(self.config))
+        self.assertEqual(cfg["target_directory"], "/storage/emulated/0/staging")
+        self.assertEqual(cfg["min_age_minutes"], 7)
+        self.assertNotIn("computer", cfg)
+        self.assertTrue(self.config.exists())
+        # The written live config must be flat and parseable by the built-in
+        # parser too (Termux has no PyYAML).
+        written = self.config.read_text(encoding="utf-8")
+        self.assertNotIn("computer:", written)
+        self.assertIn("target_directory: /storage/emulated/0/staging", written)
+        self.assertEqual(
+            phone_daemon._parse_simple_yaml(written),
+            {"target_directory": "/storage/emulated/0/staging",
+             "min_age_minutes": 7},
+        )
+
+    def test_merged_template_works_without_pyyaml(self):
+        """The textual phone-section extraction must work when PyYAML is
+        unavailable (Termux)."""
+        self.template.write_text(
+            "computer:\n"
+            "  output_base: /tmp/organized\n"
+            "phone:\n"
+            "  target_directory: /storage/emulated/0/staging\n"
+            "  min_age_minutes: 5\n"
+        )
+        self.template.rename(self.dir / "config_template.yaml")
+        self.config.write_text("")
+        orig_yaml = sys.modules.get("yaml")
+        sys.modules["yaml"] = None
+        try:
+            cfg = phone_daemon.load_config(str(self.config))
+        finally:
+            if orig_yaml is None:
+                sys.modules.pop("yaml", None)
+            else:
+                sys.modules["yaml"] = orig_yaml
+        self.assertEqual(cfg["target_directory"], "/storage/emulated/0/staging")
+        self.assertEqual(cfg["min_age_minutes"], 5)
+
+    def test_legacy_flat_phone_template_still_honoured(self):
+        """Existing phone_daemon_config.template.yaml files keep working
+        (copied verbatim when no config_template.yaml is present)."""
+        self.template.write_text(TEMPLATE_YAML)
+        cfg = phone_daemon.load_config(str(self.config))
+        self.assertEqual(cfg["target_directory"], "/storage/emulated/0/staging")
 
     def test_json_config_still_parses_without_pyyaml(self):
         """The JSON fallback must keep working when PyYAML is unavailable."""

@@ -77,10 +77,10 @@ check_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${YELLOW}No config found at $CONFIG_FILE${NC}"
         echo
-        echo "Creating starter config from template..."
-        if [ -f "$SCRIPT_DIR/phone_daemon_config.template.yaml" ]; then
-            cp "$SCRIPT_DIR/phone_daemon_config.template.yaml" "$CONFIG_FILE"
-            echo -e "${GREEN}✔ Created $CONFIG_FILE from template — includes common Android folders.${NC}"
+        echo "Creating starter config from the phone: section of config_template.yaml..."
+        if [ -f "$SCRIPT_DIR/config_template.yaml" ] || [ -f "$SCRIPT_DIR/phone_daemon_config.template.yaml" ]; then
+            $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --make-config
+            echo -e "${GREEN}✔ Created $CONFIG_FILE from the template — includes common Android folders.${NC}"
             echo
             echo -e "${YELLOW}⚠  Review $CONFIG_FILE before running:${NC}"
             echo "  - source_directories lists DCIM/Pictures/Documents/Download plus app media"
@@ -269,8 +269,8 @@ cmd_setup() {
     if [ -f "$CONFIG_FILE" ]; then
         echo -e "${GREEN}✔ Config exists at $CONFIG_FILE${NC}"
     else
-        cp "$SCRIPT_DIR/phone_daemon_config.template.yaml" "$CONFIG_FILE"
-        echo -e "${GREEN}✔ Created $CONFIG_FILE${NC}"
+        $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --make-config
+        echo -e "${GREEN}✔ Created $CONFIG_FILE from the phone: section of config_template.yaml${NC}"
     fi
 
     echo

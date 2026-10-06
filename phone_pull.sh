@@ -36,7 +36,11 @@ CONFIG_YAML="${SCRIPT_DIR}/config.yaml"
 _load_config() {
     python3 <<PYEOF
 import sys, os, yaml, shlex
-cfg = yaml.safe_load(open('$CONFIG_YAML'))
+cfg = yaml.safe_load(open('$CONFIG_YAML')) or {}
+# Since the single-template merge (item 5), config.yaml is generated from
+# the computer: section — accept both sectioned and legacy flat formats.
+if isinstance(cfg, dict) and isinstance(cfg.get('computer'), dict):
+    cfg = cfg['computer']
 drives = cfg.get('drives', {})
 
 def resolve(path):

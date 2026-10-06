@@ -48,10 +48,10 @@ DEFAULT_LOG = "~/.phone_daemon.log"
 DEFAULT_PID = "~/.phone_daemon.pid"
 
 # Built-in safety defaults. The live, editable copies of these lists live in
-# phone_daemon_config.template.yaml (proton_drive_paths, exclude_extensions,
-# exclude_patterns, exclude_folder_names). User config lists are MERGED on top
-# of these rather than replacing them, so junk never gets copied even with a
-# config file created before these rules existed.
+# the phone: section of config_template.yaml (proton_drive_paths,
+# exclude_extensions, exclude_patterns, exclude_folder_names). User config
+# lists are MERGED on top of these rather than replacing them, so junk never
+# gets copied even with a config file created before these rules existed.
 
 # Common Proton Drive paths on various platforms (fallback for the
 # proton_drive_paths config key).
@@ -72,7 +72,8 @@ DEFAULT_PROTON_CANDIDATES = [
     "~/storage/shared/Proton Drive",
 ]
 
-# Extensions never copied. Keep in sync with phone_daemon_config.template.yaml.
+# Extensions never copied. Keep in sync with the phone: section of
+# config_template.yaml.
 DEFAULT_EXCLUDE_EXTENSIONS = [
     ".tmp", ".temp", ".partial", ".crdownload", ".part", ".download",
     ".crypt14", ".pyc", ".log",
@@ -90,7 +91,7 @@ DEFAULT_EXCLUDE_PATTERNS = [
 # Exact folder-name patterns (case-insensitive, fnmatch). Matched against the
 # folder name and its path relative to the source root, so "priv/static" and
 # "tmp/cache" work. Exact matching means "build" never hits a folder called
-# "mybuildings". Keep in sync with phone_daemon_config.template.yaml.
+# "mybuildings". Keep in sync with the phone: section of config_template.yaml.
 DEFAULT_EXCLUDE_FOLDER_NAMES = [
     # Version control — back these up with git push, never file sync
     ".git", ".hg", ".svn", ".cvs",
@@ -168,12 +169,61 @@ def _expand_path(raw: str) -> str:
 
 
 def _find_template(config_path: Path) -> Optional[Path]:
-    """Locate a template config next to the config path or next to this script."""
+    """Locate a template config next to the config path or next to this script.
+
+    Since the single-template merge (item 5) the canonical template is
+    config_template.yaml, whose `phone:` section is extracted. The legacy
+    phone_daemon_config.template.yaml is still honoured if present.
+    """
     candidates = [
+        config_path.parent / "config_template.yaml",
         config_path.parent / "phone_daemon_config.template.yaml",
+        Path(__file__).resolve().parent / "config_template.yaml",
         Path(__file__).resolve().parent / "phone_daemon_config.template.yaml",
     ]
     return next((t for t in candidates if t.exists()), None)
+
+
+def _extract_phone_section(content: str) -> str:
+    """Extract the `phone:` section of a merged config template as flat YAML.
+
+    The merged config_template.yaml has `computer:` and `phone:` sections.
+    The phone daemon only needs the phone: part, and its built-in YAML
+    parser only understands the flat subset, so we slice the phone block
+    textually (top-level keys at column 0 mark section boundaries) and
+    de-dent it.
+
+    If there is no `phone:` section, the content is returned unchanged
+    (legacy flat phone config).
+    """
+    lines = content.splitlines()
+    out = []
+    in_phone = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line.startswith((" ", "\t")):
+            # Top-level key: enter/leave the phone section.
+            in_phone = stripped == "phone:" or stripped.startswith("phone: ")
+            continue
+        if in_phone:
+            # De-dent the two-space section indent.
+            out.append(line[2:] if line.startswith("  ") else line)
+    if not out:
+        return content
+    return "\n".join(out)
+
+
+def _select_phone_config(cfg):
+    """Return the phone-relevant config dict.
+
+    Accepts either a merged template dict (with a `phone:` key) or a legacy
+    flat phone config dict.
+    """
+    if isinstance(cfg, dict) and isinstance(cfg.get("phone"), dict):
+        return cfg["phone"]
+    return cfg
 
 
 def _parse_simple_scalar(token: str):
@@ -274,19 +324,41 @@ def _parse_simple_yaml(content: str) -> dict:
     return cfg
 
 
+def _make_phone_config_from_template(template: Path, config_path: Path) -> None:
+    """Write a live phone config from a template.
+
+    The merged config_template.yaml contributes only its `phone:` section
+    (de-dented, so it stays inside the built-in parser's flat subset). A
+    legacy flat phone_daemon_config.template.yaml is copied verbatim.
+    """
+    content = template.read_text(encoding="utf-8")
+    if template.name == "config_template.yaml":
+        header = (
+            "# Generated from config_template.yaml (the phone: section).\n"
+            "# Edit THIS file for per-device settings — the template's\n"
+            "# phone: section is the source of defaults. No tabs in YAML!\n"
+        )
+        config_path.write_text(
+            header + _extract_phone_section(content), encoding="utf-8"
+        )
+    else:
+        shutil.copy2(template, config_path)
+
+
 def load_config(path: str) -> dict:
     """Load config from YAML (preferred) or JSON file. Returns dict.
 
     If the config file does not exist and a template is available next to
-    the config path or next to this script, the template is copied to the
-    config path automatically so the daemon has a real, editable config.
+    the config path or next to this script, a live config is created from
+    the template automatically (for the merged config_template.yaml, only
+    its `phone:` section) so the daemon has a real, editable config.
     """
     config_path = Path(path).expanduser().resolve()
 
     if not config_path.exists():
         template = _find_template(config_path)
         if template is not None:
-            shutil.copy2(template, config_path)
+            _make_phone_config_from_template(template, config_path)
             logger.warning(
                 "No config found at %s — created it from %s. "
                 "Review source_directories and target_directory, then re-run.",
@@ -295,9 +367,9 @@ def load_config(path: str) -> dict:
             )
         else:
             logger.warning(
-                "No config found at %s — using built-in defaults. "
-                "Copy phone_daemon_config.template.yaml to phone_daemon_config.yaml "
-                "to set your own paths.",
+                "No config found at %s and no template available — using "
+                "built-in defaults. Copy config_template.yaml next to this "
+                "script to get an editable config.",
                 config_path,
             )
             return _default_config()
@@ -310,7 +382,7 @@ def load_config(path: str) -> dict:
     if not content.strip():
         template = _find_template(config_path)
         if template is not None:
-            shutil.copy2(template, config_path)
+            _make_phone_config_from_template(template, config_path)
             content = config_path.read_text(encoding="utf-8")
             logger.warning(
                 "Config at %s was empty — replaced it from %s. "
@@ -331,14 +403,14 @@ def load_config(path: str) -> dict:
         import yaml
         cfg = yaml.safe_load(content)
         if cfg:
-            return cfg
+            return _select_phone_config(cfg)
     except ImportError:
         # Termux no longer ships a python-pyyaml package and a pip install
         # would need the clang toolchain, so use the built-in parser for the
         # flat config subset this daemon uses (unless the content is JSON).
         if not content.lstrip().startswith(("{", "[")):
             try:
-                cfg = _parse_simple_yaml(content)
+                cfg = _parse_simple_yaml(_extract_phone_section(content))
                 logger.info("PyYAML not installed — using built-in YAML parser.")
                 return cfg
             except ValueError as e:
@@ -1055,6 +1127,10 @@ def main():
         help="Stop a running daemon",
     )
     parser.add_argument(
+        "--make-config", action="store_true",
+        help="Create phone_daemon_config.yaml from the template if missing, then exit",
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true",
         help="Verbose logging",
     )
@@ -1062,6 +1138,12 @@ def main():
     args.config = resolve_config_path(args.config)
 
     # ── Special commands ──
+
+    if args.make_config:
+        cfg = load_config(args.config)
+        print(f"Config ready at {args.config} "
+              f"({len(cfg)} settings). Edit it and run again.")
+        return
 
     if args.find_proton:
         cfg = load_config(args.config)

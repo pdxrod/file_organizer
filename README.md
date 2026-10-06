@@ -356,15 +356,17 @@ termux-setup-storage
 pkg install python procps
 
 # 4. Get the daemon and config (via ADB or git clone):
-#    adb push phone_daemon.py phone_daemon_config.template.yaml manage_phone_daemon.sh /sdcard/Download/
+#    adb push phone_daemon.py config_template.yaml manage_phone_daemon.sh /sdcard/Download/
 #    or, in Termux: git clone https://github.com/pdxrod/file_organizer.git
 
 # 5. In Termux, put the files in your working directory:
 cp ~/storage/shared/Download/phone_daemon.py ~/file_organizer/ 2>/dev/null || true
+cp ~/storage/shared/Download/config_template.yaml ~/file_organizer/ 2>/dev/null || true
 
-# 6. Create your own config from the template (the live config is
-#    git-ignored, so your edits never conflict with git pull):
-cp phone_daemon_config.template.yaml phone_daemon_config.yaml
+# 6. Create your own config — the daemon does this automatically from the
+#    phone: section of config_template.yaml (the live config is git-ignored,
+#    so your edits never conflict with git pull):
+python3 phone_daemon.py --make-config
 
 # 7. Edit the config: set target_directory to a staging folder on shared
 #    storage (NOT inside DCIM/Pictures/Documents/Download — the daemon scans
