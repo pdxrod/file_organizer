@@ -307,6 +307,28 @@ class OutputBaseItem15Tests(unittest.TestCase):
         text = template.read_text(encoding="utf-8")
         self.assertIn('output_base: "organized"', text)
 
+    def test_ensure_output_dir_creates_configured_folder(self):
+        from file_organizer.config import ensure_output_dir
+        cfg = self._load(f"output_base: {self.dir}/custom-organized\n")
+        out = ensure_output_dir(cfg)
+        self.assertEqual(out, self.dir / "custom-organized")
+        self.assertTrue(out.is_dir())
+
+    def test_ensure_output_dir_creates_default_folder(self):
+        # The default resolves to <file_organizer folder>/organized; point
+        # find_project_root at the temp dir so the test never touches the
+        # real project folder.
+        import file_organizer.config as cfgmod
+        from file_organizer.config import ensure_output_dir
+        from unittest import mock
+        with mock.patch.object(
+            cfgmod, "find_project_root", return_value=self.dir
+        ):
+            cfg = self._load()  # no output_base key → default resolution
+            out = ensure_output_dir(cfg)
+        self.assertEqual(out, self.dir / "organized")
+        self.assertTrue(out.is_dir())
+
 
 class StagingMapItem12bTests(unittest.TestCase):
     """Item 12b: phone staging subfolders map to computer folders.

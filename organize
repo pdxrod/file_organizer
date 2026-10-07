@@ -391,7 +391,13 @@ def computer_setup(log):
     cfg_path = computer_config_path()
     if not cfg_path.exists():
         run_computer_cli(["--scan-once"])  # creates starter + report
+    out_dir = computer_output_base()
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     log("")
+    log(f"Soft-link folder (replaces ~/organized): {out_dir}")
     log("Next steps:")
     log(f"  1. Edit {cfg_path} (TextEdit on Mac, Notepad on Windows, nano on Termux).")
     log("     - Set your real paths under 'drives:' and 'source_folders:'.")

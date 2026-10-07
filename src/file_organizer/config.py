@@ -665,6 +665,20 @@ def map_staging_path(rel_path, drives, staging_map, misc_dir: str):
     return os.path.expanduser(misc_dir), rel_path
 
 
+def ensure_output_dir(config: Config) -> Path:
+    """Item 15: make sure the organized soft-link folder exists.
+
+    The folder is the replacement for ~/organized and lives inside the
+    file_organizer folder by default (configurable via output_base).
+    Creating it eagerly — even in dry-run mode — means users can always
+    see where their links will go. Returns the folder path.
+    """
+    raw = config.data.get("output_base") if config is not None else None
+    path = Path(raw) if raw else Path(find_project_root() / "organized")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def resolve_log_path(config_path: Optional[str] = None) -> str:
     """Read log_path from a config.yaml, falling back to the default.
 

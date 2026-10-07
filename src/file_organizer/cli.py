@@ -4,7 +4,7 @@
 import os, sys, argparse, logging, signal, time
 from pathlib import Path
 
-from file_organizer.config import Config, ConfigError, report_first_run, resolve_log_path, find_project_root
+from file_organizer.config import Config, ConfigError, report_first_run, resolve_log_path, find_project_root, ensure_output_dir
 from file_organizer.scanner import FileScanner
 from file_organizer.analyzer import ContentAnalyzer
 from file_organizer.organizer import Organizer
@@ -226,6 +226,11 @@ def main(argv=None):
         # First-run UX (item 9): tell the user whether the template paths
         # will work and exactly how to finish editing.
         report_first_run(str(config_path))
+        # Item 15: create the organized folder up front so the user can see
+        # where the soft links will live.
+        default_out = find_project_root() / "organized"
+        default_out.mkdir(parents=True, exist_ok=True)
+        logger.info("Organized folder (where soft links will go): %s", default_out)
         return
 
     try:
@@ -239,6 +244,12 @@ def main(argv=None):
         )
         sys.exit(1)
     logger.info("Loaded config from %s", config_path)
+
+    # Item 15: the organized folder (replacement for ~/organized) lives
+    # inside the file_organizer folder by default. Create it up front so
+    # it is always visible, even in dry-run mode.
+    out_dir = ensure_output_dir(config)
+    logger.info("Organized folder: %s", out_dir)
 
     if args.create_test:
         from file_organizer.test_env import create_test_environment
