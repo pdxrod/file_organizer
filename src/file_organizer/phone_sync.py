@@ -47,6 +47,12 @@ try:
 except ImportError:  # pragma: no cover - standalone script execution
     from rename_family import parse_family, plan_collapse, apply_collapse
 
+# App-generated name gate + leading-date normalisation (item 13).
+try:
+    from .filename_rules import is_app_generated, normalise_leading_date
+except ImportError:  # pragma: no cover - standalone script execution
+    from filename_rules import is_app_generated, normalise_leading_date
+
 # ── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_CONFIG = "phone_sync_config.yaml"
@@ -579,6 +585,11 @@ def _default_config() -> dict:
         # Item 10: collapse foo (1).png rename families in the source dirs.
         # Off by default because it deletes files; preview with --dry-run.
         "collapse_rename_families": False,
+        # Item 13: hold app-generated filenames (Screenshot_…,
+        # YYYYMMDD_HHMMSS.jpg, IMG-YYYYMMDD-WA0001.jpg, …) until renamed;
+        # normalise leading dates like 2026-09-23-… to YYYYMMDD when copying.
+        "hold_app_generated_names": True,
+        "normalise_leading_dates": True,
         "delete_after_copy": False,  # DANGER: only set true if you know what you're doing
         "db_path": DEFAULT_DB,
         "log_path": DEFAULT_LOG,
@@ -941,6 +952,14 @@ class PhoneSync:
         self.collapse_rename_families = bool(
             self.config.get("collapse_rename_families", False)
         )
+        # Item 13: app-generated names are held until renamed; leading
+        # dates are normalised to YYYYMMDD on the staged copy.
+        self.hold_app_generated_names = bool(
+            self.config.get("hold_app_generated_names", True)
+        )
+        self.normalise_leading_dates = bool(
+            self.config.get("normalise_leading_dates", True)
+        )
         # Idle backoff (item 14).
         self.backoff_factor = int(
             self.config.get("idle_backoff_factor", 2) or 2
@@ -1008,11 +1027,14 @@ class PhoneSync:
         pid_path = Path(_expand_path(self.config.get("pid_path", DEFAULT_PID)))
         pid_path.unlink(missing_ok=True)
 
-    def copy_file(self, source: Path, dry_run: bool = False) -> Optional[Path]:
+    def copy_file(self, source: Path, dry_run: bool = False,
+                  dest_name: Optional[str] = None) -> Optional[Path]:
         """Copy a file to the target directory, preserving relative structure.
 
         The target path mirrors the source structure under target_dir.
         For example, DCIM/Camera/IMG_001.jpg → <target>/DCIM/Camera/IMG_001.jpg
+        dest_name overrides the final filename (used by item 13's leading
+        date normalisation: 2026-09-23-party.jpg → 20260923-party.jpg).
 
         Returns the final target path on success (or the would-be target in
         dry-run mode), or None on failure. Copies are atomic: data is written
@@ -1034,6 +1056,9 @@ class PhoneSync:
         if rel_path is None:
             # File is not under any configured source dir — use just the filename
             rel_path = Path(source.name)
+
+        if dest_name:
+            rel_path = rel_path.parent / dest_name
 
         target = self.target_dir / rel_path
 
@@ -1167,7 +1192,8 @@ class PhoneSync:
 
     def scan_and_sync(self, dry_run: bool = False) -> dict:
         """Run one scan-and-sync cycle. Returns stats dict."""
-        stats = {"scanned": 0, "copied": 0, "skipped": 0, "errors": 0, "bytes": 0}
+        stats = {"scanned": 0, "copied": 0, "skipped": 0, "errors": 0,
+                 "bytes": 0, "held": 0}
 
         # Item 10: (N)-family collapse before copying, when enabled.
         collapse = self._collapse_rename_families_cycle(dry_run=dry_run)
@@ -1189,6 +1215,14 @@ class PhoneSync:
         ):
             stats["scanned"] += 1
 
+            # Item 13: hold app-generated names until the user renames them.
+            if self.hold_app_generated_names and is_app_generated(filepath.name):
+                stats["held"] += 1
+                logger.info(
+                    "Held until renamed (app-generated name): %s", filepath
+                )
+                continue
+
             # Hash the file
             file_hash = hash_file(filepath, self.max_size_mb)
             if file_hash is None:
@@ -1202,8 +1236,16 @@ class PhoneSync:
                 stats["skipped"] += 1
                 continue
 
-            # Copy it
-            target_path = self.copy_file(filepath, dry_run=dry_run)
+            # Copy it. Item 13: normalise a leading date (2026-09-23-party.jpg
+            # → 20260923-party.jpg) on the STAGED copy; the source keeps its
+            # name.
+            dest_name = None
+            if self.normalise_leading_dates:
+                new_name = normalise_leading_date(filepath.name)
+                if new_name != filepath.name:
+                    dest_name = new_name
+            target_path = self.copy_file(filepath, dry_run=dry_run,
+                                         dest_name=dest_name)
             if target_path is not None:
                 if not dry_run:
                     self.db.mark_synced(
@@ -1229,9 +1271,10 @@ class PhoneSync:
         stats = self.scan_and_sync(dry_run=dry_run)
 
         logger.info(
-            "Scan complete: scanned=%d copied=%d skipped=%d errors=%d bytes=%s",
+            "Scan complete: scanned=%d copied=%d skipped=%d held=%d "
+            "errors=%d bytes=%s",
             stats["scanned"], stats["copied"], stats["skipped"],
-            stats["errors"], human_bytes(stats["bytes"]),
+            stats["held"], stats["errors"], human_bytes(stats["bytes"]),
         )
 
         # Prune stale entries periodically (deletes staged copies too)

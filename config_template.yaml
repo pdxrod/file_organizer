@@ -355,6 +355,12 @@ computer:
     #   "DCIM/Camera": "MAIN_DRIVE/Pictures/Camera"
     # Where phone_pull.sh remembers per-file mtimes (avoids re-copying).
     state_file: "~/.phone_pull_state"
+    # Item 13 — hold app-generated filenames (Screenshot_…,
+    # YYYYMMDD_HHMMSS.jpg, IMG-YYYYMMDD-WA0001.jpg, …) until you rename
+    # them; normalise leading dates like 2026-09-23-… to YYYYMMDD on the
+    # copy. Both default to true.
+    hold_app_generated_names: true
+    normalise_leading_dates: true
     # Extension filters for pull/push (case-insensitive, dots included).
     include_extensions: []
     exclude_extensions:
@@ -464,6 +470,20 @@ phone:
   # younger than min_age_minutes are left alone. Preview with
   # './organize test' (dry-run log shows the planned renames/deletes).
   collapse_rename_families: false
+
+  # Item 13 — hold app-generated filenames (Screenshot_…,
+  # YYYYMMDD_HHMMSS.jpg, IMG-YYYYMMDD-WA0001.jpg, PXL_…, …) until you
+  # rename them to something meaningful; such files are NOT copied.
+  # A timestamp with real words added (e.g.
+  # 20231203_014527_lehmann_shulevitz_hard_moral_choices.jpg) counts as
+  # renamed and IS copied.
+  hold_app_generated_names: true
+
+  # Item 13 — normalise a leading date in a filename to YYYYMMDD on the
+  # STAGED copy (the original keeps its name), e.g.
+  # 2026-09-23-party.jpg → 20260923-party.jpg,
+  # IMG-2026-01-01-birthday.jpg → IMG-20260101-birthday.jpg.
+  normalise_leading_dates: true
 
   # ── Scan interval (seconds) ────────────────────────────────────────────────
   # How often the daemon checks for new files.

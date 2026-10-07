@@ -350,6 +350,8 @@ highlights:
 | `include_extensions` / `exclude_extensions` | Extension filters |
 | `exclude_patterns` / `exclude_folder_names` | Never-copy lists (merged with defaults) |
 | `proton_drive_paths` | Where `--find-proton` looks |
+| `hold_app_generated_names` | Hold `Screenshot_…`, `YYYYMMDD_HHMMSS.jpg` etc. until renamed (item 13) |
+| `normalise_leading_dates` | `2026-09-23-party.jpg` → `20260923-party.jpg` on the copy (item 13) |
 
 ## Safety checklist before real runs
 

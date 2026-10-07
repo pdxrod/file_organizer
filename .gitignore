@@ -32,6 +32,8 @@ test/organized/something/
 /config.yaml.bak
 /phone_daemon_config.yaml
 /phone_sync_config.yaml
+# The soft-link folder (item 15) lives inside this file_organizer folder
+/organized
 __pycache__/
 *.py[cod]
 *$py.class

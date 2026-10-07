@@ -130,6 +130,12 @@ for prefix, dest in staging_map.items():
     resolved = resolve(str(dest))
     tsv_lines.append(f'{prefix}\t{resolved}')
 print('STAGING_MAP_TSV=' + shlex.quote('\n'.join(tsv_lines)))
+
+# Item 13: hold app-generated names until renamed; normalise leading dates.
+hold = pp.get('hold_app_generated_names', True)
+normalise = pp.get('normalise_leading_dates', True)
+print('HOLD_APP_GENERATED=' + ('true' if hold else 'false'))
+print('NORMALISE_DATES=' + ('true' if normalise else 'false'))
 PYEOF
 }
 
@@ -143,6 +149,33 @@ eval "$(_load_config)"
 : "${MAIN_DRIVE:=}"
 : "${MISC_DIR:=${LOCAL_STAGE}}"
 : "${STAGING_MAP_TSV:=}"
+: "${HOLD_APP_GENERATED:=true}"
+: "${NORMALISE_DATES:=true}"
+
+# Item 13 helpers — reuse the shared filename rules from the package.
+PY_SRC="$(dirname "$CONFIG_YAML")/src"
+
+name_is_app_generated() {
+    PYTHONPATH="$PY_SRC" python3 - "$1" <<'PYEOF'
+import sys
+try:
+    from file_organizer.filename_rules import is_app_generated
+    print("yes" if is_app_generated(sys.argv[1]) else "no")
+except Exception:
+    print("no")
+PYEOF
+}
+
+normalise_name() {
+    PYTHONPATH="$PY_SRC" python3 - "$1" <<'PYEOF'
+import sys
+try:
+    from file_organizer.filename_rules import normalise_leading_date
+    print(normalise_leading_date(sys.argv[1]))
+except Exception:
+    print(sys.argv[1])
+PYEOF
+}
 
 # Item 12b: map a staging-relative directory to its computer folder.
 # Prints "<dest_dir>\t<remainder>". Rules, in order:
@@ -345,12 +378,24 @@ do_pull() {
         for phone_dir in "${valid_dirs[@]}"; do
             "$ADB" -s "$device_id" shell "find '$phone_dir' -type f 2>/dev/null" 2>/dev/null | while IFS= read -r f; do
                 [[ -z "$f" ]] && continue
-                local rel="${f#$ANDROID_BASE/}"
-                local rel_dir="${rel%/*}"
+                local fname rel rel_dir mapped held dest_fname
+                fname=$(basename "$f")
+                rel="${f#$ANDROID_BASE/}"
+                rel_dir="${rel%/*}"
                 [[ "$rel_dir" == "$rel" ]] && rel_dir=""
-                local mapped
+                if [[ "$HOLD_APP_GENERATED" == "true" ]]; then
+                    held=$(name_is_app_generated "$fname")
+                    if [[ "$held" == "yes" ]]; then
+                        info "[DRY-RUN]   HOLD until renamed: $f"
+                        continue
+                    fi
+                fi
+                dest_fname="$fname"
+                if [[ "$NORMALISE_DATES" == "true" ]]; then
+                    dest_fname=$(normalise_name "$fname")
+                fi
                 mapped=$(map_dest_root "$rel_dir")
-                info "[DRY-RUN]   $f → ${mapped%%$'\t'*}/$(basename "$f")"
+                info "[DRY-RUN]   $f → ${mapped%%$'\t'*}/$dest_fname"
             done
         done
         return 0
