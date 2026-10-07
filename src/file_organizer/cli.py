@@ -55,6 +55,7 @@ def run_full_cycle(config: Config, dry_run: bool = False):
         "sync_changes": 0,
         "dedup_removed": 0,
         "git_initialized": 0,
+        "collapse_changes": 0,
     }
     sync_thread = None
     scanner = FileScanner(config)
@@ -151,8 +152,43 @@ def run_full_cycle(config: Config, dry_run: bool = False):
         logger.info("Dedup: %s", dedup_summary)
         actions["dedup_removed"] += dedup_summary.get("removed", 0)
 
+    # 8. (N)-rename-family collapse (item 10). Deleting siblings is
+    # destructive, so it runs only when the config flag is on AND we are
+    # not in dry-run. Use `--collapse-renames` for a dry-run preview.
+    if config.raw_config.get("collapse_rename_families", False):
+        logger.info("Collapsing (N)-rename families...")
+        collapse_stats = _run_collapse(config, dry_run=dry_run)
+        logger.info("Collapse: %s", collapse_stats)
+        actions["collapse_changes"] += (
+            collapse_stats.get("renamed", 0) + collapse_stats.get("deleted", 0)
+        )
+
     logger.info("=== Cycle complete ===")
     return actions, sync_thread
+
+
+def _collapse_folders(config: Config):
+    """Folders to scan for (N)-rename families: organize_folders, falling
+    back to source_folders."""
+    return (
+        config.raw_config.get("organize_folders")
+        or config.raw_config.get("source_folders")
+        or []
+    )
+
+
+def _run_collapse(config: Config, dry_run: bool = True) -> dict:
+    """Plan (and optionally apply) the (N)-family collapse across the
+    configured folders. Returns stats {"renamed", "deleted"}."""
+    from file_organizer.rename_family import collapse_in_tree, apply_collapse
+    actions = []
+    for folder in _collapse_folders(config):
+        root = Path(folder)
+        if not root.exists():
+            logger.warning("Collapse: skipping missing folder %s", root)
+            continue
+        actions.extend(collapse_in_tree(root))
+    return apply_collapse(actions, dry_run=dry_run)
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="File Organizer v2")
@@ -163,6 +199,9 @@ def main(argv=None):
     parser.add_argument("--git-preview", action="store_true", help="Preview which folders would get git init (no changes)")
     parser.add_argument("--git-init", action="store_true", help="Run auto-git: init, .gitignore, add, commit")
     parser.add_argument("--cleanup", action="store_true", help="Remove broken and stale symlinks from ~/organized")
+    parser.add_argument("--collapse-renames", action="store_true",
+                        help="Collapse 'foo (1).png' rename families — shows a "
+                             "plan, applies only with --REAL")
     parser.add_argument("--create-test", action="store_true", help="Create test environment")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
@@ -204,6 +243,27 @@ def main(argv=None):
     if args.create_test:
         from file_organizer.test_env import create_test_environment
         create_test_environment(config)
+        return
+
+    if args.collapse_renames:
+        # Item 10: plan first, apply only with --REAL.
+        from file_organizer.rename_family import (
+            collapse_in_tree, format_actions, apply_collapse,
+        )
+        actions = []
+        for folder in _collapse_folders(config):
+            root = Path(folder)
+            if not root.exists():
+                logger.warning("Collapse: skipping missing folder %s", root)
+                continue
+            actions.extend(collapse_in_tree(root))
+        print("=== Rename-family collapse plan ===")
+        print(format_actions(actions))
+        if real_mode:
+            stats = apply_collapse(actions, dry_run=False)
+            print(f"Applied: {stats}")
+        else:
+            print("No changes made. Run with --REAL to apply.")
         return
 
     if args.sync_only and real_mode:

@@ -298,11 +298,19 @@ computer:
   # If 'auto_git' is true, for any folder underneath the auto_git_folders
   # folders which does not have a .git folder in it, do a git init, write a
   # .gitignore, git add ., and git commit. Defaults to false for safety.
-  # Use './manage_organizer.sh git-preview' to see which folders would be affected.
-  # Use './manage_organizer.sh git-init' to actually run it.
+  # Use './organize git-preview' to see which folders would be affected.
+  # Use './organize git-init' to actually run it.
   auto_git: false
   auto_git_folders:
     - "MAIN_DRIVE/dev"
+
+  # Item 10 — collapse 'foo (1).png' rename families (made by the Mac or a
+  # phone when the same file is downloaded twice). The NEWEST member becomes
+  # foo.png and the other members are DELETED. Off by default because it
+  # deletes files. Preview with './organize collapse-renames' (dry-run);
+  # when you are happy, either apply with './organize collapse-renames --REAL'
+  # or set this to true so production cycles do it automatically.
+  collapse_rename_families: false
 
   # ── Phone pull (ADB-based sync) ────────────────────────────────────────────
   # Used by phone_pull.sh.  local_stage is where phone files land on this
@@ -433,6 +441,13 @@ phone:
   #
   # Set to 0 to copy immediately. Recommended: 5-10 minutes.
   min_age_minutes: 10
+
+  # Item 10 — collapse 'foo (1).png' rename families on the phone BEFORE
+  # copying: the newest member becomes foo.png, the others are DELETED.
+  # Off by default because it deletes files. Families whose newest file is
+  # younger than min_age_minutes are left alone. Preview with
+  # './organize test' (dry-run log shows the planned renames/deletes).
+  collapse_rename_families: false
 
   # ── Scan interval (seconds) ────────────────────────────────────────────────
   # How often the daemon checks for new files.

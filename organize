@@ -73,6 +73,7 @@ COMPUTER_COMMANDS = {
     "cleanup": ["--REAL", "--cleanup"],
     "git-preview": ["--git-preview"],
     "git-init": ["--git-init"],
+    "collapse-renames": ["--collapse-renames"],
     "create-test": ["--create-test"],
 }
 
@@ -487,13 +488,14 @@ def usage(platform):
             "  ./organize clean         wipe ~/organized + log, fresh scan",
             "  ./organize git-preview   which folders would get 'git init'",
             "  ./organize git-init      run auto-git for real",
+            "  ./organize collapse-renames  plan 'foo (1).png' family collapse",
             "  ./organize create-test   build a small test environment",
             "  ./organize setup         first-time setup (config + report)",
             "  ./organize gui           desktop app      ./organize web   web UI",
             "  ./organize pull|push|list   phone sync over USB (needs adb)",
             "",
             "Flags (computer): --REAL --scan-once --sync-only --dedupe-only",
-            "  --git-preview --git-init --cleanup --create-test --config FILE -v",
+            "  --git-preview --git-init --cleanup --collapse-renames --config FILE -v",
             "",
             "On a phone (run there instead):",
             "  ./organize test    dry-run scan     ./organize scan    production scan",

@@ -102,6 +102,10 @@ DEFAULTS: Dict[str, Any] = {
     },
     "auto_git": False,
     "auto_git_folders": [],
+    # Item 10: collapse foo (1).png rename families during production cycles.
+    # Off by default — it deletes the losing siblings; preview with
+    # `organize collapse-renames`.
+    "collapse_rename_families": False,
     "log_path": "~/.file_organizer.log",
     "pid_path": "/tmp/file_organizer.pid",
     "phone_pull": {

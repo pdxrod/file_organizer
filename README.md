@@ -244,6 +244,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `clean` | Wipe `~/organized` and the log, then a fresh scan |
 | `cleanup` | Remove broken/stale soft links from `~/organized` |
 | `git-preview` / `git-init` | Preview or run auto-git |
+| `collapse-renames` | Plan the 'foo (1).png' family collapse (dry-run; add `--REAL` to apply) |
 | `gui` / `web` | Desktop GUI / web UI |
 | `pull` / `push` / `list` | Phone ↔ computer over USB (adb) |
 | `create-test` | Create a sample test environment |

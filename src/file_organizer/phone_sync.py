@@ -40,6 +40,13 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Iterator
 
+# (N)-family collapse (item 10). Relative import for package execution with a
+# fallback for standalone execution (python3 phone_sync.py on the phone).
+try:
+    from .rename_family import parse_family, plan_collapse, apply_collapse
+except ImportError:  # pragma: no cover - standalone script execution
+    from rename_family import parse_family, plan_collapse, apply_collapse
+
 # ── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_CONFIG = "phone_sync_config.yaml"
@@ -569,6 +576,9 @@ def _default_config() -> dict:
         "exclude_folder_patterns": [],  # folder NAMES only — e.g. "line", "twitter"
         "proton_drive_paths": list(DEFAULT_PROTON_CANDIDATES),
         "prune_max_age_days": 30,
+        # Item 10: collapse foo (1).png rename families in the source dirs.
+        # Off by default because it deletes files; preview with --dry-run.
+        "collapse_rename_families": False,
         "delete_after_copy": False,  # DANGER: only set true if you know what you're doing
         "db_path": DEFAULT_DB,
         "log_path": DEFAULT_LOG,
@@ -925,6 +935,12 @@ class PhoneSync:
         self.min_age = self.config.get("min_age_minutes", 10) * 60
         self.scan_interval = self.config.get("scan_interval_seconds", 60)
         self.max_size_mb = self.config.get("max_file_size_mb", 500)
+        # Item 10: collapse foo (1).png rename families in the source dirs.
+        # Off by default — it deletes the losing siblings. The collapse
+        # respects min_age (grace period) so fresh files are never touched.
+        self.collapse_rename_families = bool(
+            self.config.get("collapse_rename_families", False)
+        )
         # Idle backoff (item 14).
         self.backoff_factor = int(
             self.config.get("idle_backoff_factor", 2) or 2
@@ -1056,12 +1072,36 @@ class PhoneSync:
                     target = update_path
                     logger.info("Updating staged copy in place: %s", target)
                 else:
-                    stem = target.stem
-                    suffix = target.suffix
-                    counter = 1
-                    while target.exists():
-                        target = target.parent / f"{stem}_{counter}{suffix}"
-                        counter += 1
+                    # Item 10 — never create _1/_N renames. When a staged
+                    # copy already exists, overwrite it only if the incoming
+                    # file is NEWER and a DIFFERENT SIZE; otherwise keep the
+                    # staged copy.
+                    try:
+                        tgt_stat = target.stat()
+                        src_stat = source.stat()
+                        newer = src_stat.st_mtime > tgt_stat.st_mtime
+                        diff_size = src_stat.st_size != tgt_stat.st_size
+                    except OSError:
+                        newer = False
+                        diff_size = False
+                    if newer and diff_size:
+                        logger.info(
+                            "Overwriting staged copy (newer, different size): %s",
+                            target,
+                        )
+                    elif newer:
+                        # Same size but different content (identical content
+                        # returned above): overwrite so the newer bytes get
+                        # backed up. Still no _1 rename.
+                        logger.info(
+                            "Overwriting staged copy (newer content): %s", target
+                        )
+                    else:
+                        logger.warning(
+                            "Keeping existing staged copy (incoming is not "
+                            "newer): %s — this variant is not backed up", source
+                        )
+                        return target
 
             # Atomic copy: write to a temp name, then rename into place.
             partial = target.parent / (target.name + ".partial")
@@ -1078,9 +1118,60 @@ class PhoneSync:
             logger.error("Failed to copy %s → %s: %s", source, target, e)
             return None
 
+    def _collapse_rename_families_cycle(self, dry_run: bool = False) -> dict:
+        """Item 10: collapse foo (1).png rename families in the source dirs.
+
+        The newest member of each family becomes the base name and the
+        other members are deleted. Families whose newest file is younger
+        than min_age are skipped (grace period). Dry-run only plans.
+        Returns stats {"renamed", "deleted"}.
+        """
+        stats = {"renamed": 0, "deleted": 0}
+        if not self.collapse_rename_families:
+            return stats
+        mode = "DRY-RUN" if dry_run else "PRODUCTION"
+        logger.info("=== Rename-family collapse (%s) ===", mode)
+        for sd in self.source_dirs:
+            root = Path(_expand_path(sd))
+            if not root.is_dir():
+                continue
+            for dirpath, _dirnames, _filenames in os.walk(root):
+                actions = plan_collapse(dirpath, min_age_seconds=self.min_age)
+                if not actions:
+                    continue
+                for a in actions:
+                    if dry_run:
+                        if a.kind == "rename":
+                            logger.info(
+                                "[DRY-RUN] Would rename %s → %s",
+                                a.path, a.target.name,
+                            )
+                        else:
+                            logger.info("[DRY-RUN] Would delete %s", a.path)
+                    else:
+                        try:
+                            if a.kind == "rename" and a.target:
+                                os.replace(a.path, a.target)
+                                logger.info("Renamed %s → %s", a.path, a.target.name)
+                                stats["renamed"] += 1
+                            elif a.kind == "delete":
+                                a.path.unlink(missing_ok=True)
+                                logger.info("Deleted %s", a.path)
+                                stats["deleted"] += 1
+                        except OSError as e:
+                            logger.error("Collapse failed for %s: %s", a.path, e)
+        if not dry_run and (stats["renamed"] or stats["deleted"]):
+            logger.info("Collapse done: renamed=%d deleted=%d",
+                        stats["renamed"], stats["deleted"])
+        return stats
+
     def scan_and_sync(self, dry_run: bool = False) -> dict:
         """Run one scan-and-sync cycle. Returns stats dict."""
         stats = {"scanned": 0, "copied": 0, "skipped": 0, "errors": 0, "bytes": 0}
+
+        # Item 10: (N)-family collapse before copying, when enabled.
+        collapse = self._collapse_rename_families_cycle(dry_run=dry_run)
+        stats["collapsed"] = collapse["renamed"] + collapse["deleted"]
 
         include_ext = self.config.get("include_extensions", []) or []
         # Merge built-in safety defaults with user config (user only adds).
