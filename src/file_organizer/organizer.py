@@ -1,4 +1,5 @@
-""" Organizer: creates and maintains the soft-link tree under ~/organized.
+""" Organizer: creates and maintains the soft-link tree under the
+'organized' folder (inside the file_organizer folder by default — item 15).
 
 Groups files by:
 - Type (documents, images, music, video, code, archives, other)
@@ -72,9 +73,14 @@ class Organizer:
     @property
     def output_base(self) -> Path:
         if self._output_base is None:
-            self._output_base = Path(
-                os.path.expanduser(self.config.get("output_base", "~/organized"))
-            )
+            raw = self.config.get("output_base")
+            if raw in (None, "", "organized", "~/organized"):
+                # Item 15: default to organized/ inside the file_organizer
+                # folder. "~/organized" is the pre-item-15 default and
+                # migrates to the same place.
+                from file_organizer.config import find_project_root
+                raw = str(find_project_root() / "organized")
+            self._output_base = Path(os.path.expanduser(raw))
         return self._output_base
 
     def _file_type(self, filepath: Path) -> str:

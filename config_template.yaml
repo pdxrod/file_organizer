@@ -78,7 +78,7 @@ computer:
     - "MAIN_DRIVE/Documents"
     - "MAIN_DRIVE/Pictures"
 
-  # Folders to scan for creating the ~/organized soft-link tree.
+  # Folders to scan for creating the 'organized' soft-link tree.
   # Only documents, images, music, and video files are linked (see
   # organize_file_types). If empty, falls back to source_folders above.
   organize_folders:
@@ -86,7 +86,7 @@ computer:
     - "MAIN_DRIVE/Music"
     - "MAIN_DRIVE/Pictures"
 
-  # Which file type categories to include in ~/organized.
+  # Which file type categories to include in the 'organized' tree.
   # Options: documents, images, music, video, code, archives, other
   organize_file_types:
     - documents
@@ -341,6 +341,18 @@ computer:
     # Skip files younger than this many minutes (grace period to delete junk
     # before it gets pulled).
     min_age_minutes: 5
+    # ── Item 12b: staging subfolder → computer folder mapping ──────────────
+    # Pulled files KEEP their staging subfolder structure. Each subfolder is
+    # mapped to a computer folder like this:
+    #   1. longest staging_map prefix below wins (e.g. Music →
+    #      MAIN_DRIVE/Entertainment, overriding the default);
+    #   2. otherwise, if a same-named folder exists under MAIN_DRIVE
+    #      (e.g. MAIN_DRIVE/Music for staging/Music), files go there;
+    #   3. otherwise files land in MAIN_DRIVE/misc (created on demand) with
+    #      the staging path preserved underneath it.
+    staging_map: {}
+    #   "Music": "MAIN_DRIVE/Entertainment"
+    #   "DCIM/Camera": "MAIN_DRIVE/Pictures/Camera"
     # Where phone_pull.sh remembers per-file mtimes (avoids re-copying).
     state_file: "~/.phone_pull_state"
     # Extension filters for pull/push (case-insensitive, dots included).

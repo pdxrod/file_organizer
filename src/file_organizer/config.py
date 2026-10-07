@@ -19,7 +19,7 @@ DEFAULTS: Dict[str, Any] = {
     "sync_pairs": [],
     "one_way_pairs": [],
     "source_folders": [],
-    "organize_folders": [],  # folders to scan for ~/organized (defaults to source_folders)
+    "organize_folders": [],  # folders to scan for the organized tree (defaults to source_folders)
     "organize_file_types": ["documents", "images", "music", "video"],  # which type categories to link
     # Item 15: the organized soft-link folder lives inside the file_organizer
     # folder by default; set output_base in config.yaml to move it anywhere
@@ -126,6 +126,13 @@ DEFAULTS: Dict[str, Any] = {
             ".tmp", ".temp", ".partial", ".crdownload", ".part", ".download",
             ".crypt14", ".pyc", ".log",
         ],
+        # Item 12b: phone staging subfolder → computer folder mapping.
+        # Keys are paths relative to the phone's file_organizer_staging
+        # folder (e.g. "Music", "DCIM/Camera"). Values are computer folders
+        # (drive names allowed). Longest matching prefix wins; unlisted
+        # folders go to a same-named folder under MAIN_DRIVE when it
+        # exists, otherwise MAIN_DRIVE/misc (created on demand).
+        "staging_map": {},
     },
 }
 
@@ -606,6 +613,56 @@ def find_project_root() -> Path:
 def load_config(path: Optional[str] = None) -> Config:
     """Convenience: load and return a Config."""
     return Config(path).load(path)
+
+
+def resolve_staging_map(staging_map, drives) -> Dict[str, str]:
+    """Item 12b: resolve drive names in a staging_map {prefix: dest}."""
+    out: Dict[str, str] = {}
+    for prefix, dest in (staging_map or {}).items():
+        resolved = str(dest)
+        for drive_key, drive_path in (drives or {}).items():
+            resolved = resolved.replace(drive_key, drive_path)
+        out[prefix] = os.path.expanduser(resolved)
+    return out
+
+
+def map_staging_path(rel_path, drives, staging_map, misc_dir: str):
+    """Item 12b: map a phone staging-relative path to a computer folder.
+
+    Returns (dest_dir, remainder):
+
+    1. The longest configured staging_map prefix wins, e.g.
+       "Music" → "MAIN_DRIVE/Entertainment" sends Music/foo.mp3 to
+       MAIN_DRIVE/Entertainment/foo.mp3 (override of the default).
+    2. Otherwise the longest prefix whose same-named folder exists under
+       MAIN_DRIVE wins, e.g. Music/foo.mp3 → MAIN_DRIVE/Music/foo.mp3.
+    3. Otherwise everything lands in misc_dir (created on demand by the
+       caller) with the full staging path preserved underneath it.
+    """
+    rel_path = (rel_path or "").strip("/")
+    mapping = resolve_staging_map(staging_map, drives)
+
+    best = None
+    for prefix, dest in mapping.items():
+        p = str(prefix).strip("/")
+        if not p:
+            continue
+        if rel_path == p or rel_path.startswith(p + "/"):
+            if best is None or len(p) > len(best[0]):
+                best = (p, dest)
+    if best:
+        prefix, dest = best
+        return dest, rel_path[len(prefix):].lstrip("/")
+
+    main = (drives or {}).get("MAIN_DRIVE")
+    if main:
+        parts = [p for p in rel_path.split("/") if p]
+        for i in range(len(parts), 0, -1):
+            cand = os.path.join(main, *parts[:i])
+            if os.path.isdir(cand):
+                return cand, "/".join(parts[i:])
+
+    return os.path.expanduser(misc_dir), rel_path
 
 
 def resolve_log_path(config_path: Optional[str] = None) -> str:

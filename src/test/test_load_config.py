@@ -308,5 +308,68 @@ class OutputBaseItem15Tests(unittest.TestCase):
         self.assertIn('output_base: "organized"', text)
 
 
+class StagingMapItem12bTests(unittest.TestCase):
+    """Item 12b: phone staging subfolders map to computer folders.
+
+    Rules: longest configured staging_map prefix → longest same-named
+    folder under MAIN_DRIVE → misc fallback with the path preserved.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+        self.main = self.dir / "main"
+        (self.main / "Music").mkdir(parents=True)
+        self.misc = str(self.main / "misc")
+        self.drives = {"MAIN_DRIVE": str(self.main)}
+
+    def _map(self, rel, staging_map=None):
+        from file_organizer.config import map_staging_path
+        return map_staging_path(rel, self.drives, staging_map, self.misc)
+
+    def test_configured_override_wins(self):
+        dest, rem = self._map("Music", {"Music": "MAIN_DRIVE/Entertainment"})
+        self.assertEqual(dest, str(self.main / "Entertainment"))
+        self.assertEqual(rem, "")
+
+    def test_configured_override_applies_to_subfolders(self):
+        dest, rem = self._map(
+            "Music/sub", {"Music": "MAIN_DRIVE/Entertainment"}
+        )
+        self.assertEqual(dest, str(self.main / "Entertainment"))
+        self.assertEqual(rem, "sub")
+
+    def test_longest_prefix_wins(self):
+        mapping = {
+            "DCIM": "MAIN_DRIVE/Pictures",
+            "DCIM/Camera": "MAIN_DRIVE/Pictures/Camera",
+        }
+        dest, rem = self._map("DCIM/Camera", mapping)
+        self.assertEqual(dest, str(self.main / "Pictures" / "Camera"))
+        self.assertEqual(rem, "")
+
+    def test_same_name_folder_under_main_drive(self):
+        dest, rem = self._map("Music")
+        self.assertEqual(dest, str(self.main / "Music"))
+        self.assertEqual(rem, "")
+
+    def test_same_name_nested_subfolder(self):
+        dest, rem = self._map("Music/sub")
+        self.assertEqual(dest, str(self.main / "Music"))
+        self.assertEqual(rem, "sub")
+
+    def test_unknown_folder_goes_to_misc_with_path_preserved(self):
+        dest, rem = self._map("DCIM/Camera")
+        self.assertEqual(dest, self.misc)
+        self.assertEqual(rem, "DCIM/Camera")
+
+    def test_no_main_drive_falls_back_to_misc(self):
+        from file_organizer.config import map_staging_path
+        dest, rem = map_staging_path("Music", {}, {}, self.misc)
+        self.assertEqual(dest, self.misc)
+        self.assertEqual(rem, "Music")
+
+
 if __name__ == "__main__":
     unittest.main()

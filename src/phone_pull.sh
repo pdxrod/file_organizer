@@ -7,8 +7,9 @@
 # connected via USB.
 #
 # Usage:
-#   ./phone_pull.sh                  # pull from all connected phones → ~/misc
-#   ./phone_pull.sh --push           # push: Proton Drive/misc → phone
+#   ./phone_pull.sh                  # pull from all connected phones (mapped
+#                                    # to MAIN_DRIVE folders, item 12b)
+#   ./phone_pull.sh --push           # push: remote_stage → phone
 #   ./phone_pull.sh --device R5GL11RL4ML  # use specific device
 #   ./phone_pull.sh --list           # list connected devices
 #   ./phone_pull.sh --dry-run        # show what would be synced
@@ -117,6 +118,18 @@ print('PHONE_SOURCE_DIRS=(' + ' '.join(shlex.quote(d) for d in src_dirs) + ')')
 print('PHONE_TARGET_DIR=' + shlex.quote(pp.get('phone_push_dir') or defaults['phone_push_dir']))
 print('INCLUDE_EXTS=(' + ' '.join(shlex.quote(str(e).lower()) for e in (pp.get('include_extensions') or defaults['include_extensions'])) + ')')
 print('EXCLUDE_EXTS=(' + ' '.join(shlex.quote(str(e).lower()) for e in (pp.get('exclude_extensions') or defaults['exclude_extensions'])) + ')')
+
+# Item 12b: staging subfolder → computer folder mapping.
+main_drive = resolve(drives.get('MAIN_DRIVE', '')) if drives.get('MAIN_DRIVE') else ''
+print('MAIN_DRIVE=' + shlex.quote(main_drive))
+misc_dir = os.path.join(main_drive, 'misc') if main_drive else local_stage
+print('MISC_DIR=' + shlex.quote(misc_dir))
+staging_map = pp.get('staging_map') or {}
+tsv_lines = []
+for prefix, dest in staging_map.items():
+    resolved = resolve(str(dest))
+    tsv_lines.append(f'{prefix}\t{resolved}')
+print('STAGING_MAP_TSV=' + shlex.quote('\n'.join(tsv_lines)))
 PYEOF
 }
 
@@ -127,6 +140,50 @@ eval "$(_load_config)"
 : "${ANDROID_BASE:=/storage/emulated/0}"
 : "${MIN_AGE_MINUTES:=5}"
 : "${STATE_FILE:=${HOME}/.phone_pull_state}"
+: "${MAIN_DRIVE:=}"
+: "${MISC_DIR:=${LOCAL_STAGE}}"
+: "${STAGING_MAP_TSV:=}"
+
+# Item 12b: map a staging-relative directory to its computer folder.
+# Prints "<dest_dir>\t<remainder>". Rules, in order:
+#   1. longest configured staging_map prefix (e.g. "Music" → "MAIN_DRIVE/Entertainment")
+#   2. longest prefix whose same-named folder exists under MAIN_DRIVE
+#   3. MISC_DIR (created on demand), full staging path preserved under it
+map_dest_root() {
+    local rel="$1" best="" best_dest="" prefix mapped rem
+    if [[ -n "$STAGING_MAP_TSV" ]]; then
+        while IFS=$'\t' read -r prefix mapped; do
+            [[ -z "$prefix" ]] && continue
+            if [[ "$rel" == "$prefix" || "$rel" == "$prefix"/* ]]; then
+                if [[ ${#prefix} -gt ${#best} ]]; then
+                    best="$prefix"
+                    best_dest="$mapped"
+                fi
+            fi
+        done <<< "$STAGING_MAP_TSV"
+        if [[ -n "$best" ]]; then
+            rem="${rel#$best}"
+            rem="${rem#/}"
+            printf '%s\t%s\n' "$best_dest" "$rem"
+            return 0
+        fi
+    fi
+    if [[ -n "$MAIN_DRIVE" ]]; then
+        local cur="$rel" parts i
+        while [[ -n "$cur" ]]; do
+            if [[ -d "$MAIN_DRIVE/$cur" ]]; then
+                rem="${rel#$cur}"
+                rem="${rem#/}"
+                printf '%s\t%s\n' "$MAIN_DRIVE/$cur" "$rem"
+                return 0
+            fi
+            [[ "$cur" == */* ]] || break
+            cur="${cur%/*}"
+        done
+    fi
+    printf '%s\t%s\n' "$MISC_DIR" "$rel"
+    return 0
+}
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 
@@ -146,22 +203,27 @@ OPTIONS:
   --verbose        Verbose output
 
 DESCRIPTION:
-  Pull mode (default): Copies new/changed files from configured phone
-  directories into local_stage (flat — no subdirectories). Files are first
-  pulled to a temp staging area with their directory structure, then
-  flattened into local_stage. The file_organizer daemon then picks
-  them up and syncs to your cloud drive.
+  Pull mode (default): Copies new/changed files from the phone's
+  file_organizer_staging folders onto this computer, KEEPING the staging
+  subfolder structure (item 12b). Each staging subfolder is mapped to a
+  computer folder: a configured phone_pull.staging_map entry first, then
+  a same-named folder under MAIN_DRIVE when it exists, otherwise
+  MAIN_DRIVE/misc (created on demand). The file_organizer daemon then
+  syncs those folders to your cloud drive.
 
   Push mode (--push): Copies files from remote_stage back to the phone.
 
   Both modes track file modification times to avoid re-copying unchanged
   files. Files younger than MIN_AGE_MINUTES are skipped to give you time
-  to delete unwanted files before they are synced.
+  to delete unwanted files before they are synced. Existing files are
+  overwritten only when the incoming file is newer AND a different size —
+  no _1/_N renames (item 10).
 
 CONFIGURATION:
   All settings come from config.yaml — see the phone_pull: section.
-  - local_stage:  where phone files land on this machine
+  - local_stage:  fallback landing folder when MAIN_DRIVE is unset
   - remote_stage: cloud-drive folder for push mode (e.g. Proton Drive)
+  - staging_map:  staging subfolder → computer folder overrides (item 12b)
   - adb_path:     path to the adb binary
   - temp_stage:   temp folder used during pulls (default: <local_stage>/.tmp_pull)
   - android_base: phone shared-storage root (default: /storage/emulated/0)
@@ -283,7 +345,12 @@ do_pull() {
         for phone_dir in "${valid_dirs[@]}"; do
             "$ADB" -s "$device_id" shell "find '$phone_dir' -type f 2>/dev/null" 2>/dev/null | while IFS= read -r f; do
                 [[ -z "$f" ]] && continue
-                info "[DRY-RUN]   → $(basename "$f")"
+                local rel="${f#$ANDROID_BASE/}"
+                local rel_dir="${rel%/*}"
+                [[ "$rel_dir" == "$rel" ]] && rel_dir=""
+                local mapped
+                mapped=$(map_dest_root "$rel_dir")
+                info "[DRY-RUN]   $f → ${mapped%%$'\t'*}/$(basename "$f")"
             done
         done
         return 0
@@ -314,8 +381,8 @@ do_pull() {
         return 0
     fi
 
-    # ── Phase 2: Flatten into ~/misc ──
-    info "Phase 2: Flattening into $LOCAL_STAGE..."
+    # ── Phase 2: Map staging subfolders to computer folders (item 12b) ──
+    info "Phase 2: Mapping staging subfolders to computer folders..."
 
     local min_age_sec=$((MIN_AGE_MINUTES * 60))
     local now_sec
@@ -381,25 +448,40 @@ do_pull() {
         local file_size
         file_size=$(stat $stat_size_flag "$temp_file" 2>/dev/null || echo "0")
 
-        # Flatten: move into ~/misc/, resolving name collisions
-        local dest="$LOCAL_STAGE/$fname"
-        if [[ -f "$dest" ]]; then
-            # Collision — add _1, _2, … suffix before extension
-            local stem="${fname%.*}"
-            local suffix=".${fname##*.}"
-            [[ "$suffix" == ".$fname" ]] && suffix=""  # no extension
-            local counter=1
-            while [[ -f "$dest" ]]; do
-                dest="$LOCAL_STAGE/${stem}_${counter}${suffix}"
-                ((counter++))
-            done
-            dbg "Collision: $fname → $(basename "$dest")"
+        # Item 12b: keep the staging subfolder structure and map it to the
+        # computer folder (configured mapping → same-name MAIN_DRIVE folder
+        # → MAIN_DRIVE/misc fallback, created on demand).
+        local rel_dir="${rel_path%/*}"
+        [[ "$rel_dir" == "$rel_path" ]] && rel_dir=""
+        local mapped dest_root dest_rel dest
+        mapped=$(map_dest_root "$rel_dir")
+        dest_root="${mapped%%$'\t'*}"
+        dest_rel="${mapped#*$'\t'}"
+        if [[ -n "$dest_rel" ]]; then
+            dest="$dest_root/$dest_rel/$fname"
+        else
+            dest="$dest_root/$fname"
         fi
 
+        # Item 10: never invent _1/_N names. If a file is already there,
+        # overwrite only when the incoming one is newer AND a different
+        # size; otherwise keep what is there.
+        if [[ -f "$dest" ]]; then
+            local dest_mtime dest_size
+            dest_mtime=$(stat $stat_mtime_flag "$dest" 2>/dev/null || echo "0")
+            dest_size=$(stat $stat_size_flag "$dest" 2>/dev/null || echo "0")
+            if [[ "$file_mtime" -le "$dest_mtime" || "$file_size" == "$dest_size" ]]; then
+                dbg "Keeping existing (not newer+different): $dest"
+                continue
+            fi
+            dbg "Overwriting (newer, different size): $dest"
+        fi
+
+        mkdir -p "$(dirname "$dest")"
         if mv "$temp_file" "$dest" 2>/dev/null; then
             ((total_copied++)) || true
             total_bytes=$((total_bytes + file_size))
-            info "  $fname ($(( file_size / 1024 )) KB)"
+            info "  $rel_path → $dest ($(( file_size / 1024 )) KB)"
 
             # Update state
             state=$(echo "$state" | python3 -c "import sys,json; d=json.load(sys.stdin); d['$state_key']='$file_mtime'; print(json.dumps(d))" 2>/dev/null || echo "$state")

@@ -198,7 +198,7 @@ def main(argv=None):
     parser.add_argument("--dedupe-only", action="store_true", help="Only run deduplication")
     parser.add_argument("--git-preview", action="store_true", help="Preview which folders would get git init (no changes)")
     parser.add_argument("--git-init", action="store_true", help="Run auto-git: init, .gitignore, add, commit")
-    parser.add_argument("--cleanup", action="store_true", help="Remove broken and stale symlinks from ~/organized")
+    parser.add_argument("--cleanup", action="store_true", help="Remove broken and stale symlinks from the organized folder")
     parser.add_argument("--collapse-renames", action="store_true",
                         help="Collapse 'foo (1).png' rename families — shows a "
                              "plan, applies only with --REAL")

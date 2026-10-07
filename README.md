@@ -154,10 +154,10 @@ Watch what it does:
    adb push organize config_template.yaml /sdcard/Download/
    adb push src /sdcard/Download/file_organizer_src/
    # then, in Termux:
-   mkdir -p ~/organize_home/src
-   cp ~/storage/shared/Download/organize ~/organize_home/
-   cp ~/storage/shared/Download/config_template.yaml ~/organize_home/
-   cp -r ~/storage/shared/Download/file_organizer_src/file_organizer ~/organize_home/src/
+   mkdir -p ~/file_organizer/src
+   cp ~/storage/shared/Download/organize ~/file_organizer/
+   cp ~/storage/shared/Download/config_template.yaml ~/file_organizer/
+   cp -r ~/storage/shared/Download/file_organizer_src/file_organizer ~/file_organizer/src/
 
    # Or directly on the phone:
    pkg install git
@@ -168,7 +168,7 @@ Watch what it does:
    `phone:` section and prints a "Will it work?" report:
 
    ```bash
-   cd ~/organize_home
+   cd ~/file_organizer
    ./organize make-config
    ```
 
@@ -202,23 +202,26 @@ Phone (Termux)                         Computer                        Cloud
 ┌───────────────────────┐   ┌───────────────────────────┐   ┌──────────────────┐
 │ phone_sync            │   │ file_organizer            │   │ Proton Drive /   │
 │                       │   │                           │   │ Google Drive     │
-│ DCIM/Camera ──────────┼──►│ ~/misc (via phone_pull.sh)│──►│ My Files/misc    │
-│ DCIM/Screenshots      │   │         │                 │   │                  │
-│ Pictures ─────────────┤   │         ▼                 │   │                  │
-│ Documents ────────────┤   │ organized (soft links)    │   │                  │
-│ Download ─────────────┤   └───────────────────────────┘   └──────────────────┘
-│                       │
+│ DCIM/Camera ──────────┼──►│ MAIN_DRIVE/Pictures…     │──►│ My Files/…       │
+│ DCIM/Screenshots      │   │ MAIN_DRIVE/Music, misc    │   │                  │
+│ Pictures ─────────────┤   │         │                 │   │                  │
+│ Documents ────────────┤   │         ▼                 │   │                  │
+│ Download ─────────────┤   │ organized (soft links)    │   │                  │
+└───────────────────────┘   └───────────────────────────┘   └──────────────────┘
 │ ◄─ 10-minute grace ──►│  files younger than min_age_minutes are never copied,
-└───────────────────────┘  so photos you delete right away are never backed up
+                         │  so photos you delete right away are never backed up
 ```
 
 1. `phone_sync` scans the folders you configured, skips junk, waits out the
    grace period, and copies new files into `/storage/emulated/0/file_organizer_staging`
    (keeping their folder structure, e.g. `DCIM/Camera/IMG_001.jpg`).
 2. On the computer, `./organize pull` fetches the staging folder over USB
-   (or wireless ADB) into `local_stage`.
-3. The computer's sync pairs then mirror that folder to Proton Drive, Google
-   Drive, or an external disk.
+   (or wireless ADB) and maps each staging subfolder to a computer folder:
+   a `staging_map:` override first, then a same-named folder under
+   MAIN_DRIVE (e.g. `staging/Music` → `MAIN_DRIVE/Music`), then
+   `MAIN_DRIVE/misc` (created on demand) for anything it can't place.
+3. The computer's sync pairs then mirror those folders to Proton Drive,
+   Google Drive, or an external disk.
 4. `./organize push` copies files from the cloud back to the phone.
 
 Deleting a photo on the phone during the grace period means it is never
