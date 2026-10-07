@@ -30,7 +30,13 @@ set -euo pipefail
 # hardcoded.  Works with Proton Drive, Google Drive, external drives, etc.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG_YAML="${SCRIPT_DIR}/config.yaml"
+# config.yaml lives at the project root (next to organize); fall back to
+# this script's directory when run from an old checkout.
+if [ -f "$(dirname "$SCRIPT_DIR")/config.yaml" ]; then
+    CONFIG_YAML="$(dirname "$SCRIPT_DIR")/config.yaml"
+else
+    CONFIG_YAML="${SCRIPT_DIR}/config.yaml"
+fi
 
 # Parse config.yaml with python3 — resolves drive: references like MAIN_DRIVE
 _load_config() {
@@ -566,7 +572,7 @@ main() {
         info "and sync them to Proton Drive, Google Drive, etc."
         echo ""
         info "To run file_organizer immediately:"
-        echo "  cd $(dirname "$0") && ./manage_organizer.sh test-real"
+        echo "  cd $(dirname "$(dirname "$0")") && ./organize test-real"
     fi
 
     return $exit_code

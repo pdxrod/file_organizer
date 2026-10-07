@@ -438,7 +438,7 @@ class Config:
     def create_starter(cls, target_path: str) -> str:
         """Create a starter config.yaml from the template with most features
         turned off for safety.  Returns the path to the created file."""
-        template_path = os.path.join(os.path.dirname(__file__), "config_template.yaml")
+        template_path = str(find_project_root() / "config_template.yaml")
 
         if not os.path.exists(template_path):
             raise ConfigError(
@@ -487,8 +487,8 @@ class Config:
             f"         - enable_duplicate_detection  (careful!)  \n"
             f"         - enable_semantic_categories\n"
             f"         - auto_git\n"
-            f"    5. Run './manage_organizer.sh test' to dry-run\n"
-            f"    6. When ready, run './manage_organizer.sh start'\n"
+            f"    5. Run './organize test' to dry-run\n"
+            f"    6. When ready, run './organize start'\n"
             f"{'='*60}\n",
             file=sys.stderr,
         )
@@ -562,9 +562,25 @@ def report_first_run(config_path: str) -> None:
         "  2. Replace the placeholder paths (anything with 'janedoe' or\n"
         "     'YourExternalDrive') with YOUR real paths.\n"
         "  3. Use SPACES for indentation — YAML does not allow TABs.\n"
-        "  4. Run again: ./manage_organizer.sh test\n",
+        "  4. Run again: ./organize test\n",
         file=sys.stderr,
     )
+
+
+def find_project_root() -> Path:
+    """Locate the project root: the directory containing the shared
+    config_template.yaml. Walks up from this file
+    (src/file_organizer/config.py → src → project root), and falls back to
+    this file's directory when no template is found (e.g. old flat layout).
+    """
+    cur = Path(__file__).resolve().parent
+    for _ in range(6):
+        if (cur / "config_template.yaml").exists():
+            return cur
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    return Path(__file__).resolve().parent
 
 
 def load_config(path: Optional[str] = None) -> Config:
@@ -579,7 +595,7 @@ def resolve_log_path(config_path: Optional[str] = None) -> str:
     in cli.py, or from the GUI/web apps). Never raises.
     """
     default = os.path.expanduser("~/.file_organizer.log")
-    target = config_path or os.path.join(os.path.dirname(__file__), "config.yaml")
+    target = config_path or str(find_project_root() / "config.yaml")
     try:
         with open(target, "r") as f:
             cfg = yaml.safe_load(f) or {}

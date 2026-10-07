@@ -4,7 +4,7 @@
 import os, sys, argparse, logging, signal, time
 from pathlib import Path
 
-from file_organizer.config import Config, ConfigError, report_first_run, resolve_log_path
+from file_organizer.config import Config, ConfigError, report_first_run, resolve_log_path, find_project_root
 from file_organizer.scanner import FileScanner
 from file_organizer.analyzer import ContentAnalyzer
 from file_organizer.organizer import Organizer
@@ -154,7 +154,7 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     logger.info("=== Cycle complete ===")
     return actions, sync_thread
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="File Organizer v2")
     parser.add_argument("-R", "--REAL", action="store_true", help="Production mode (default: test/dry-run)")
     parser.add_argument("--scan-once", action="store_true", help="Run one cycle then exit")
@@ -166,7 +166,14 @@ def main():
     parser.add_argument("--create-test", action="store_true", help="Create test environment")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    # Running `python -m file_organizer` from src/ should still find the
+    # live config.yaml at the project root (next to organize).
+    if args.config == "config.yaml" and not os.path.exists("config.yaml"):
+        root_cfg = find_project_root() / "config.yaml"
+        if root_cfg.exists():
+            args.config = str(root_cfg)
 
     setup_logging(args.verbose, args.config)
     real_mode = args.REAL

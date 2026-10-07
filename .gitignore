@@ -27,11 +27,11 @@ test/organized/music/
 test/organized/notes/
 test/organized/peggy/
 test/organized/something/
-config.yaml
-config.yaml.bak
-phone_daemon_config.yaml
-phone_sync_config.yaml
-phone_pull.sh.bak
+# Live configs — created next to organize, never committed
+/config.yaml
+/config.yaml.bak
+/phone_daemon_config.yaml
+/phone_sync_config.yaml
 __pycache__/
 *.py[cod]
 *$py.class

@@ -189,12 +189,15 @@ def _find_template(config_path: Path) -> Optional[Path]:
     phone_daemon_config.template.yaml (pre-rename) is still honoured
     if present.
     """
-    candidates = [
-        config_path.parent / "config_template.yaml",
-        config_path.parent / "phone_daemon_config.template.yaml",
-        Path(__file__).resolve().parent / "config_template.yaml",
-        Path(__file__).resolve().parent / "phone_daemon_config.template.yaml",
-    ]
+    bases = [config_path.parent, Path(__file__).resolve().parent]
+    # Walk up from this file (src/file_organizer → src → project root) so
+    # the shared config_template.yaml at the project root is found.
+    for parent in Path(__file__).resolve().parent.parents:
+        bases.append(parent)
+    candidates = []
+    for base in bases:
+        candidates.append(base / "config_template.yaml")
+        candidates.append(base / "phone_daemon_config.template.yaml")
     return next((t for t in candidates if t.exists()), None)
 
 
@@ -1206,7 +1209,7 @@ class PhoneSync:
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Phone Sync - monitor and sync phone files to Proton Drive",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1259,7 +1262,7 @@ def main():
         "-v", "--verbose", action="store_true",
         help="Verbose logging",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     args.config = resolve_config_path(args.config)
 
     # ── Special commands ──

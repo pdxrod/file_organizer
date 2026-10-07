@@ -29,6 +29,30 @@ folder sync). The phone program runs on **Android via Termux**, or on macOS.
 
 ---
 
+## One program: `organize`
+
+The **only program you run is `./organize`** at the top of this folder
+(item 12). It detects whether it is on a phone or a computer and does the
+right thing; everything else lives in `src/` so you are never tempted to
+run it directly. Run it with no arguments and it tells you what it does and
+which commands to use.
+
+```bash
+./organize              # prints what it does + the commands for THIS device
+./organize test         # dry-run scan (safe) — both platforms
+./organize test-real    # computer: one production scan
+./organize scan         # phone: one production scan
+./organize start        # run in the background   ./organize stop
+./organize log          # follow the log   ./organize status
+./organize setup        # first-time setup (config + will-it-work report)
+./organize pull         # computer: pull phone staging over USB (adb)
+```
+
+The old names `src/manage_organizer.sh` and `src/manage_phone.sh` still work
+— they are now thin forwards to `organize`.
+
+---
+
 ## One config file for everything
 
 Everything is configured from a single template: **`config_template.yaml`**,
@@ -73,25 +97,25 @@ cd /path/to/file_organizer
 # 1. First run: this creates config.yaml from the template and prints a
 #    "Will it work?" report telling you which paths exist and which
 #    placeholders you must edit.
-./manage_organizer.sh test
+./organize test
 
 # 2. Open config.yaml with TextEdit (macOS) or your favourite editor,
 #    replace the placeholder paths, then run the test again.
-./manage_organizer.sh test
+./organize test
 
 # 3. When the test looks right, run for real (one cycle):
-./manage_organizer.sh test-real
+./organize test-real
 
 # 4. Or run continuously in the background:
-./manage_organizer.sh start
+./organize start
 ```
 
 Watch what it does:
 
 ```bash
-./manage_organizer.sh log        # tail the log (~/.file_organizer.log)
-./manage_organizer.sh status     # is it running?
-./manage_organizer.sh stop       # stop the background process
+./organize log        # tail the log (~/.file_organizer.log)
+./organize status     # is it running?
+./organize stop       # stop the background process
 ```
 
 ## Quick start — Windows
@@ -101,8 +125,10 @@ Watch what it does:
 2. Open a terminal in the `file_organizer` folder and run:
 
    ```
-   py -m file_organizer --scan-once
+   py organize --scan-once
    ```
+
+   (or `py -m file_organizer --scan-once` from inside `src\`)
 
 3. This creates `config.yaml` and prints the "Will it work?" report. Open
    `config.yaml` with **Notepad**, replace the placeholder paths, and run the
@@ -123,12 +149,15 @@ Watch what it does:
 3. Get the files onto the phone (pick one):
 
    ```bash
-   # From a computer over USB:
-   adb push phone_sync.py config_template.yaml manage_phone.sh /sdcard/Download/
+   # From a computer over USB — the whole program is 3 things:
+   # organize, src/, and config_template.yaml
+   adb push organize config_template.yaml /sdcard/Download/
+   adb push src /sdcard/Download/file_organizer_src/
    # then, in Termux:
-   cp ~/storage/shared/Download/phone_sync.py ~/
-   cp ~/storage/shared/Download/config_template.yaml ~/
-   cp ~/storage/shared/Download/manage_phone.sh ~/
+   mkdir -p ~/organize_home/src
+   cp ~/storage/shared/Download/organize ~/organize_home/
+   cp ~/storage/shared/Download/config_template.yaml ~/organize_home/
+   cp -r ~/storage/shared/Download/file_organizer_src/file_organizer ~/organize_home/src/
 
    # Or directly on the phone:
    pkg install git
@@ -139,7 +168,8 @@ Watch what it does:
    `phone:` section and prints a "Will it work?" report:
 
    ```bash
-   python3 phone_sync.py --make-config
+   cd ~/organize_home
+   ./organize make-config
    ```
 
 5. Edit the config with **nano** (spaces, never tabs):
@@ -151,13 +181,13 @@ Watch what it does:
 6. Test without copying anything:
 
    ```bash
-   ./manage_phone.sh test
+   ./organize test
    ```
 
 7. Run continuously:
 
    ```bash
-   ./manage_phone.sh start
+   ./organize start
    ```
 
 > On Samsung phones, a Termux session that stays in the foreground survives
@@ -185,11 +215,11 @@ Phone (Termux)                         Computer                        Cloud
 1. `phone_sync` scans the folders you configured, skips junk, waits out the
    grace period, and copies new files into `/storage/emulated/0/file_organizer_staging`
    (keeping their folder structure, e.g. `DCIM/Camera/IMG_001.jpg`).
-2. On the computer, `phone_pull.sh pull` fetches the staging folder over USB
+2. On the computer, `./organize pull` fetches the staging folder over USB
    (or wireless ADB) into `local_stage`.
 3. The computer's sync pairs then mirror that folder to Proton Drive, Google
    Drive, or an external disk.
-4. `phone_pull.sh push` copies files from the cloud back to the phone.
+4. `./organize push` copies files from the cloud back to the phone.
 
 Deleting a photo on the phone during the grace period means it is never
 copied. Deleting it later removes it from staging on the next cleanup.
@@ -199,7 +229,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 ## Everyday commands — computer
 
 ```bash
-./manage_organizer.sh {command}
+./organize {command}
 ```
 
 | Command | What it does |
@@ -208,19 +238,20 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `stop` / `restart` / `status` | Control the background process |
 | `log` | Tail `~/.file_organizer.log` |
 | `test` | Single **dry-run** cycle — nothing real is changed |
-| `test-real` | Single production cycle |
+| `test-real` (alias `scan`) | Single production cycle |
 | `sync` | Folder synchronization only |
 | `dedupe` | Deduplication only |
 | `clean` | Wipe `~/organized` and the log, then a fresh scan |
 | `cleanup` | Remove broken/stale soft links from `~/organized` |
 | `git-preview` / `git-init` | Preview or run auto-git |
-| `gui` | Desktop GUI |
+| `gui` / `web` | Desktop GUI / web UI |
+| `pull` / `push` / `list` | Phone ↔ computer over USB (adb) |
 | `create-test` | Create a sample test environment |
 
 ## Everyday commands — phone
 
 ```bash
-./manage_phone.sh {command}
+./organize {command}
 ```
 
 | Command | What it does |
@@ -231,18 +262,20 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `test` | Single **dry-run** scan — no files copied |
 | `scan` | Single production scan |
 | `find-proton` | Locate the Proton Drive folder on the device |
+| `make-config` | Create phone_sync_config.yaml from the template |
 | `setup` | First-time setup wizard |
 
-## Phone ↔ computer over USB (`phone_pull.sh`)
+## Phone ↔ computer over USB (`organize pull`)
 
 ```bash
-./phone_pull.sh pull                    # phone → computer (all phones)
-./phone_pull.sh push                    # cloud → phone
-./phone_pull.sh list                    # connected devices and stats
-./phone_pull.sh pull --device ID        # one specific phone
-./phone_pull.sh pull --dry-run          # show what would transfer
+./organize pull                    # phone → computer (all phones)
+./organize push                    # cloud → phone
+./organize list                    # connected devices and stats
+./organize pull --device ID        # one specific phone
+./organize pull --dry-run          # show what would transfer
 ```
 
+(These forward to `src/phone_pull.sh`; you can still call that directly.)
 All paths come from the `phone_pull:` section of `config.yaml`. On macOS,
 install ADB with `brew install android-platform-tools` and enable USB
 Debugging in the phone's Developer Options.
@@ -251,13 +284,13 @@ Debugging in the phone's Developer Options.
 
 ## Test mode
 
-`./manage_organizer.sh create-test` builds a small environment with sample
-files under `test/`. `./manage_organizer.sh test` then runs a full dry-run
-cycle against it, so you can see exactly what the program would do before
-you let it near your real files. Nothing outside the test folders is touched.
+`./organize create-test` builds a small environment with sample files under
+`src/test/`. `./organize test` then runs a full dry-run cycle against it, so
+you can see exactly what the program would do before you let it near your
+real files. Nothing outside the test folders is touched.
 
-The phone equivalent is `./manage_phone.sh test` (dry-run scan of the real
-folders — it copies nothing).
+The phone equivalent is `./organize test` on the phone (dry-run scan of the
+real folders — it copies nothing).
 
 ---
 

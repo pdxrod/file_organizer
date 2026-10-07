@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import phone_sync  # noqa: E402
+from file_organizer import phone_sync  # noqa: E402
 
 import logging  # noqa: E402
 logging.getLogger("phone_sync").addHandler(logging.NullHandler())

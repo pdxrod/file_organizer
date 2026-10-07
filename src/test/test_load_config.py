@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import phone_sync  # noqa: E402
+from file_organizer import phone_sync  # noqa: E402
 
 # Keep test output quiet — load_config logs warnings on recovery paths.
 logging.getLogger("phone_sync").addHandler(logging.NullHandler())
@@ -126,7 +126,8 @@ class LoadConfigTests(unittest.TestCase):
         fails, the phone: section has outgrown the supported subset."""
         import yaml as pyyaml
 
-        repo_root = Path(__file__).resolve().parent.parent
+        # Test file lives at src/test/ → project root is three levels up.
+        repo_root = Path(__file__).resolve().parent.parent.parent
         template_text = (
             repo_root / "config_template.yaml"
         ).read_text(encoding="utf-8")

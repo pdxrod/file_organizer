@@ -14,10 +14,10 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config as cfgmod            # noqa: E402
-import sync_engine                  # noqa: E402
-import softlink_handler             # noqa: E402
-from scanner import FileScanner     # noqa: E402
+from file_organizer import config as cfgmod     # noqa: E402
+from file_organizer import sync_engine          # noqa: E402
+from file_organizer import softlink_handler     # noqa: E402
+from file_organizer.scanner import FileScanner  # noqa: E402
 
 
 class ExclusionUnionTests(unittest.TestCase):
@@ -267,13 +267,7 @@ class IdleBackoffTests(unittest.TestCase):
     daemon's exactly (they are intentionally duplicated)."""
 
     def test_cli_backoff_matches_phone_sync(self):
-        import phone_sync
-        # cli.py lives in the file_organizer package, whose parent is two
-        # levels above this file.
-        repo_parent = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
-        sys.path.insert(0, repo_parent)
+        from file_organizer import phone_sync
         from file_organizer.cli import compute_idle_sleep
         for streak in range(0, 10):
             self.assertEqual(

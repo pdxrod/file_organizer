@@ -3,6 +3,10 @@
 
 import os, sys, json, subprocess, threading
 from pathlib import Path
+
+# The package lives at src/file_organizer; src/ must be importable and the
+# HTML template lives at src/templates/.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from flask import Flask, render_template, jsonify, request
 
 try:
@@ -10,10 +14,10 @@ try:
 except ImportError:
     resolve_log_path = None
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=str(Path(__file__).resolve().parent.parent / "templates"))
 ORGANIZED = Path.home() / "organized"
 LOG_FILE = Path(resolve_log_path() if resolve_log_path else os.path.expanduser("~/.file_organizer.log"))
-PROJECT_DIR = Path(__file__).parent
+SRC_DIR = Path(__file__).resolve().parent.parent
 
 @app.route("/")
 def index():
@@ -70,7 +74,7 @@ def api_scan():
     def run():
         subprocess.run(
             [sys.executable, "-m", "file_organizer", "--REAL", "--scan-once"],
-            cwd=str(PROJECT_DIR),
+            cwd=str(SRC_DIR),
         )
     t = threading.Thread(target=run, daemon=True)
     t.start()

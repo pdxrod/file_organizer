@@ -1,0 +1,591 @@
+#!/usr/bin/env python3
+"""organize — ONE program that runs on your phone or your computer.
+
+On a computer it drives the file_organizer package (organize files,
+sync folders, deduplicate, auto-git). On a phone (Android / Termux) it
+drives the phone sync program. Run it with no arguments to see what it
+does and which flags to use on this device.
+
+This is the only program in this folder. Everything else lives in src/.
+"""
+
+import os
+import sys
+import time
+import signal
+import subprocess
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SRC = HERE / "src"
+PACKAGE = SRC / "file_organizer"
+
+# ── platform detection ─────────────────────────────────────────────────────
+
+def is_android() -> bool:
+    """Best-effort Android detection (Termux or other Android Linux)."""
+    if os.environ.get("ANDROID_ROOT") or os.environ.get("TERMUX_VERSION"):
+        return True
+    if os.path.exists("/system/build.prop") and os.path.exists("/data"):
+        return True
+    return os.path.exists("/data/data/com.termux")
+
+
+def split_platform_args(argv):
+    """Pull --phone/--computer overrides out of argv.
+
+    Returns (platform_or_None, remaining_argv).
+    """
+    platform = None
+    rest = []
+    for arg in argv:
+        if platform is None and arg in ("--phone", "--computer"):
+            platform = arg[2:]
+        else:
+            rest.append(arg)
+    return platform, rest
+
+
+def detect_platform(argv=None):
+    """Return "phone" or "computer" for the given argv (default sys.argv[1:]).
+
+    Order of precedence: --phone/--computer flag, ORGANIZE_PLATFORM env
+    var, then automatic detection (Android vs everything else).
+    """
+    argv = list(sys.argv[1:]) if argv is None else list(argv)
+    platform, _ = split_platform_args(argv)
+    if platform:
+        return platform
+    env = os.environ.get("ORGANIZE_PLATFORM", "").strip().lower()
+    if env in ("phone", "computer"):
+        return env
+    return "phone" if is_android() else "computer"
+
+
+# ── subcommand mapping (pure — unit tested) ────────────────────────────────
+
+COMPUTER_COMMANDS = {
+    "test": ["--scan-once"],                 # dry-run scan (safe)
+    "test-real": ["--REAL", "--scan-once"],  # production one-shot
+    "scan": ["--REAL", "--scan-once"],       # alias of test-real
+    "sync": ["--REAL", "--sync-only"],
+    "dedupe": ["--REAL", "--dedupe-only"],
+    "cleanup": ["--REAL", "--cleanup"],
+    "git-preview": ["--git-preview"],
+    "git-init": ["--git-init"],
+    "create-test": ["--create-test"],
+}
+
+# Computer flags that pass straight through to the file_organizer CLI.
+COMPUTER_PASSTHROUGH = (
+    "--REAL", "--scan-once", "--sync-only", "--dedupe-only",
+    "--git-preview", "--git-init", "--cleanup", "--create-test",
+    "-v", "--verbose", "--config", "-h", "--help",
+)
+
+PHONE_COMMANDS = {
+    "test": ["--scan-once", "--dry-run"],    # dry-run scan (safe)
+    "dry-run": ["--scan-once", "--dry-run"],
+    "scan": ["--scan-once"],                 # production one-shot
+    "scan-once": ["--scan-once"],
+    "start": ["--background"],               # fork to the background
+    "stop": ["--stop"],
+    "status": ["--status"],
+    "stats": ["--stats"],
+    "find-proton": ["--find-proton"],
+    "make-config": ["--make-config"],
+}
+
+# Phone flags that pass straight through to phone_sync.
+PHONE_PASSTHROUGH = (
+    "--scan-once", "--dry-run", "--background", "--daemon",
+    "--find-proton", "--stats", "--status", "--stop", "--make-config",
+    "-v", "--verbose", "--config", "-h", "--help",
+)
+
+
+def map_command(platform, argv):
+    """Map a leading subcommand to CLI args for the platform CLI.
+
+    Returns (argv_for_cli, handled_here) where handled_here is the name of
+    a lifecycle subcommand (start/stop/restart/status/log/gui/…) that
+    organize itself implements, or None.
+    """
+    if not argv:
+        return argv, None
+    head, rest = argv[0], argv[1:]
+    commands = COMPUTER_COMMANDS if platform == "computer" else PHONE_COMMANDS
+    if head in commands:
+        return commands[head] + rest, None
+    lifecycle = {
+        "computer": ("start", "stop", "restart", "status", "log", "clean",
+                     "gui", "web", "pull", "push", "list", "setup"),
+        "phone": ("start", "stop", "restart", "status", "log", "setup"),
+    }
+    if head in lifecycle[platform]:
+        return argv, head
+    return argv, None  # plain passthrough
+
+
+# ── helpers ────────────────────────────────────────────────────────────────
+
+def _insert_src_path():
+    if str(SRC) not in sys.path:
+        sys.path.insert(0, str(SRC))
+
+
+def computer_config_path():
+    """config.yaml lives next to organize (repo root)."""
+    return HERE / "config.yaml"
+
+
+def run_computer_cli(args):
+    _insert_src_path()
+    from file_organizer import cli
+    argv = list(args)
+    if not any(a == "--config" for a in argv):
+        argv += ["--config", str(computer_config_path())]
+    cli.main(argv)
+
+
+def phone_config_path():
+    """Live phone config next to organize; legacy name honoured."""
+    new = HERE / "phone_sync_config.yaml"
+    legacy = HERE / "phone_daemon_config.yaml"
+    if new.exists() or not legacy.exists():
+        return str(new)
+    return str(legacy)
+
+
+def run_phone_cli(args):
+    _insert_src_path()
+    from file_organizer import phone_sync
+    argv = list(args)
+    if not any(a == "--config" for a in argv):
+        argv += ["--config", phone_config_path()]
+    phone_sync.main(argv)
+
+
+def computer_pid_log():
+    """(pid_file, log_file) from config.yaml, with safe defaults."""
+    _insert_src_path()
+    from file_organizer.config import Config
+    pid_file = "/tmp/file_organizer.pid"
+    log_file = os.path.expanduser("~/.file_organizer.log")
+    try:
+        cfg = Config(str(computer_config_path()))
+        pid_file = cfg.data.get("pid_path") or pid_file
+        log_file = cfg.data.get("log_path") or log_file
+    except Exception:
+        pass
+    return os.path.expanduser(pid_file), os.path.expanduser(log_file)
+
+
+def phone_pid_log():
+    """(pid_file, log_file) from the phone config, with safe defaults."""
+    _insert_src_path()
+    from file_organizer import phone_sync
+    pid_file = os.path.expanduser("~/.phone_sync.pid")
+    log_file = os.path.expanduser("~/.phone_sync.log")
+    try:
+        cfg = phone_sync.load_config(phone_config_path())
+        pid_file = phone_sync._expand_path(cfg.get("pid_path", "~/.phone_sync.pid"))
+        log_file = phone_sync._expand_path(cfg.get("log_path", "~/.phone_sync.log"))
+    except Exception:
+        pass
+    return pid_file, log_file
+
+
+def ps_snapshot():
+    """[(pid:int, command:str)] for all running processes (best effort)."""
+    try:
+        if os.name == "nt":
+            out = subprocess.run(
+                ["tasklist", "/fo", "csv"],
+                capture_output=True, text=True,
+            ).stdout
+            rows = []
+            for line in out.splitlines()[1:]:
+                parts = line.strip().strip('"').split('","')
+                if len(parts) >= 2:
+                    try:
+                        rows.append((int(parts[1]), parts[0]))
+                    except ValueError:
+                        pass
+            return rows
+        out = subprocess.run(
+            ["ps", "-axo", "pid=,command="], capture_output=True, text=True
+        ).stdout
+    except Exception:
+        return []
+    rows = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        pid_s, _, cmd = line.partition(" ")
+        try:
+            rows.append((int(pid_s.strip()), cmd.strip()))
+        except ValueError:
+            pass
+    return rows
+
+
+def kill_pid(pid, log):
+    """SIGTERM then SIGKILL a pid. Returns True if it was running."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+        time.sleep(1)
+        try:
+            os.kill(pid, 0)
+            os.kill(pid, signal.SIGKILL)
+            log(f"  Force-killed PID {pid}")
+        except OSError:
+            log(f"  Stopped PID {pid}")
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return False
+
+
+def _windows_kill(pid, log):
+    subprocess.run(["taskkill", "/pid", str(pid), "/f"],
+                   capture_output=True, text=True)
+    log(f"  taskkill sent for PID {pid}")
+    return True
+
+
+# ── lifecycle: start/stop/restart/status/log ───────────────────────────────
+
+def computer_start(log):
+    cfg_path = computer_config_path()
+    if not cfg_path.exists():
+        # cli creates the starter config and prints the will-it-work report.
+        run_computer_cli(["--scan-once"])
+        log("")
+        log("A starter config.yaml has been created.")
+        log("Please edit it before starting the background program.")
+        raise SystemExit(1)
+
+    pid_file, log_file = computer_pid_log()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "file_organizer", "--REAL",
+         "--config", str(cfg_path)],
+        cwd=str(SRC),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    Path(pid_file).write_text(str(proc.pid))
+    time.sleep(1.5)
+    if proc.poll() is None:
+        log(f"File organizer started in PRODUCTION MODE (PID {proc.pid})")
+        log(f"Log file: {log_file}")
+    else:
+        log("ERROR: File organizer failed to start!")
+        log(f"Check the log file for details: {log_file}")
+        Path(pid_file).unlink(missing_ok=True)
+        raise SystemExit(1)
+
+
+def computer_stop(log):
+    pid_file, _ = computer_pid_log()
+    stopped = 0
+    if os.path.exists(pid_file):
+        try:
+            pid = int(Path(pid_file).read_text().strip())
+        except (ValueError, OSError):
+            pid = None
+        if pid and kill_pid(pid, log):
+            stopped += 1
+        elif pid is None:
+            log("Stale PID file — removing")
+        Path(pid_file).unlink(missing_ok=True)
+
+    me = os.getpid()
+    for pid, cmd in ps_snapshot():
+        if pid == me:
+            continue
+        if "file_organizer" in cmd and "organize" not in cmd and pid != me:
+            if kill_pid(pid, log):
+                stopped += 1
+
+    # Kill stuck rsync children on cloud mounts (as the manage script did).
+    for pid, cmd in ps_snapshot():
+        if "rsync" in cmd and any(
+            marker in cmd for marker in ("ProtonDrive", "GoogleDrive", "PASSPORT")
+        ):
+            try:
+                os.kill(pid, signal.SIGKILL)
+                log(f"  Killed stuck rsync (PID {pid})")
+                stopped += 1
+            except OSError:
+                pass
+
+    if stopped == 0:
+        log("No File Organizer processes found")
+
+
+def computer_status(log):
+    pid_file, log_file = computer_pid_log()
+    running = False
+    if os.path.exists(pid_file):
+        try:
+            pid = int(Path(pid_file).read_text().strip())
+            os.kill(pid, 0)
+            log(f"Background program is running (PID {pid})")
+            log(f"  Log file: {log_file}")
+            running = True
+        except (OSError, ValueError):
+            log("PID file exists but the process is not running (stale)")
+            Path(pid_file).unlink(missing_ok=True)
+
+    me = os.getpid()
+    for pid, cmd in ps_snapshot():
+        if pid != me and "file_organizer" in cmd and "organize" not in cmd:
+            log(f"Process running (PID {pid}): {cmd[:80]}")
+            running = True
+
+    if not running:
+        log("File Organizer is not running")
+
+
+def phone_start(log):
+    """Phone start delegates to phone_sync --background (it forks itself)."""
+    run_phone_cli(PHONE_COMMANDS["start"])
+
+
+def phone_stop(log):
+    run_phone_cli(PHONE_COMMANDS["stop"])
+
+
+def phone_status(log):
+    run_phone_cli(PHONE_COMMANDS["status"])
+
+
+def tail_log(path, log):
+    """Print the last few lines of a log then follow it (Ctrl+C to stop)."""
+    p = Path(path)
+    if not p.exists():
+        log(f"Log file not found: {path}")
+        return
+    try:
+        with open(p, "r", errors="replace") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 4000))
+            sys.stdout.write(f.read())
+        while True:
+            with open(p, "r", errors="replace") as f:
+                f.seek(0, 2)
+                chunk = f.read()
+            if chunk:
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        log("")
+
+
+def computer_setup(log):
+    cfg_path = computer_config_path()
+    if not cfg_path.exists():
+        run_computer_cli(["--scan-once"])  # creates starter + report
+    log("")
+    log("Next steps:")
+    log(f"  1. Edit {cfg_path} (TextEdit on Mac, Notepad on Windows, nano on Termux).")
+    log("     - Set your real paths under 'drives:' and 'source_folders:'.")
+    log("     - Never use TAB characters in YAML — spaces only.")
+    log("  2. Dry-run test:   ./organize test")
+    log("  3. Production run: ./organize test-real")
+    log("  4. Run in the background: ./organize start")
+
+
+def phone_setup(log):
+    run_phone_cli(PHONE_COMMANDS["find-proton"])
+    cfg_path = Path(phone_config_path())
+    if not cfg_path.exists():
+        run_phone_cli(PHONE_COMMANDS["make-config"])
+    log("")
+    log("Next steps:")
+    log(f"  1. Edit {cfg_path} (nano on Termux).")
+    log("     - On Android: target_directory = /storage/emulated/0/file_organizer_staging")
+    log("     - Never use TAB characters in YAML — spaces only.")
+    log("  2. Dry-run test:   ./organize test")
+    log("  3. Production scan: ./organize scan")
+    log("  4. Run in the background: ./organize start")
+
+
+def computer_clean(log):
+    """Wipe ~/organized, log, and progress — then a fresh production scan."""
+    import shutil
+    for path in (
+        Path.home() / "organized",
+        computer_pid_log()[1],
+        Path.home() / ".file_organizer_progress.json",
+        Path.home() / ".file_organizer_discovered_categories.json",
+    ):
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            elif os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
+    log("Cleaned. Starting fresh production scan...")
+    run_computer_cli(COMPUTER_COMMANDS["test-real"])
+
+
+def computer_pull_push_list(log, argv):
+    """ADB phone sync — delegate to src/phone_pull.sh."""
+    script = SRC / "phone_pull.sh"
+    if not script.exists():
+        log(f"Phone sync tool not found: {script}")
+        raise SystemExit(1)
+    subprocess.run(["bash", str(script)] + argv[1:])
+
+
+def computer_gui(log):
+    app = PACKAGE / "desktop_app.py"
+    subprocess.run([sys.executable, str(app)])
+
+
+def computer_web(log):
+    app = PACKAGE / "web_app.py"
+    subprocess.run([sys.executable, str(app)])
+
+
+# ── usage ──────────────────────────────────────────────────────────────────
+
+def usage(platform):
+    lines = [
+        "",
+        "organize — one program for your phone and your computer",
+        "",
+        f"This device looks like a {'phone' if platform == 'phone' else 'computer'}",
+        f"({'Android/Termux' if platform == 'phone' else 'macOS/Linux/Windows'}).",
+        "",
+        "On a computer it organizes your files into ~/organized soft links,",
+        "syncs folders between drives (Proton Drive, Google Drive, external",
+        "drives), deduplicates files, and runs auto-git. On a phone it watches",
+        "your DCIM/Pictures/Documents/Download folders and copies new files to",
+        "the staging folder so your computer can pull them to the cloud.",
+        "",
+    ]
+    if platform == "computer":
+        lines += [
+            "Commands for THIS device (computer):",
+            "  ./organize test          dry-run scan — safe, changes nothing",
+            "  ./organize test-real     one production scan (alias: scan)",
+            "  ./organize start         run in the background, repeatedly",
+            "  ./organize stop          stop the background program",
+            "  ./organize restart       stop, wait, start again",
+            "  ./organize status        is it running?",
+            "  ./organize log           follow the log file (Ctrl+C to stop)",
+            "  ./organize sync          sync folders only",
+            "  ./organize dedupe        remove duplicate files only",
+            "  ./organize cleanup       remove broken/stale symlinks",
+            "  ./organize clean         wipe ~/organized + log, fresh scan",
+            "  ./organize git-preview   which folders would get 'git init'",
+            "  ./organize git-init      run auto-git for real",
+            "  ./organize create-test   build a small test environment",
+            "  ./organize setup         first-time setup (config + report)",
+            "  ./organize gui           desktop app      ./organize web   web UI",
+            "  ./organize pull|push|list   phone sync over USB (needs adb)",
+            "",
+            "Flags (computer): --REAL --scan-once --sync-only --dedupe-only",
+            "  --git-preview --git-init --cleanup --create-test --config FILE -v",
+            "",
+            "On a phone (run there instead):",
+            "  ./organize test    dry-run scan     ./organize scan    production scan",
+            "  ./organize start   run in the background    ./organize stop",
+        ]
+    else:
+        lines += [
+            "Commands for THIS device (phone):",
+            "  ./organize test          dry-run scan — safe, copies nothing",
+            "  ./organize scan          one production scan (alias: scan-once)",
+            "  ./organize start         run in the background",
+            "  ./organize stop          stop the background program",
+            "  ./organize restart       stop, wait, start again",
+            "  ./organize status        is it running?",
+            "  ./organize log           follow the log file (Ctrl+C to stop)",
+            "  ./organize stats         sync database statistics",
+            "  ./organize find-proton   locate the Proton Drive folder",
+            "  ./organize make-config   create phone_sync_config.yaml",
+            "  ./organize setup         first-time setup wizard",
+            "",
+            "Flags (phone): --scan-once --dry-run --background --find-proton",
+            "  --stats --status --stop --make-config --config FILE -v",
+            "",
+            "On a computer (run there instead):",
+            "  ./organize test    dry-run scan     ./organize test-real  production",
+        ]
+    lines += [
+        "",
+        "Config: the computer uses config.yaml next to organize; the phone",
+        "uses phone_sync_config.yaml. Both are created from config_template.yaml",
+        "the first time you run — edit them (spaces, never tabs) and you're set.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+# ── main ───────────────────────────────────────────────────────────────────
+
+def main(argv=None):
+    argv = list(sys.argv[1:]) if argv is None else list(argv)
+    platform = detect_platform(argv)
+    _, argv = split_platform_args(argv)
+
+    if not argv or argv[0] in ("help", "-h", "--help"):
+        sys.stdout.write(usage(platform))
+        return 0
+
+    mapped, handled = map_command(platform, argv)
+    log = lambda msg: print(msg, flush=True)
+
+    # ── lifecycle commands handled by organize itself ──
+    if handled == "start":
+        (computer_start if platform == "computer" else phone_start)(log)
+        return 0
+    if handled == "stop":
+        (computer_stop if platform == "computer" else phone_stop)(log)
+        return 0
+    if handled == "restart":
+        (computer_stop if platform == "computer" else phone_stop)(log)
+        time.sleep(2)
+        (computer_start if platform == "computer" else phone_start)(log)
+        return 0
+    if handled == "status":
+        (computer_status if platform == "computer" else phone_status)(log)
+        return 0
+    if handled == "log":
+        path = (computer_pid_log if platform == "computer" else phone_pid_log)()[1]
+        tail_log(path, log)
+        return 0
+    if handled == "setup":
+        (computer_setup if platform == "computer" else phone_setup)(log)
+        return 0
+    if handled == "clean":
+        computer_clean(log)
+        return 0
+    if handled == "gui":
+        computer_gui(log)
+        return 0
+    if handled == "web":
+        computer_web(log)
+        return 0
+    if handled in ("pull", "push", "list"):
+        computer_pull_push_list(log, mapped)
+        return 0
+
+    # ── plain CLI passthrough ──
+    if platform == "computer":
+        run_computer_cli(mapped)
+    else:
+        run_phone_cli(mapped)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -131,9 +131,9 @@ python3 phone_daemon.py --scan-once --dry-run  # test
 
 Next:
 
-1 - make it more user-friendly - an app that does what we do on Termux?
-2 - make filenames shorter and easier for users to understand - no 'daemon'
-3 - stop copying these files and folders, either on the phone, or on the computer
+1. - make it more user-friendly - an app that does what we do on Termux?
+2. - make filenames shorter and easier for users to understand - no 'daemon'
+3. - stop copying these files and folders, either on the phone, or on the computer
   - "*.crypt14" 
   - "node_modules"
   - "_build"
@@ -178,19 +178,19 @@ Next:
   
 Incidentally, I got this list out of various files. I think everything like this should be in config files.
 
-4 - Everything which is hard-coded in code files, which can be put in config files, put it there, e.g. PROTON_CANDIDATES
+4. - Everything which is hard-coded in code files, which can be put in config files, put it there, e.g. PROTON_CANDIDATES
 
-5 - Maybe, the phone config file and the config_template.yaml could be merged? Fewer files for the user to edit would be super. config_template.yaml could be divided into two sections: computer_config and phone_config. 
+5. - Maybe, the phone config file and the config_template.yaml could be merged? Fewer files for the user to edit would be super. config_template.yaml could be divided into two sections: computer_config and phone_config. 
 
-6 - Make the file_organizer find the files in misc, and move them to their correct folders. This will be quite difficult. Most of the files beginning with a YYYYMMDD or YYYY-MM-DD eg. 20260708 belong in ~/pol/2026, but not all of them. THEN create the folders in ~/organized containing soft links to files, the soft links named after categories, like yorkshire and driver. 
+6. - Make the file_organizer find the files in misc, and move them to their correct folders. This will be quite difficult. Most of the files beginning with a YYYYMMDD or YYYY-MM-DD eg. 20260708 belong in ~/pol/2026, but not all of them. THEN create the folders in ~/organized containing soft links to files, the soft links named after categories, like yorkshire and driver. 
 
-7 - Remove any reference to /Users/janedoe, /Users/janedoe/misc, or anything else specific to me. If you have to use a name, use 'janedoe'. When file_organizer runs without a config.yaml, or with a config.yaml copied from config_template.yaml, and it has /Users/janedoe in it, and /Users/janedoe does not exist, say so and exit - tell the user to edit the config file. 
+7. - Remove any reference to /Users/janedoe, /Users/janedoe/misc, or anything else specific to me. If you have to use a name, use 'janedoe'. When file_organizer runs without a config.yaml, or with a config.yaml copied from config_template.yaml, and it has /Users/janedoe in it, and /Users/janedoe does not exist, say so and exit - tell the user to edit the config file. 
 
-8 - make any user action easier - for example, tell users to open files with TextEdit or Notepad, or nano on a phone. In the README, put all instructions as clearly as possible. 
+8. - make any user action easier - for example, tell users to open files with TextEdit or Notepad, or nano on a phone. In the README, put all instructions as clearly as possible. 
 
-9 - In both the phone app and the computer app, when they first start, if there is only a yaml config template file (config_template.yaml or phone_daemon_config.template.yaml), it creates a new config file, and tells the user if it will work, and how to edit it (for example, on the computer, if it has /Users/janedoe, and the user is not called Jane Doe, it explains how to edit config.yaml). Remind the user not to use tabs in a YAML file. It should be impossible to run the computer software without a config.yaml file, but the phone program can produce a new config file based on phone_daemon_config.template.yaml.
+9. - In both the phone app and the computer app, when they first start, if there is only a yaml config template file (config_template.yaml or phone_daemon_config.template.yaml), it creates a new config file, and tells the user if it will work, and how to edit it (for example, on the computer, if it has /Users/janedoe, and the user is not called Jane Doe, it explains how to edit config.yaml). Remind the user not to use tabs in a YAML file. It should be impossible to run the computer software without a config.yaml file, but the phone program can produce a new config file based on phone_daemon_config.template.yaml.
 
-10 - don't rename files with _1 at the end. Copying foo.png over foo.png, just overwrite it if it's later and a different size. In both the phone and computer software, look out for (1) files, renamed by the Mac or a phone - e.g. 'foo (1).png', or 'foo (2).png', or 'foo (1) (1).png', or 'foo (1) (2).png' etc. or even 'foo (1) (1)_1.png'. Always find the latest, rename it foo.png, and delete all the files which end in (1), (2), etc.. 
+10. - don't rename files with _1 at the end. Copying foo.png over foo.png, just overwrite it if it's later and a different size. In both the phone and computer software, look out for (1) files, renamed by the Mac or a phone - e.g. 'foo (1).png', or 'foo (2).png', or 'foo (1) (1).png', or 'foo (1) (2).png' etc. or even 'foo (1) (1)_1.png'. Always find the latest, rename it foo.png, and delete all the files which end in (1), (2), etc.. 
 
 11. The organizer backing up to PROTON_DRIVE is a bit hit-and-miss.
 
@@ -207,6 +207,8 @@ It needs to be configurable so that any folder in /storage/emulated/0/file_organ
 13. Don't back up files YYYYMMDD_NNNNNN.jpg etc. Screenshot... ...etc.  wait til I've changed their names. Find examples. Normalise all dates at beginning of filenames to YYYYMMDD. This includes files like IMG-YYYYMMDD... any file which has been created by an app, which I have not yet given a meaningful name to.
 
 14. When the daemons are running, if an operation, e.g. bidirectional sync, dedup, auto_git results in no action, gradually increase the time the daemon sleeps between each operation.
+
+15. The folder it creates, 'organized', full of soft links, should be located in the file_organizer folder by default, instead of in the user's home folder, but where it is should be configurable in a config file. 
 
 DeepSeek, 2026-10-04:
 I've read file_organizer.md and surveyed the codebase. Here's my report.
@@ -259,4 +261,11 @@ Item 5: merge into one template (my recommendation), or keep two?
 Item 12a layout: organize at top level + src/ subdirectory, OK? Keep manage_*.sh?
 Item 1: Termux-based MVP app first, or go straight for an APK?
 Item 11: want me to instrument and run a verbose sync now so we have diagnosis data before Phase 4?
+
+DeepSeek, 2026-10-07 — progress so far:
+Phase 1 done: exclusion lists consolidated into config (item 3); PROTON_CANDIDATES and softlink classification moved to config (item 4); fail-fast on unedited template paths (item 7); single merged config_template.yaml with computer:/phone: sections (item 5).
+Phase 2 done: first-run will-it-work report + no-tabs errors (item 9); README rewritten with per-platform instructions (item 8); 'daemon' dropped from user-facing names — phone_sync.py, manage_phone.sh, PhoneSync (item 2); idle backoff so daemons sleep longer when a cycle does nothing (item 14).
+Phase 3 done (item 12a): there is now ONE program — ./organize at the top level. It detects phone vs computer (flags --phone/--computer and ORGANIZE_PLATFORM override), prints full usage with no arguments, and every old command is now an organize subcommand: test, test-real, scan, start, stop, restart, status, log, sync, dedupe, cleanup, clean, git-preview, git-init, create-test, gui, web, pull/push/list, setup, make-config, find-proton, stats. All other files moved to src/ (package src/file_organizer/, scripts src/phone_pull.sh, and thin manage_*.sh forwards kept for muscle memory). The stray phone_pull.sh.bak was deleted. Tests grew to 72 and the suite passes; end-to-end smoke tests on a scratch copy confirmed dry-run, production links, daemon start/status/stop, phone-mode dry-run, and ADB delegation.
+Open questions from the plan still unanswered: item 1 MVP form (Termux wrapper vs APK — recommended: Termux first) and item 11 (verbose sync diagnosis — will be the first step of Phase 4d).
+
 If you approve this order, I'd start with Phase 1: items 3 and 4, then 7, then pause for your answer on the merge.

@@ -4,8 +4,11 @@
 import sys, os, threading, subprocess
 from pathlib import Path
 
-# Add parent to path so we can import
+# Add src/ to path so we can import the package
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# config.yaml lives at the project root (next to organize)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 try:
     from file_organizer.config import resolve_log_path
@@ -88,8 +91,13 @@ class OrganizerGUI:
         # Try to load default config
         self._auto_load_config()
 
+    def _default_config(self):
+        """config.yaml lives at the project root (next to organize)."""
+        candidates = [PROJECT_ROOT / "config.yaml", Path.cwd() / "config.yaml"]
+        return next((p for p in candidates if p.exists()), PROJECT_ROOT / "config.yaml")
+
     def _auto_load_config(self):
-        config_path = Path("config.yaml")
+        config_path = self._default_config()
         if config_path.exists():
             self.config_label.config(text=f"Config: {config_path.resolve()}")
         else:
@@ -104,7 +112,7 @@ class OrganizerGUI:
             self.config_label.config(text=f"Config: {path}")
 
     def _edit_config(self):
-        config_path = Path("config.yaml")
+        config_path = self._default_config()
         if not config_path.exists():
             messagebox.showwarning("No Config", "No config.yaml found. Create one first.")
             return
@@ -148,7 +156,7 @@ class OrganizerGUI:
                 proc = subprocess.Popen(
                     [sys.executable, "-m", "file_organizer"] + args,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    cwd=str(Path(__file__).parent),
+                    cwd=str(Path(__file__).parent.parent),
                     text=True, bufsize=1
                 )
                 for line in proc.stdout:
