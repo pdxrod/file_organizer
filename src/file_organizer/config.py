@@ -21,7 +21,10 @@ DEFAULTS: Dict[str, Any] = {
     "source_folders": [],
     "organize_folders": [],  # folders to scan for ~/organized (defaults to source_folders)
     "organize_file_types": ["documents", "images", "music", "video"],  # which type categories to link
-    "output_base": "~/organized",
+    # Item 15: the organized soft-link folder lives inside the file_organizer
+    # folder by default; set output_base in config.yaml to move it anywhere
+    # else (e.g. ~/organized for the old behaviour).
+    "output_base": "organized",
     # Safety defaults. User config lists are MERGED on top of these (see
     # _union_list in load()) so junk like .git is never synced even with a
     # config file created before these rules existed.
@@ -207,7 +210,7 @@ class Config:
         merged["organize_folders"] = [
             self._resolve_path(p) for p in merged.get("organize_folders", [])
         ]
-        merged["output_base"] = self._resolve_path(merged["output_base"])
+        merged["output_base"] = self._resolve_output_base(merged.get("output_base"))
         merged["auto_git_folders"] = [
             self._resolve_path(p) for p in merged.get("auto_git_folders", [])
         ]
@@ -282,6 +285,19 @@ class Config:
         for drive_key, drive_path in self.drives.items():
             path = path.replace(drive_key, drive_path)
         return path
+
+    def _resolve_output_base(self, value) -> str:
+        """Item 15: the organized soft-link folder defaults to inside the
+        file_organizer folder; the config can point it anywhere else.
+
+        Values that mean "use the default" — missing, empty, the literal
+        'organized', or the pre-item-15 default '~/organized' — resolve to
+        <file_organizer folder>/organized. Any other value is a deliberate
+        choice and is resolved like any other path (~ and drive names).
+        """
+        if value in (None, "", "organized", "~/organized"):
+            return str(find_project_root() / "organized")
+        return self._resolve_path(value)
 
     def _resolve_sync_pairs(self, pairs: List[Dict]) -> List[Dict]:
         """Resolve drive placeholders in sync/one_way pair folder lists."""

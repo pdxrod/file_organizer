@@ -258,5 +258,55 @@ class LoadConfigTests(unittest.TestCase):
         self.assertIn("SPACES", out)
 
 
+class OutputBaseItem15Tests(unittest.TestCase):
+    """Item 15: the organized soft-link folder defaults to inside the
+    file_organizer folder and is configurable via output_base."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def _load(self, extra: str = ""):
+        from file_organizer import config as cfgmod
+        cfg_file = self.dir / "config.yaml"
+        cfg_file.write_text(extra)
+        return cfgmod.Config(str(cfg_file))
+
+    def test_default_is_inside_file_organizer_folder(self):
+        from file_organizer.config import find_project_root
+        cfg = self._load()
+        expected = str(find_project_root() / "organized")
+        self.assertEqual(cfg.data.get("output_base"), expected)
+
+    def test_literal_organized_means_the_default_folder(self):
+        from file_organizer.config import find_project_root
+        cfg = self._load("output_base: organized\n")
+        self.assertEqual(
+            cfg.data.get("output_base"), str(find_project_root() / "organized")
+        )
+
+    def test_old_home_default_migrates_to_project_folder(self):
+        # Configs generated before item 15 say ~/organized; the new default
+        # applies to them too.
+        from file_organizer.config import find_project_root
+        cfg = self._load("output_base: ~/organized\n")
+        self.assertEqual(
+            cfg.data.get("output_base"), str(find_project_root() / "organized")
+        )
+
+    def test_explicit_path_is_respected(self):
+        cfg = self._load(f"output_base: {self.dir}/my-organized\n")
+        self.assertEqual(
+            cfg.data.get("output_base"), str(self.dir / "my-organized")
+        )
+
+    def test_template_documents_the_new_default(self):
+        from file_organizer.config import find_project_root
+        template = find_project_root() / "config_template.yaml"
+        text = template.read_text(encoding="utf-8")
+        self.assertIn('output_base: "organized"', text)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,7 +18,7 @@ your computer, cloud drives, and Android phone.
 
 | Capability | What happens |
 |------------|--------------|
-| **Organize** | Scans folders and builds a tree of **soft links** under `~/organized`, grouped by type, year, and content categories. Original files stay where they are. |
+| **Organize** | Scans folders and builds a tree of **soft links** under the `organized` folder — inside the `file_organizer` folder by default, anywhere you like via `output_base` — grouped by type, year, and content categories. Original files stay where they are. |
 | **Folder sync** | Bidirectionally or one-way synchronizes folder pairs (e.g. computer ↔ Proton Drive, computer → external disk) with `rsync`. |
 | **Phone sync** | Copies new files from your Android phone to a staging folder, from where they reach the cloud and your computer. Has a 10-minute grace period so photos you delete immediately are never backed up. |
 | **Deduplication** | Optionally finds and removes duplicate real files by content hash. |
@@ -133,8 +133,8 @@ Watch what it does:
 3. This creates `config.yaml` and prints the "Will it work?" report. Open
    `config.yaml` with **Notepad**, replace the placeholder paths, and run the
    command again.
-4. Symlinks in `~/organized` require Administrator rights or Windows
-   Developer Mode.
+4. Symlinks in the `organized` folder require Administrator rights or
+   Windows Developer Mode.
 
 ## Quick start — Android (Termux)
 
@@ -205,7 +205,7 @@ Phone (Termux)                         Computer                        Cloud
 │ DCIM/Camera ──────────┼──►│ ~/misc (via phone_pull.sh)│──►│ My Files/misc    │
 │ DCIM/Screenshots      │   │         │                 │   │                  │
 │ Pictures ─────────────┤   │         ▼                 │   │                  │
-│ Documents ────────────┤   │ ~/organized (soft links)  │   │                  │
+│ Documents ────────────┤   │ organized (soft links)    │   │                  │
 │ Download ─────────────┤   └───────────────────────────┘   └──────────────────┘
 │                       │
 │ ◄─ 10-minute grace ──►│  files younger than min_age_minutes are never copied,
@@ -241,8 +241,8 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `test-real` (alias `scan`) | Single production cycle |
 | `sync` | Folder synchronization only |
 | `dedupe` | Deduplication only |
-| `clean` | Wipe `~/organized` and the log, then a fresh scan |
-| `cleanup` | Remove broken/stale soft links from `~/organized` |
+| `clean` | Wipe the `organized` folder and the log, then a fresh scan |
+| `cleanup` | Remove broken/stale soft links from the `organized` folder |
 | `git-preview` / `git-init` | Preview or run auto-git |
 | `collapse-renames` | Plan the 'foo (1).png' family collapse (dry-run; add `--REAL` to apply) |
 | `gui` / `web` | Desktop GUI / web UI |
@@ -297,7 +297,9 @@ real folders — it copies nothing).
 
 ## What gets organized / synced — and what never does
 
-`~/organized` contains only **soft links** — your original files stay put.
+The `organized` folder contains only **soft links** — your original files
+stay put. It lives inside the `file_organizer` folder by default; set
+`output_base` in `config.yaml` to put it anywhere else (item 15).
 Links are grouped by file type, year, and meaningful content categories
 (short common words like "ready" or "wrote" are filtered out; distinctive
 words like "yugoslavia" become categories).
@@ -326,7 +328,8 @@ highlights:
 | `drives` | Shortcuts like `MAIN_DRIVE`, `PROTON_DRIVE` used elsewhere |
 | `sync_pairs` | Bidirectional folder pairs (newest file wins) |
 | `one_way_pairs` | One-way pairs (source → target only) |
-| `source_folders` / `organize_folders` | Folders scanned for dedup / the `~/organized` tree |
+| `source_folders` / `organize_folders` | Folders scanned for dedup / the `organized` tree |
+| `output_base` | Where the `organized` soft-link folder lives (default: inside this folder) |
 | `exclude_patterns` | Never-copy list (always merged with the built-in defaults) |
 | `scan_interval` | How often the background process runs (seconds) |
 | `idle_backoff_factor` / `idle_backoff_max_multiplier` | Sleep longer when cycles change nothing |

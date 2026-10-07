@@ -124,9 +124,10 @@ computer:
 
   # Files and folders matching these patterns are NEVER copied or synced.
   # A pattern matches any file or folder with that name, anywhere in the tree.
-  # The output_base (~/organized) and softlink_backup_base are always excluded
-  # automatically. The built-in safety defaults (.git etc.) are always in force
-  # even if you shorten this list — your entries only ADD to them.
+  # The output_base (the 'organized' folder) and softlink_backup_base are
+  # always excluded automatically. The built-in safety defaults (.git etc.)
+  # are always in force even if you shorten this list — your entries only
+  # ADD to them.
   exclude_patterns:
     # Junk files
     - ".DS_Store"
@@ -180,8 +181,11 @@ computer:
     - ".m2"
     - "tmp/cache"
 
-  # Where organized files are stored (with soft links). Use ~ for home directory.
-  output_base: "~/organized"
+  # Where the 'organized' soft-link folder lives (item 15).
+  # Default: the organized/ folder inside THIS file_organizer folder.
+  # Set any other path to override, e.g. "~/organized" for the old
+  # home-folder behaviour, or a cloud-drive path.
+  output_base: "organized"
 
   # Log and PID files for the organizer daemon (used by manage_organizer.sh,
   # cli.py, web_app.py, desktop_app.py).

@@ -416,11 +416,24 @@ def phone_setup(log):
     log("  4. Run in the background: ./organize start")
 
 
+def computer_output_base():
+    """The configured organized folder (item 15): inside the file_organizer
+    folder by default, or wherever output_base points."""
+    _insert_src_path()
+    from file_organizer.config import Config
+    try:
+        cfg = Config(str(computer_config_path()))
+        return Path(cfg.data.get("output_base") or Path.home() / "organized")
+    except Exception:
+        return Path.home() / "organized"
+
+
 def computer_clean(log):
-    """Wipe ~/organized, log, and progress — then a fresh production scan."""
+    """Wipe the organized folder, log, and progress — then a fresh
+    production scan."""
     import shutil
     for path in (
-        Path.home() / "organized",
+        computer_output_base(),
         computer_pid_log()[1],
         Path.home() / ".file_organizer_progress.json",
         Path.home() / ".file_organizer_discovered_categories.json",
@@ -465,7 +478,8 @@ def usage(platform):
         f"This device looks like a {'phone' if platform == 'phone' else 'computer'}",
         f"({'Android/Termux' if platform == 'phone' else 'macOS/Linux/Windows'}).",
         "",
-        "On a computer it organizes your files into ~/organized soft links,",
+        "On a computer it organizes your files into an 'organized' folder of",
+        "soft links (inside this file_organizer folder by default),",
         "syncs folders between drives (Proton Drive, Google Drive, external",
         "drives), deduplicates files, and runs auto-git. On a phone it watches",
         "your DCIM/Pictures/Documents/Download folders and copies new files to",
@@ -485,7 +499,7 @@ def usage(platform):
             "  ./organize sync          sync folders only",
             "  ./organize dedupe        remove duplicate files only",
             "  ./organize cleanup       remove broken/stale symlinks",
-            "  ./organize clean         wipe ~/organized + log, fresh scan",
+            "  ./organize clean         wipe the organized folder + log, fresh scan",
             "  ./organize git-preview   which folders would get 'git init'",
             "  ./organize git-init      run auto-git for real",
             "  ./organize collapse-renames  plan 'foo (1).png' family collapse",

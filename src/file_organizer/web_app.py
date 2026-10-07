@@ -15,7 +15,20 @@ except ImportError:
     resolve_log_path = None
 
 app = Flask(__name__, template_folder=str(Path(__file__).resolve().parent.parent / "templates"))
-ORGANIZED = Path.home() / "organized"
+
+
+def _organized_folder() -> Path:
+    """Item 15: the organized soft-link folder — inside the file_organizer
+    folder by default, or wherever output_base points."""
+    try:
+        from file_organizer.config import Config, find_project_root
+        cfg = Config(str(find_project_root() / "config.yaml"))
+        return Path(cfg.data.get("output_base") or Path.home() / "organized")
+    except Exception:
+        return Path.home() / "organized"
+
+
+ORGANIZED = _organized_folder()
 LOG_FILE = Path(resolve_log_path() if resolve_log_path else os.path.expanduser("~/.file_organizer.log"))
 SRC_DIR = Path(__file__).resolve().parent.parent
 
