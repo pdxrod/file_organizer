@@ -19,7 +19,24 @@ class SyncEngine:
         self._checksum_mode: str = config.raw_config.get("rsync_checksum_mode", "timestamp")
         self._size_only: bool = config.raw_config.get("rsync_size_only", False)
         self._additional_args: list[str] = config.raw_config.get("rsync_additional_args", []) or []
-        self._disable_mmap: bool = config.raw_config.get("rsync_disable_mmap", True)
+        # Item 11 fix: cloud mounts (Proton Drive placeholders) hang when
+        # rsync uses the mmap-heavy delta algorithm. Whole-file transfer
+        # streams the LOCAL source into a fresh file on the cloud side
+        # without reading placeholder content — so it is the default.
+        if "rsync_whole_file" in config.raw_config:
+            self._whole_file: bool = bool(config.raw_config.get("rsync_whole_file"))
+        else:
+            # Legacy key: rsync_disable_mmap used to add --no-whole-file
+            # (delta), which triggered 'mmap: Operation timed out' on
+            # Proton placeholders. Reinterpret it as whole-file.
+            self._whole_file = bool(config.raw_config.get("rsync_disable_mmap", True))
+        # Per-I/O stall guard (rsync --timeout): a stalled placeholder read
+        # fails in minutes instead of hanging the whole sync hour. 0 = off.
+        try:
+            io = config.raw_config.get("rsync_io_timeout_seconds", 300)
+            self._io_timeout: int = int(io) if io is not None else 300
+        except (TypeError, ValueError):
+            self._io_timeout = 300
         self._timeout: int = (config.raw_config.get("sync_timeout_minutes", 60) or 60) * 60
         self._chunk_subfolders: int = config.raw_config.get("sync_chunk_subfolders", 30)
         self._exclude_patterns: list[str] = config.raw_config.get("exclude_patterns", []) or []
@@ -27,7 +44,8 @@ class SyncEngine:
         # run_all_sync_pairs() call. Used for idle backoff (item 14).
         self.last_change_count: int = 0
 
-    def _build_rsync_args(self, source: Path, target: Path, delete: bool = False) -> list[str]:
+    def _build_rsync_args(self, source: Path, target: Path, delete: bool = False,
+                          exclude_subdirs=None) -> list[str]:
         """Build rsync argument list."""
         args = ["rsync", "-av", "--progress"]
 
@@ -35,15 +53,24 @@ class SyncEngine:
         # sync actually did anything (idle backoff, item 14).
         args.append("--itemize-changes")
 
+        # Item 11 fix: whole-file transfer by default so cloud placeholder
+        # files are never mmap'ed/read on the receiving side. Delta mode is
+        # opt-in via rsync_whole_file: false.
+        args.append("--whole-file" if self._whole_file else "--no-whole-file")
+
+        # Stall guard: fail fast when a cloud read hangs (item 11).
+        if self._io_timeout > 0:
+            args.append(f"--timeout={self._io_timeout}")
+
         # Checksum mode
         if self._checksum_mode == "checksum":
             args.append("--checksum")
         elif self._size_only:
             args.append("--size-only")
 
-        # Disable mmap for network/cloud drives
-        if self._disable_mmap:
-            args.append("--no-whole-file")
+        # Chunking: skip immediate subfolders handled by their own rsync runs.
+        for name in (exclude_subdirs or []):
+            args.extend(["--exclude", f"/{name}/"])
 
         # Exclude patterns from config. Version-control folders (.git etc.)
         # are part of the built-in exclude_patterns safety defaults — they
@@ -66,9 +93,10 @@ class SyncEngine:
 
         return args
 
-    def _run_rsync(self, source: Path, target: Path, delete: bool = False) -> bool:
+    def _run_rsync(self, source: Path, target: Path, delete: bool = False,
+                    exclude_subdirs=None) -> bool:
         """Run rsync from source to target. Returns True on success."""
-        args = self._build_rsync_args(source, target, delete)
+        args = self._build_rsync_args(source, target, delete, exclude_subdirs)
 
         # Ensure target directory exists
         target.mkdir(parents=True, exist_ok=True)
@@ -101,6 +129,44 @@ class SyncEngine:
             logger.error("rsync not found — please install rsync")
             return False
 
+    def _run_rsync_many(self, source: Path, target: Path,
+                        delete: bool = False) -> bool:
+        """Item 11 fix: sync a folder, splitting it into per-subfolder rsync
+        runs when it has more than sync_chunk_subfolders direct subfolders.
+
+        Huge trees (e.g. MAIN_DRIVE/dev with hundreds of thousands of files)
+        used to run as ONE rsync that exceeded the subprocess timeout — one
+        stuck cloud placeholder killed the whole pair. Chunking bounds each
+        rsync's work and its timeout, and one failed chunk no longer
+        prevents the rest from syncing.
+        """
+        subdirs = []
+        if self._chunk_subfolders and source.is_dir():
+            try:
+                subdirs = sorted(
+                    p.name for p in source.iterdir() if p.is_dir()
+                )
+            except OSError:
+                subdirs = []
+
+        if len(subdirs) <= self._chunk_subfolders:
+            return self._run_rsync(source, target, delete=delete)
+
+        logger.info("Chunked sync: %d subfolders of %s", len(subdirs), source)
+        all_ok = True
+        for name in subdirs:
+            ok = self._run_rsync(
+                source / name, target / name, delete=delete
+            )
+            if not ok:
+                all_ok = False
+        # Loose files at the top level (the subfolders are excluded here so
+        # their contents are not transferred twice).
+        ok = self._run_rsync(
+            source, target, delete=delete, exclude_subdirs=subdirs
+        )
+        return all_ok and ok
+
     def _count_itemized_changes(self, stdout: bytes) -> int:
         """Count rsync --itemize-changes lines in captured output.
 
@@ -120,16 +186,16 @@ class SyncEngine:
         result = {"a_to_b": False, "b_to_a": False}
 
         # Sync A → B
-        result["a_to_b"] = self._run_rsync(folder_a, folder_b)
+        result["a_to_b"] = self._run_rsync_many(folder_a, folder_b)
 
         # Sync B → A
-        result["b_to_a"] = self._run_rsync(folder_b, folder_a)
+        result["b_to_a"] = self._run_rsync_many(folder_b, folder_a)
 
         return result
 
     def sync_one_way(self, source: Path, target: Path, delete: bool = False) -> bool:
         """One-way sync: copy new/changed files from source to target only."""
-        return self._run_rsync(source, target, delete=delete)
+        return self._run_rsync_many(source, target, delete=delete)
 
     def run_all_sync_pairs(self) -> dict:
         """Run all configured sync pairs. Returns summary dict."""

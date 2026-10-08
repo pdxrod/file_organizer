@@ -325,6 +325,90 @@ class SyncChangeCountTests(unittest.TestCase):
         self.assertTrue(engine._run_rsync(src, dst))
         self.assertEqual(engine.last_change_count - before, 0)
 
+    # ── Item 11: cloud-placeholder sync fixes ──
+
+    def _engine_with(self, raw):
+        class _StubConfig:
+            raw_config = raw
+        return sync_engine.SyncEngine(_StubConfig())
+
+    def test_whole_file_is_default(self):
+        engine = self._engine_with({"exclude_patterns": []})
+        args = engine._build_rsync_args(Path("/a"), Path("/b"))
+        self.assertIn("--whole-file", args)
+        self.assertNotIn("--no-whole-file", args)
+        self.assertIn("--timeout=300", args)
+
+    def test_legacy_rsync_disable_mmap_means_whole_file(self):
+        # The old key used to add --no-whole-file (delta), which hung on
+        # Proton placeholders. It must now mean whole-file.
+        engine = self._engine_with({
+            "exclude_patterns": [],
+            "rsync_disable_mmap": True,
+        })
+        args = engine._build_rsync_args(Path("/a"), Path("/b"))
+        self.assertIn("--whole-file", args)
+        self.assertNotIn("--no-whole-file", args)
+
+    def test_whole_file_can_be_disabled(self):
+        engine = self._engine_with({
+            "exclude_patterns": [],
+            "rsync_whole_file": False,
+        })
+        args = engine._build_rsync_args(Path("/a"), Path("/b"))
+        self.assertIn("--no-whole-file", args)
+
+    def test_io_timeout_configurable(self):
+        engine = self._engine_with({
+            "exclude_patterns": [],
+            "rsync_io_timeout_seconds": 0,
+        })
+        args = engine._build_rsync_args(Path("/a"), Path("/b"))
+        self.assertFalse(any(a.startswith("--timeout=") for a in args))
+
+    def test_many_subfolders_are_chunked_per_subfolder(self):
+        from unittest import mock
+        src = self.dir / "src"
+        for name in ("one", "two", "three"):
+            (src / name).mkdir(parents=True)
+        (src / "loose.txt").write_text("x")
+        engine = self._engine_with({
+            "exclude_patterns": [],
+            "sync_chunk_subfolders": 1,
+        })
+        calls = []
+        with mock.patch.object(
+            engine, "_run_rsync", side_effect=lambda s, t, delete=False, exclude_subdirs=None: calls.append((s, t, exclude_subdirs)) or True
+        ):
+            ok = engine._run_rsync_many(src, self.dir / "dst")
+        self.assertTrue(ok)
+        # one call per subfolder + one for the loose files
+        self.assertEqual(len(calls), 4)
+        subdir_calls = [c for c in calls if c[2] is None]
+        self.assertEqual(len(subdir_calls), 3)
+        loose = [c for c in calls if c[2] is not None][0]
+        self.assertEqual(loose[0], src)
+        self.assertEqual(sorted(loose[2]), ["one", "three", "two"])
+
+    def test_few_subfolders_run_one_rsync(self):
+        from unittest import mock
+        src = self.dir / "src"
+        (src / "one").mkdir(parents=True)
+        engine = self._engine_with({
+            "exclude_patterns": [],
+            "sync_chunk_subfolders": 30,
+        })
+        calls = []
+        with mock.patch.object(
+            engine, "_run_rsync", side_effect=lambda s, t, delete=False, exclude_subdirs=None: calls.append(s) or True
+        ):
+            engine._run_rsync_many(src, self.dir / "dst")
+        self.assertEqual(calls, [src])
+
+    def test_defaults_exclude_proton_trash_markers(self):
+        self.assertIn(".trashed*", cfgmod.DEFAULTS["exclude_patterns"])
+        self.assertIn(".pending*", cfgmod.DEFAULTS["exclude_patterns"])
+
 
 class FirstRunUxTests(unittest.TestCase):
     """Item 9: tabs must be caught with a plain message, and the first-run

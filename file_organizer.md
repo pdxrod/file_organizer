@@ -128,7 +128,6 @@ python3 phone_daemon.py --find-proton    # locate Proton Drive folder
 python3 phone_daemon.py --scan-once --dry-run  # test
 ./manage_phone_daemon.sh start          # go live
 
-
 Next:
 
 1. - make it more user-friendly - an app that does what we do on Termux?
@@ -274,5 +273,13 @@ Item 15 done: the 'organized' soft-link folder now defaults to organized/ INSIDE
 Phase 4b done (item 12b): phone_pull.sh no longer flattens pulls into ~/misc. Pulled files keep their file_organizer_staging subfolder structure and each subfolder is mapped to a computer folder: the longest phone_pull.staging_map prefix first (e.g. Music → MAIN_DRIVE/Entertainment), then a same-named folder under MAIN_DRIVE when it exists (staging/Music → MAIN_DRIVE/Music), then MAIN_DRIVE/misc (created on demand) with the staging path preserved underneath. Pulls also follow the item-10 overwrite rule (no _1 renames). Mapping rules live in config.py (map_staging_path, resolve_staging_map) and are mirrored in phone_pull.sh for the bash loop. 7 new tests (99 total).
 Naming settled: the program is 'organize'; the soft-link folder is file_organizer/organized; ~/organized no longer exists or is used anywhere (remaining mentions are only the migration rules and docs). The live config.yaml was updated to output_base: "organized". The live organized/ folder is git-ignored.
 Phase 4c done (item 13): new filename_rules.py grounded in real examples from the user's folders. App-generated names — Screenshot_…, Screen Shot/Recording …, YYYYMMDD_HHMMSS.jpg (with (1)/_N decorations), IMG/VID-YYYYMMDD-WA0001, IMG_YYYYMMDD_HHMMSS, PXL_/MVIMG_/Panorama_/Audio_, timestamp+app-name (20260218_150629_LINE_B204.jpg), WhatsApp Image …, Telegram photo_…, Snapchat-…, DSC/IMAG camera names, iOS timestamps — are HELD (not copied) until the user renames them; a timestamp with real words added counts as renamed and is copied. Leading dates in user names are normalised to YYYYMMDD on the staged copy (2026-09-23-party.jpg → 20260923-party.jpg, IMG-2026-01-01-birthday.jpg → IMG-20260101-birthday.jpg); the source keeps its name. Both rules are config flags (default true) on the phone (phone_sync) and in phone_pull.sh pulls, with dry-run previews. 15 new tests (107 total).
+Phase 4d done (item 11) — diagnosed and fixed the PROTON_DRIVE hit-and-miss sync:
+- The daemon log showed the cause: 'mmap: Operation timed out' and 'pread: Operation timed out' on Proton placeholder files, plus whole rsync runs timing out at 3600s (especially the huge dev pair, 642k files). The old rsync_disable_mmap flag added --no-whole-file, forcing the mmap-heavy delta algorithm to READ cloud placeholders — exactly what hangs.
+- Fix 1: whole-file transfer is now the default (rsync_whole_file: true; the legacy rsync_disable_mmap key means whole-file too). The local source is streamed into a fresh cloud file without reading placeholder content.
+- Fix 2: rsync_io_timeout_seconds (default 300) passes rsync --timeout so a stalled cloud read fails in minutes instead of hanging an hour.
+- Fix 3: sync_chunk_subfolders now actually works — pairs with more than 30 direct subfolders sync one subfolder per rsync run, each with its own timeout, so one stuck folder can't kill the pair (this is what the 642k-file dev pair needed).
+- Fix 4: Proton's own artifacts (.trashed-<timestamp>-<name> markers, .pending, .thumbnails) are now in the built-in safety excludes so rsync never tries to read them.
+- Verified on the real mount: a dry-run of Proton pol → MAIN_DRIVE pol enumerated 8274 files and found 788 real differences (files missing on the computer that previous syncs never got to) — with chunking these now transfer piecemeal instead of timing out. 7 new tests (116 total).
+- Note for the user: ~/Documents is protected by macOS privacy (TCC) — the daemon needs Full Disk Access for Documents/Desktop/Downloads pairs.
 
 If you approve this order, I'd start with Phase 1: items 3 and 4, then 7, then pause for your answer on the merge.

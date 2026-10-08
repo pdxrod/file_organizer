@@ -268,9 +268,17 @@ computer:
   # checksum = thorough but SLOW. timestamp = fast (recommended)
   rsync_size_only: false
   rsync_additional_args: []
-  # Disable mmap if you see "mmap: Operation canceled" during rsync.
-  rsync_disable_mmap: true
+  # Item 11 — whole-file transfers (default true). The mmap-heavy delta
+  # algorithm hangs reading Proton Drive placeholder files, so keep this
+  # on for cloud pairs; set false only for real network filesystems.
+  rsync_whole_file: true
+  # Item 11 — rsync --timeout stall guard: a stuck cloud read fails after
+  # this many seconds instead of hanging the whole sync hour. 0 = off.
+  rsync_io_timeout_seconds: 300
   max_drive_usage_percent: 90
+  # Item 11 — when a pair has MORE than this many direct subfolders, the
+  # sync is split into one rsync per subfolder so one stuck cloud folder
+  # can't kill the whole pair (each chunk gets its own timeout).
   sync_chunk_subfolders: 30
   sync_chunk_concurrency: 1
   sync_timeout_minutes: 60

@@ -33,6 +33,10 @@ DEFAULTS: Dict[str, Any] = {
         ".DS_Store", "*.pyc", "*.pyo", "*.log", "*.crypt14",
         ".Spotlight-V100", ".TemporaryItems", ".fseventsd",
         ".DocumentRevisions-V100", ".Trash", ".Trashes", "*_files",
+        # Cloud apps' own artifacts — reading these placeholders is what
+        # made Proton syncs hang (item 11). The * catches Proton's
+        # '.trashed-<timestamp>-<name>' trash markers.
+        ".trashed*", ".pending*", ".thumbnails*",
         # Version control — back these up with git push, never file sync
         ".git", ".hg", ".svn", ".cvs",
         # Environments and dependencies — recreate from lock files
@@ -85,6 +89,11 @@ DEFAULTS: Dict[str, Any] = {
     "use_rsync": True,
     "rsync_checksum_mode": "timestamp",
     "rsync_size_only": False,
+    # Item 11: whole-file transfers by default — the mmap-heavy delta
+    # algorithm hangs reading Proton Drive placeholder files.
+    "rsync_whole_file": True,
+    # Item 11: per-I/O stall guard (rsync --timeout, seconds).
+    "rsync_io_timeout_seconds": 300,
     "rsync_additional_args": [],
     "max_drive_usage_percent": 90,
     "sync_chunk_subfolders": 30,

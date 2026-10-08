@@ -337,6 +337,8 @@ highlights:
 | `scan_interval` | How often the background process runs (seconds) |
 | `idle_backoff_factor` / `idle_backoff_max_multiplier` | Sleep longer when cycles change nothing |
 | `enable_folder_sync`, `enable_duplicate_detection`, `auto_git` | Feature switches (safe defaults off where dangerous) |
+| `rsync_whole_file` / `rsync_io_timeout_seconds` | Whole-file transfers + stall guard for cloud drives (item 11) |
+| `sync_chunk_subfolders` | Pairs with more subfolders than this are synced one subfolder at a time |
 | `phone_pull` | Where phone files land and where push mode reads from |
 
 **`phone:` section**
