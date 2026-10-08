@@ -100,6 +100,14 @@ class SubcommandMappingTests(unittest.TestCase):
         self.assertEqual(mapped, ["--background"])
         self.assertIsNone(handled)
 
+    def test_find_cloud_drives_maps_and_no_find_proton(self):
+        mapped, handled = organize.map_command("phone", ["find-cloud-drives"])
+        self.assertEqual(mapped, ["--find-cloud-drives"])
+        self.assertIsNone(handled)
+        # The user's spec: no specific find-proton command.
+        self.assertNotIn("find-proton", organize.PHONE_COMMANDS)
+        self.assertNotIn("--find-proton", organize.PHONE_PASSTHROUGH)
+
     def test_unknown_flags_pass_through(self):
         mapped, handled = organize.map_command(
             "computer", ["--REAL", "--scan-once"]

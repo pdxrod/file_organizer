@@ -30,12 +30,15 @@
 computer:
 
   drives:
-    # Define drive shortcuts here. You can use these names in sync_pairs and
-    # source_folders below. If a drive is not available, the program will
-    # skip it gracefully.
+    # Drive shortcuts — including the ADDRESSES OF YOUR CLOUD DRIVES on
+    # this computer. Use these names in sync_pairs and source_folders
+    # below. If a drive is not available, the program skips it gracefully.
+    # Replace the placeholder paths with your real ones.
     MAIN_DRIVE: "/Users/janedoe"
     EXTERNAL_DRIVE: "/Volumes/YourExternalDrive"
-    PROTON_DRIVE: "/Users/janedoe/ProtonDrive"
+    # e.g. the Proton Drive folder macOS mounts for your account:
+    PROTON_DRIVE: "/Users/janedoe/Library/CloudStorage/ProtonDrive-jdoe@protonmail.com-folder"
+    # e.g. a Google Drive sync folder:
     GOOGLE_DRIVE: "/Users/janedoe/GoogleDrive/MyFiles"
 
   sync_pairs:
@@ -474,6 +477,20 @@ phone:
     - "~/storage/shared/GoogleDrive"
     - "~/storage/shared/Google Drive"
     - "~/storage/shared/Dropbox"
+
+  # ── Phone-side cloud sync ────────────────────────────────────────────────
+  # When true, the daemon looks for cloud drive folders on the device
+  # (see cloud_drive_paths above) and copies new files from
+  # source_directories into each one — under a file_organizer subfolder —
+  # so your files are backed up to the cloud even without the computer.
+  # The free-space guard below applies to every copy.
+  sync_cloud_drives: false
+  cloud_sync_subfolder: "file_organizer"
+
+  # ── Free-space guard ──────────────────────────────────────────────────────
+  # The daemon stops copying when the target has less than this much free
+  # space (MB) — it never fills the phone up. 0 = off.
+  min_free_space_mb: 200
 
   # ── Grace period (minutes) ─────────────────────────────────────────────────
   # Files must be at least this old before the daemon will copy them.

@@ -112,9 +112,6 @@ DEFAULT_CLOUD_DRIVE_CANDIDATES = [
     "~/storage/shared/Dropbox",
 ]
 
-# Legacy name (pre cloud-drive generalisation).
-DEFAULT_PROTON_CANDIDATES = DEFAULT_CLOUD_DRIVE_CANDIDATES
-
 # Extensions never copied. Keep in sync with the phone: section of
 # config_template.yaml.
 DEFAULT_EXCLUDE_EXTENSIONS = [
@@ -283,12 +280,6 @@ def _select_phone_config(cfg):
     """
     if isinstance(cfg, dict) and isinstance(cfg.get("phone"), dict):
         cfg = cfg["phone"]
-    # Cloud-drive generalisation: the pre-existing proton_drive_paths key
-    # still works and is treated as cloud_drive_paths.
-    if isinstance(cfg, dict) and "cloud_drive_paths" not in cfg \
-            and cfg.get("proton_drive_paths") is not None:
-        cfg = dict(cfg)
-        cfg["cloud_drive_paths"] = cfg.pop("proton_drive_paths")
     return cfg
 
 
@@ -617,6 +608,15 @@ def _default_config() -> dict:
         "exclude_folder_names": list(DEFAULT_EXCLUDE_FOLDER_NAMES),
         "exclude_folder_patterns": [],  # folder NAMES only — e.g. "line", "twitter"
         "cloud_drive_paths": list(DEFAULT_CLOUD_DRIVE_CANDIDATES),
+        # Phone-side cloud sync: the daemon looks for cloud drive folders on
+        # the device and copies new files from source_directories into each
+        # one (under cloud_sync_subfolder), so files are backed up to the
+        # cloud even without the computer. Off by default.
+        "sync_cloud_drives": False,
+        "cloud_sync_subfolder": "file_organizer",
+        # Free-space guard: stop copying when the target has less than this
+        # much free space (MB) — never fill the phone up.
+        "min_free_space_mb": 200,
         "prune_max_age_days": 30,
         # Item 10: collapse foo (1).png rename families in the source dirs.
         # Off by default because it deletes files; preview with --dry-run.
@@ -674,9 +674,45 @@ class SyncDB:
                 file_size INTEGER NOT NULL,
                 file_mtime REAL NOT NULL,
                 copied_at TEXT NOT NULL,
-                UNIQUE(source_path, content_hash)
+                UNIQUE(source_path, content_hash, target_path)
             )
         """)
+        # Pre-cloud-sync databases have UNIQUE(source_path, content_hash),
+        # which would block recording the same source synced to a second
+        # destination (staging AND a found cloud drive). Recreate the table
+        # with a target-aware uniqueness constraint.
+        has_old_unique = False
+        for row in self.conn.execute("PRAGMA index_list(synced_files)"):
+            if not row[2]:  # unique flag
+                continue
+            idx_cols = [c[2] for c in
+                        self.conn.execute(f"PRAGMA index_info({row[1]})")]
+            if set(idx_cols) == {"source_path", "content_hash"}:
+                has_old_unique = True
+        if has_old_unique:
+            logger.info("Migrating sync database to target-aware tracking…")
+            self.conn.execute("ALTER TABLE synced_files RENAME TO synced_files_old")
+            self.conn.execute("""
+                CREATE TABLE synced_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_path TEXT NOT NULL,
+                    target_path TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    file_mtime REAL NOT NULL,
+                    copied_at TEXT NOT NULL,
+                    UNIQUE(source_path, content_hash, target_path)
+                )
+            """)
+            self.conn.execute("""
+                INSERT INTO synced_files
+                    (source_path, target_path, content_hash, file_size,
+                     file_mtime, copied_at)
+                SELECT source_path, target_path, content_hash, file_size,
+                       file_mtime, copied_at
+                FROM synced_files_old
+            """)
+            self.conn.execute("DROP TABLE synced_files_old")
         self.conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_synced_hash
             ON synced_files(content_hash, file_size)
@@ -687,31 +723,49 @@ class SyncDB:
         """)
         self.conn.commit()
 
-    def is_synced(self, source_path: str, content_hash: str, file_size: int) -> bool:
-        """Check if a file with this hash+size has already been synced from this path."""
-        row = self.conn.execute(
-            "SELECT 1 FROM synced_files WHERE source_path=? AND content_hash=? AND file_size=?",
-            (source_path, content_hash, file_size),
-        ).fetchone()
+    def is_synced(self, source_path: str, content_hash: str, file_size: int,
+                  target_path: Optional[str] = None) -> bool:
+        """Check if a file with this hash+size has already been synced from
+        this path (to the given target when target_path is set)."""
+        if target_path is not None:
+            row = self.conn.execute(
+                "SELECT 1 FROM synced_files WHERE source_path=? "
+                "AND content_hash=? AND file_size=? AND target_path=?",
+                (source_path, content_hash, file_size, target_path),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT 1 FROM synced_files WHERE source_path=? "
+                "AND content_hash=? AND file_size=?",
+                (source_path, content_hash, file_size),
+            ).fetchone()
         return row is not None
 
     def mark_synced(
         self, source_path: str, target_path: str,
         content_hash: str, file_size: int, file_mtime: float,
     ) -> None:
-        """Record a successful sync."""
+        """Record a successful sync to a specific target path."""
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        # Target-aware upsert: the same source may be synced to several
+        # destinations (staging + each found cloud drive).
         self.conn.execute(
-            """INSERT OR REPLACE INTO synced_files
+            "DELETE FROM synced_files WHERE source_path=? "
+            "AND content_hash=? AND target_path=?",
+            (source_path, content_hash, target_path),
+        )
+        self.conn.execute(
+            """INSERT INTO synced_files
                (source_path, target_path, content_hash, file_size, file_mtime, copied_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (source_path, target_path, content_hash, file_size, file_mtime, now),
         )
-        # Keep only the newest version per source so stats and target
-        # lookups stay accurate after in-place updates.
+        # Keep only the newest version per source+target so stats and
+        # target lookups stay accurate after in-place updates.
         self.conn.execute(
-            "DELETE FROM synced_files WHERE source_path=? AND content_hash != ?",
-            (source_path, content_hash),
+            "DELETE FROM synced_files WHERE source_path=? "
+            "AND target_path=? AND content_hash != ?",
+            (source_path, target_path, content_hash),
         )
         self.conn.commit()
 
@@ -921,12 +975,11 @@ def scan_sources(
 # ── Cloud drive finder ──────────────────────────────────────────────────────
 
 def find_cloud_drives(candidates: Optional[list] = None) -> list[Path]:
-    """Search common locations for cloud drive folders (Proton Drive, Google
+    """Search common locations for cloud drive folders (Google Drive, Proton
     Drive, Dropbox, iCloud, OneDrive, …). Returns list of found paths.
 
     candidates defaults to the built-in list; configs can override it with
-    the cloud_drive_paths key (the legacy proton_drive_paths key still
-    works).
+    the cloud_drive_paths key.
     """
     import glob as glob_mod
 
@@ -955,8 +1008,15 @@ def find_cloud_drives(candidates: Optional[list] = None) -> list[Path]:
     return unique
 
 
-# Legacy name (pre cloud-drive generalisation).
-find_proton_drive = find_cloud_drives
+def free_space_mb(path) -> Optional[int]:
+    """Free space in MB on the volume containing path, or None if unknown."""
+    try:
+        target = Path(path)
+        anchor = target if target.is_dir() else target.parent
+        usage = shutil.disk_usage(anchor if anchor.exists() else anchor.parent)
+        return usage.free // (1024 * 1024)
+    except OSError:
+        return None
 
 
 # ── Main daemon ──────────────────────────────────────────────────────────────
@@ -1002,6 +1062,21 @@ class PhoneSync:
         self.normalise_leading_dates = bool(
             self.config.get("normalise_leading_dates", True)
         )
+        # Phone-side cloud sync: find cloud drives on the device and copy
+        # new files into each one (under cloud_sync_subfolder). The
+        # free-space guard applies to every copy target.
+        self.sync_cloud_drives = bool(
+            self.config.get("sync_cloud_drives", False)
+        )
+        self.cloud_sync_subfolder = str(
+            self.config.get("cloud_sync_subfolder", "file_organizer")
+        ) or "file_organizer"
+        try:
+            self.min_free_space_mb = int(
+                self.config.get("min_free_space_mb", 200) or 0
+            )
+        except (TypeError, ValueError):
+            self.min_free_space_mb = 200
         # Idle backoff (item 14).
         self.backoff_factor = int(
             self.config.get("idle_backoff_factor", 2) or 2
@@ -1070,13 +1145,16 @@ class PhoneSync:
         pid_path.unlink(missing_ok=True)
 
     def copy_file(self, source: Path, dry_run: bool = False,
-                  dest_name: Optional[str] = None) -> Optional[Path]:
+                  dest_name: Optional[str] = None,
+                  target_root: Optional[Path] = None) -> Optional[Path]:
         """Copy a file to the target directory, preserving relative structure.
 
         The target path mirrors the source structure under target_dir.
         For example, DCIM/Camera/IMG_001.jpg → <target>/DCIM/Camera/IMG_001.jpg
         dest_name overrides the final filename (used by item 13's leading
         date normalisation: 2026-09-23-party.jpg → 20260923-party.jpg).
+        target_root overrides the destination root (phone-side cloud sync:
+        copies into a found cloud drive folder instead of staging).
 
         Returns the final target path on success (or the would-be target in
         dry-run mode), or None on failure. Copies are atomic: data is written
@@ -1102,7 +1180,7 @@ class PhoneSync:
         if dest_name:
             rel_path = rel_path.parent / dest_name
 
-        target = self.target_dir / rel_path
+        target = (target_root or self.target_dir) / rel_path
 
         if dry_run:
             logger.info("[DRY-RUN] Would copy: %s → %s", source, target)
@@ -1232,23 +1310,99 @@ class PhoneSync:
                         stats["renamed"], stats["deleted"])
         return stats
 
-    def scan_and_sync(self, dry_run: bool = False) -> dict:
-        """Run one scan-and-sync cycle. Returns stats dict."""
-        stats = {"scanned": 0, "copied": 0, "skipped": 0, "errors": 0,
-                 "bytes": 0, "held": 0}
-
-        # Item 10: (N)-family collapse before copying, when enabled.
-        collapse = self._collapse_rename_families_cycle(dry_run=dry_run)
-        stats["collapsed"] = collapse["renamed"] + collapse["deleted"]
-
+    def _scan_filters(self):
+        """Extension/pattern filters shared by the staging and cloud scans."""
         include_ext = self.config.get("include_extensions", []) or []
-        # Merge built-in safety defaults with user config (user only adds).
         exclude_ext = _merged_list(
             DEFAULT_EXCLUDE_EXTENSIONS, self.config.get("exclude_extensions")
         )
         exclude_pat = _merged_list(
             DEFAULT_EXCLUDE_PATTERNS, self.config.get("exclude_patterns")
         )
+        return include_ext, exclude_ext, exclude_pat
+
+    def _sync_cloud_drives_cycle(self, dry_run: bool = False) -> dict:
+        """Look for cloud drive folders on the device and copy new files
+        from the source directories into each one (under
+        cloud_sync_subfolder), so files reach the cloud even without the
+        computer. The free-space guard applies to every copy. Returns
+        stats {"found", "copied", "skipped"}.
+        """
+        stats = {"found": 0, "copied": 0, "skipped": 0}
+        if not self.sync_cloud_drives:
+            return stats
+
+        candidates = self.config.get("cloud_drive_paths") or \
+            DEFAULT_CLOUD_DRIVE_CANDIDATES
+        drives = find_cloud_drives(candidates)
+        if not drives:
+            logger.info("Cloud sync: no cloud drive folders found on this device")
+            return stats
+
+        include_ext, exclude_ext, exclude_pat = self._scan_filters()
+        for drive in drives:
+            # Never sync back into the staging folder itself (loop guard).
+            try:
+                dr = drive.resolve()
+                if dr == self.target_dir.resolve() or \
+                        self.target_dir.resolve() in dr.parents:
+                    continue
+            except OSError:
+                pass
+            stats["found"] += 1
+            dest_root = drive / self.cloud_sync_subfolder
+            logger.info("Cloud sync: copying new files to %s", dest_root)
+            for filepath, mtime in scan_sources(
+                self.source_dirs, include_ext, exclude_ext,
+                exclude_pat, self.exclude_folder_patterns,
+                self.exclude_folder_names, self.max_size_mb, self.min_age,
+            ):
+                if self.hold_app_generated_names and \
+                        is_app_generated(filepath.name):
+                    continue  # item 13 — held until renamed
+                file_hash = hash_file(filepath, self.max_size_mb)
+                if file_hash is None:
+                    continue
+                size = filepath.stat().st_size
+                dest_name = None
+                if self.normalise_leading_dates:
+                    new_name = normalise_leading_date(filepath.name)
+                    if new_name != filepath.name:
+                        dest_name = new_name
+                target_path = self.copy_file(
+                    filepath, dry_run=dry_run, dest_name=dest_name,
+                    target_root=dest_root,
+                )
+                if target_path is None:
+                    continue
+                if self.db.is_synced(str(filepath), file_hash, size,
+                                     target_path=str(target_path)):
+                    stats["skipped"] += 1
+                    continue
+                if not dry_run:
+                    self.db.mark_synced(
+                        str(filepath), str(target_path),
+                        file_hash, size, mtime,
+                    )
+                stats["copied"] += 1
+        return stats
+
+    def scan_and_sync(self, dry_run: bool = False) -> dict:
+        """Run one scan-and-sync cycle. Returns stats dict."""
+        stats = {"scanned": 0, "copied": 0, "skipped": 0, "errors": 0,
+                 "bytes": 0, "held": 0, "low_disk_space": 0}
+
+        # Item 10: (N)-family collapse before copying, when enabled.
+        collapse = self._collapse_rename_families_cycle(dry_run=dry_run)
+        stats["collapsed"] = collapse["renamed"] + collapse["deleted"]
+
+        include_ext, exclude_ext, exclude_pat = self._scan_filters()
+
+        # Free-space guard: report free space and stop the cycle when the
+        # target volume has less than min_free_space_mb left.
+        free_mb = free_space_mb(self.target_dir)
+        if free_mb is not None:
+            logger.info("Free space on target volume: %d MB", free_mb)
 
         for filepath, mtime in scan_sources(
             self.source_dirs, include_ext, exclude_ext,
@@ -1256,6 +1410,18 @@ class PhoneSync:
             self.max_size_mb, self.min_age,
         ):
             stats["scanned"] += 1
+
+            # Free-space guard — never fill the phone up.
+            if not dry_run and self.min_free_space_mb > 0:
+                free_mb = free_space_mb(self.target_dir)
+                if free_mb is not None and free_mb < self.min_free_space_mb:
+                    stats["low_disk_space"] += 1
+                    logger.warning(
+                        "Low disk space (%d MB free < %d MB) — stopping this "
+                        "cycle before %s",
+                        free_mb, self.min_free_space_mb, filepath,
+                    )
+                    break
 
             # Item 13: hold app-generated names until the user renames them.
             if self.hold_app_generated_names and is_app_generated(filepath.name):
@@ -1298,6 +1464,12 @@ class PhoneSync:
                 stats["bytes"] += size
             else:
                 stats["errors"] += 1
+
+        # Phone-side cloud sync: found cloud drive folders each get a copy
+        # of new files (when sync_cloud_drives is on).
+        cloud = self._sync_cloud_drives_cycle(dry_run=dry_run)
+        stats["cloud_found"] = cloud["found"]
+        stats["cloud_copied"] = cloud["copied"]
 
         return stats
 
@@ -1415,11 +1587,10 @@ def main(argv=None):
         help="Scan but do not actually copy files",
     )
     parser.add_argument(
-        "--find-cloud-drives", "--find-proton", dest="find_cloud_drives",
+        "--find-cloud-drives", dest="find_cloud_drives",
         action="store_true",
-        help="Search for cloud drive folders (Proton Drive, Google Drive, "
-             "Dropbox, iCloud, OneDrive, …) and exit. "
-             "--find-proton is the old name and still works.",
+        help="Search for cloud drive folders (Google Drive, Proton Drive, "
+             "Dropbox, iCloud, OneDrive, …) and exit",
     )
     parser.add_argument(
         "--stats", action="store_true",

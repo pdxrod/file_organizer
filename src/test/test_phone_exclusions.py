@@ -140,10 +140,12 @@ class CloudDriveCandidatesTests(unittest.TestCase):
         found = phone_sync.find_cloud_drives([str(self.dir / "MyDrive")])
         self.assertEqual(found, [self.dir / "MyDrive"])
 
-    def test_legacy_find_proton_drive_alias_still_works(self):
-        (self.dir / "MyDrive").mkdir()
-        found = phone_sync.find_proton_drive([str(self.dir / "MyDrive")])
-        self.assertEqual(found, [self.dir / "MyDrive"])
+    def test_no_find_proton_alias_remains(self):
+        # The user's spec: there is NO find-proton — only find-cloud-drives.
+        self.assertFalse(hasattr(phone_sync, "find_proton_drive"))
+        self.assertFalse(
+            hasattr(phone_sync, "DEFAULT_PROTON_CANDIDATES")
+        )
 
     def test_config_cloud_drive_paths_drives_finder(self):
         config = self.dir / "phone_sync_config.yaml"
@@ -156,21 +158,107 @@ class CloudDriveCandidatesTests(unittest.TestCase):
             phone_sync.DEFAULT_CLOUD_DRIVE_CANDIDATES
         self.assertEqual(candidates, [f"{self.dir}/MyDrive"])
 
-    def test_legacy_proton_drive_paths_key_migrates(self):
-        config = self.dir / "phone_sync_config.yaml"
-        config.write_text(
-            "proton_drive_paths:\n"
-            f"  - \"{self.dir}/MyDrive\"\n"
-        )
-        cfg = phone_sync.load_config(str(config))
-        # The old key is treated as cloud_drive_paths.
-        self.assertEqual(cfg.get("cloud_drive_paths"), [f"{self.dir}/MyDrive"])
-
     def test_default_candidates_cover_multiple_clouds(self):
         text = "\n".join(phone_sync.DEFAULT_CLOUD_DRIVE_CANDIDATES)
         for name in ("ProtonDrive", "GoogleDrive", "Dropbox", "OneDrive",
                      "CloudDocs"):
             self.assertIn(name, text)
+
+
+class PhoneCloudSyncTests(unittest.TestCase):
+    """Phone-side cloud sync: found cloud drives get copies of new files,
+    tracked per destination, with the free-space guard."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+        self.src = self.dir / "DCIM"
+        self.src.mkdir()
+        self.cloud = self.dir / "MyCloud"
+        self.cloud.mkdir()
+        self.target = self.dir / "staging"
+        self.old = time.time() - 7200
+
+    def _write(self, name, content="x"):
+        p = self.src / name
+        p.write_text(content)
+        os.utime(p, (self.old, self.old))
+        return p
+
+    def _sync(self, extra: str = ""):
+        config = self.dir / "phone_sync_config.yaml"
+        config.write_text(
+            f"db_path: \"{self.dir}/db.sqlite\"\n"
+            f"target_directory: \"{self.target}\"\n"
+            "min_age_minutes: 0\n"
+            "sync_cloud_drives: true\n"
+            "cloud_drive_paths:\n"
+            f"  - \"{self.cloud}\"\n"
+            "source_directories:\n"
+            f"  - \"{self.src}\"\n"
+            + extra
+        )
+        return phone_sync.PhoneSync(str(config))
+
+    def test_cloud_sync_copies_to_found_drive(self):
+        self._write("report.txt", "hello")
+        sync = self._sync()
+        try:
+            stats = sync.scan_and_sync(dry_run=False)
+            self.assertEqual(stats["cloud_found"], 1)
+            self.assertEqual(stats["cloud_copied"], 1)
+            self.assertEqual(
+                (self.cloud / "file_organizer" / "report.txt").read_text(),
+                "hello",
+            )
+            # The staging copy happened too.
+            self.assertTrue((self.target / "report.txt").exists())
+        finally:
+            sync.db.close()
+
+    def test_second_run_does_not_recopy_to_cloud(self):
+        self._write("report.txt", "hello")
+        sync = self._sync()
+        try:
+            first = sync.scan_and_sync(dry_run=False)
+            self.assertEqual(first["cloud_copied"], 1)
+            second = sync.scan_and_sync(dry_run=False)
+            self.assertEqual(second["cloud_copied"], 0)
+        finally:
+            sync.db.close()
+
+    def test_held_app_names_are_not_copied_to_cloud(self):
+        self._write("Screenshot_20260101-123456.png")
+        sync = self._sync()
+        try:
+            sync.scan_and_sync(dry_run=False)
+            self.assertFalse(
+                (self.cloud / "file_organizer").exists() or
+                (self.cloud / "file_organizer" / "Screenshot_20260101-123456.png").exists()
+            )
+        finally:
+            sync.db.close()
+
+    def test_free_space_guard_stops_cycle(self):
+        self._write("report.txt", "hello")
+        sync = self._sync("min_free_space_mb: 1000000000\n")
+        try:
+            stats = sync.scan_and_sync(dry_run=False)
+            self.assertEqual(stats["low_disk_space"], 1)
+            self.assertEqual(stats["copied"], 0)
+        finally:
+            sync.db.close()
+
+    def test_disabled_cloud_sync_copies_nothing(self):
+        self._write("report.txt", "hello")
+        sync = self._sync("sync_cloud_drives: false\n")
+        try:
+            stats = sync.scan_and_sync(dry_run=False)
+            self.assertEqual(stats["cloud_found"], 0)
+            self.assertFalse((self.cloud / "file_organizer").exists())
+        finally:
+            sync.db.close()
 
 class PhoneSyncMergeTests(unittest.TestCase):
     def setUp(self):

@@ -94,14 +94,13 @@ PHONE_COMMANDS = {
     "status": ["--status"],
     "stats": ["--stats"],
     "find-cloud-drives": ["--find-cloud-drives"],
-    "find-proton": ["--find-cloud-drives"],  # old name — still works
     "make-config": ["--make-config"],
 }
 
 # Phone flags that pass straight through to phone_sync.
 PHONE_PASSTHROUGH = (
     "--scan-once", "--dry-run", "--background", "--daemon",
-    "--find-cloud-drives", "--find-proton", "--stats", "--status",
+    "--find-cloud-drives", "--stats", "--status",
     "--stop", "--make-config",
     "-v", "--verbose", "--config", "-h", "--help",
 )
