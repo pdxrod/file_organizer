@@ -8,5 +8,5 @@ Handles .git, .venv, and other development folders intelligently.
 """
 
 __version__ = "2.0.0"
-__author__ = "Rod McLaughlin"
+__author__ = "janedoe"
 __license__ = "MIT"

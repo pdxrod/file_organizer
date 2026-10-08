@@ -161,7 +161,7 @@ Watch what it does:
 
    # Or directly on the phone:
    pkg install git
-   git clone https://github.com/pdxrod/file_organizer.git
+   git clone https://github.com/janedoe/file_organizer.git
    ```
 
 4. First run — creates `phone_sync_config.yaml` from the template's
