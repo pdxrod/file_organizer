@@ -93,14 +93,16 @@ PHONE_COMMANDS = {
     "stop": ["--stop"],
     "status": ["--status"],
     "stats": ["--stats"],
-    "find-proton": ["--find-proton"],
+    "find-cloud-drives": ["--find-cloud-drives"],
+    "find-proton": ["--find-cloud-drives"],  # old name — still works
     "make-config": ["--make-config"],
 }
 
 # Phone flags that pass straight through to phone_sync.
 PHONE_PASSTHROUGH = (
     "--scan-once", "--dry-run", "--background", "--daemon",
-    "--find-proton", "--stats", "--status", "--stop", "--make-config",
+    "--find-cloud-drives", "--find-proton", "--stats", "--status",
+    "--stop", "--make-config",
     "-v", "--verbose", "--config", "-h", "--help",
 )
 
@@ -408,7 +410,7 @@ def computer_setup(log):
 
 
 def phone_setup(log):
-    run_phone_cli(PHONE_COMMANDS["find-proton"])
+    run_phone_cli(PHONE_COMMANDS["find-cloud-drives"])
     cfg_path = Path(phone_config_path())
     if not cfg_path.exists():
         run_phone_cli(PHONE_COMMANDS["make-config"])
@@ -532,11 +534,11 @@ def usage(platform):
             "  ./organize status        is it running?",
             "  ./organize log           follow the log file (Ctrl+C to stop)",
             "  ./organize stats         sync database statistics",
-            "  ./organize find-proton   locate the Proton Drive folder",
+            "  ./organize find-cloud-drives  locate your cloud drive folders",
             "  ./organize make-config   create phone_sync_config.yaml",
             "  ./organize setup         first-time setup wizard",
             "",
-            "Flags (phone): --scan-once --dry-run --background --find-proton",
+            "Flags (phone): --scan-once --dry-run --background --find-cloud-drives",
             "  --stats --status --stop --make-config --config FILE -v",
             "",
             "On a computer (run there instead):",

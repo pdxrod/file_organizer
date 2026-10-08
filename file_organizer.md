@@ -209,6 +209,11 @@ It needs to be configurable so that any folder in /storage/emulated/0/file_organ
 
 15. The folder it creates, 'organized', full of soft links, should be located in the file_organizer folder by default, instead of in the user's home folder, but where it is should be configurable in a config file. 
 
+16. There should not be a specific 'find-proton' flag. It might be 'find-cloud-drives' and it would find any: Google, Proton, or any other cloud drives. The config file should contain addresses of cloud drives on computers e.g. 
+  PROTON_DRIVE: "/Users/janedoe/Library/CloudStorage/ProtonDrive-jdoe@protonmail.com-folder"
+  GOOGLE_DRIVE: "/Users/janedoe/GoogleDrive"
+On a phone, the daemon would look for cloud drives and try to synchronise them with drives on the phone - taking account of available disc space on the phone.
+
 DeepSeek, 2026-10-04:
 I've read file_organizer.md and surveyed the codebase. Here's my report.
 
@@ -281,5 +286,6 @@ Phase 4d done (item 11) — diagnosed and fixed the PROTON_DRIVE hit-and-miss sy
 - Fix 4: Proton's own artifacts (.trashed-<timestamp>-<name> markers, .pending, .thumbnails) are now in the built-in safety excludes so rsync never tries to read them.
 - Verified on the real mount: a dry-run of Proton pol → MAIN_DRIVE pol enumerated 8274 files and found 788 real differences (files missing on the computer that previous syncs never got to) — with chunking these now transfer piecemeal instead of timing out. 7 new tests (116 total).
 - Note for the user: ~/Documents is protected by macOS privacy (TCC) — the daemon needs Full Disk Access for Documents/Desktop/Downloads pairs.
+Cloud-drive generalisation: all Proton-specific finder wording is now generic. --find-proton → --find-cloud-drives (organize find-cloud-drives; the old names still work), the proton_drive_paths config key → cloud_drive_paths (old key still honoured), and the built-in candidates now cover Proton Drive, Google Drive, Dropbox, iCloud, OneDrive and Box on macOS/Windows/Android. Verified on this Mac: finds the mounted Proton folder. 4 new tests (119 total).
 
 If you approve this order, I'd start with Phase 1: items 3 and 4, then 7, then pause for your answer on the merge.

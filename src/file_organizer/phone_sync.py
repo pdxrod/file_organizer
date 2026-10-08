@@ -3,13 +3,14 @@
 Phone Sync — lightweight file monitor and sync for Android (Termux) or macOS.
 
 Monitors configured source directories and copies new/changed files to a
-target Proton Drive folder. Tracks copied files by content hash (SHA-256)
-so renames and moves are handled correctly.
+target cloud drive folder (Proton Drive, Google Drive, Dropbox, …). Tracks
+copied files by content hash (SHA-256) so renames and moves are handled
+correctly.
 
 Key features:
 - Content-hash tracking (SQLite) — never copies the same file twice
 - min_age_minutes grace period — gives you time to delete unwanted photos
-  before they get backed up (solves the Proton Drive "too eager" problem)
+  before they get backed up (solves the cloud "too eager" backup problem)
 - Configurable source directories and target path
 - Dry-run mode for safe testing
 - Runs on Android via Termux, or on macOS
@@ -20,7 +21,7 @@ Usage:
     python3 phone_sync.py --background # start in the background
     python3 phone_sync.py --scan-once  # single scan then exit
     python3 phone_sync.py --dry-run    # scan but don't copy
-    python3 phone_sync.py --find-proton  # locate Proton Drive folder
+    python3 phone_sync.py --find-cloud-drives  # locate cloud drive folders
     python3 phone_sync.py --config /path/to/config.yaml
 """
 
@@ -61,29 +62,58 @@ DEFAULT_LOG = "~/.phone_sync.log"
 DEFAULT_PID = "~/.phone_sync.pid"
 
 # Built-in safety defaults. The live, editable copies of these lists live in
-# the phone: section of config_template.yaml (proton_drive_paths,
+# the phone: section of config_template.yaml (cloud_drive_paths,
 # exclude_extensions, exclude_patterns, exclude_folder_names). User config
 # lists are MERGED on top of these rather than replacing them, so junk never
 # gets copied even with a config file created before these rules existed.
 
-# Common Proton Drive paths on various platforms (fallback for the
-# proton_drive_paths config key).
-DEFAULT_PROTON_CANDIDATES = [
-    # macOS
+# Common cloud drive paths on various platforms (fallback for the
+# cloud_drive_paths config key). The finder reports ALL of them — the user
+# may use Proton Drive, Google Drive, Dropbox, iCloud, OneDrive, or any
+# other cloud app.
+DEFAULT_CLOUD_DRIVE_CANDIDATES = [
+    # macOS — Apple File Provider mounts
     "~/Library/CloudStorage/ProtonDrive-*",
+    "~/Library/CloudStorage/GoogleDrive-*",
+    "~/Library/CloudStorage/Dropbox-*",
+    "~/Library/CloudStorage/OneDrive-*",
+    "~/Library/CloudStorage/Box-*",
+    # macOS — classic sync-app folders
+    "~/Google Drive",
+    "~/GoogleDrive",
+    "~/Dropbox",
+    "~/OneDrive",
+    "~/iCloud Drive",
+    "~/Library/Mobile Documents/com~apple~CloudDocs",  # iCloud Drive
+    # Windows
+    "C:/Users/*/Google Drive",
+    "C:/Users/*/Dropbox",
+    "C:/Users/*/OneDrive",
     # Android — shared storage
     "/storage/emulated/0/ProtonDrive",
     "/storage/emulated/0/Proton Drive",
+    "/storage/emulated/0/GoogleDrive",
+    "/storage/emulated/0/Google Drive",
+    "/storage/emulated/0/Dropbox",
+    "/storage/emulated/0/OneDrive",
     "/storage/emulated/0/Documents/ProtonDrive",
     "/storage/emulated/0/Download/ProtonDrive",
     # Android — app media (scoped storage)
     "/storage/emulated/0/Android/media/com.protontech.android.drive",
+    "/storage/emulated/0/Android/media/com.google.android.apps.docs",
+    "/storage/emulated/0/Android/media/com.dropbox.android",
     # Android — app data (may need root)
     "/storage/emulated/0/Android/data/com.protontech.android.drive/files",
     # Termux shared
     "~/storage/shared/ProtonDrive",
     "~/storage/shared/Proton Drive",
+    "~/storage/shared/GoogleDrive",
+    "~/storage/shared/Google Drive",
+    "~/storage/shared/Dropbox",
 ]
+
+# Legacy name (pre cloud-drive generalisation).
+DEFAULT_PROTON_CANDIDATES = DEFAULT_CLOUD_DRIVE_CANDIDATES
 
 # Extensions never copied. Keep in sync with the phone: section of
 # config_template.yaml.
@@ -252,7 +282,13 @@ def _select_phone_config(cfg):
     flat phone config dict.
     """
     if isinstance(cfg, dict) and isinstance(cfg.get("phone"), dict):
-        return cfg["phone"]
+        cfg = cfg["phone"]
+    # Cloud-drive generalisation: the pre-existing proton_drive_paths key
+    # still works and is treated as cloud_drive_paths.
+    if isinstance(cfg, dict) and "cloud_drive_paths" not in cfg \
+            and cfg.get("proton_drive_paths") is not None:
+        cfg = dict(cfg)
+        cfg["cloud_drive_paths"] = cfg.pop("proton_drive_paths")
     return cfg
 
 
@@ -580,7 +616,7 @@ def _default_config() -> dict:
         "exclude_patterns": list(DEFAULT_EXCLUDE_PATTERNS),
         "exclude_folder_names": list(DEFAULT_EXCLUDE_FOLDER_NAMES),
         "exclude_folder_patterns": [],  # folder NAMES only — e.g. "line", "twitter"
-        "proton_drive_paths": list(DEFAULT_PROTON_CANDIDATES),
+        "cloud_drive_paths": list(DEFAULT_CLOUD_DRIVE_CANDIDATES),
         "prune_max_age_days": 30,
         # Item 10: collapse foo (1).png rename families in the source dirs.
         # Off by default because it deletes files; preview with --dry-run.
@@ -882,18 +918,20 @@ def scan_sources(
                 yield (Path(dirpath_str) / fname, st.st_mtime)
 
 
-# ── Proton Drive finder ──────────────────────────────────────────────────────
+# ── Cloud drive finder ──────────────────────────────────────────────────────
 
-def find_proton_drive(candidates: Optional[list] = None) -> list[Path]:
-    """Search common locations for Proton Drive folder. Returns list of found paths.
+def find_cloud_drives(candidates: Optional[list] = None) -> list[Path]:
+    """Search common locations for cloud drive folders (Proton Drive, Google
+    Drive, Dropbox, iCloud, OneDrive, …). Returns list of found paths.
 
-    candidates defaults to the built-in list; configs can override it with the
-    proton_drive_paths key.
+    candidates defaults to the built-in list; configs can override it with
+    the cloud_drive_paths key (the legacy proton_drive_paths key still
+    works).
     """
     import glob as glob_mod
 
     found = []
-    for candidate in (candidates if candidates is not None else DEFAULT_PROTON_CANDIDATES):
+    for candidate in (candidates if candidates is not None else DEFAULT_CLOUD_DRIVE_CANDIDATES):
         expanded = os.path.expanduser(candidate)
         if "*" in expanded:
             matches = glob_mod.glob(expanded)
@@ -917,10 +955,14 @@ def find_proton_drive(candidates: Optional[list] = None) -> list[Path]:
     return unique
 
 
+# Legacy name (pre cloud-drive generalisation).
+find_proton_drive = find_cloud_drives
+
+
 # ── Main daemon ──────────────────────────────────────────────────────────────
 
 class PhoneSync:
-    """Monitors phone directories and syncs new files to Proton Drive."""
+    """Monitors phone directories and syncs new files to your cloud drive."""
 
     def __init__(self, config_path: str):
         self.config = load_config(config_path)
@@ -1345,13 +1387,13 @@ class PhoneSync:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Phone Sync - monitor and sync phone files to Proton Drive",
+        description="Phone Sync - monitor and sync phone files to your cloud drive",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   python3 phone_sync.py --scan-once --dry-run     # test without copying
   python3 phone_sync.py --scan-once               # one-shot real run
   python3 phone_sync.py --background              # start in the background
-  python3 phone_sync.py --find-proton             # locate Proton Drive folder
+  python3 phone_sync.py --find-cloud-drives       # locate your cloud drive folders
   python3 phone_sync.py --config my_config.yaml # use custom config
         """,
     )
@@ -1373,8 +1415,11 @@ def main(argv=None):
         help="Scan but do not actually copy files",
     )
     parser.add_argument(
-        "--find-proton", action="store_true",
-        help="Search for Proton Drive folder and exit",
+        "--find-cloud-drives", "--find-proton", dest="find_cloud_drives",
+        action="store_true",
+        help="Search for cloud drive folders (Proton Drive, Google Drive, "
+             "Dropbox, iCloud, OneDrive, …) and exit. "
+             "--find-proton is the old name and still works.",
     )
     parser.add_argument(
         "--stats", action="store_true",
@@ -1407,21 +1452,21 @@ def main(argv=None):
               f"({len(cfg)} settings). Edit it and run again.")
         return
 
-    if args.find_proton:
+    if args.find_cloud_drives:
         cfg = load_config(args.config)
-        candidates = cfg.get("proton_drive_paths") or DEFAULT_PROTON_CANDIDATES
-        found = find_proton_drive(candidates)
+        candidates = cfg.get("cloud_drive_paths") or DEFAULT_CLOUD_DRIVE_CANDIDATES
+        found = find_cloud_drives(candidates)
         if found:
-            print(f"Found {len(found)} Proton Drive location(s):")
+            print(f"Found {len(found)} cloud drive folder(s):")
             for p in found:
                 print(f"  {p}")
         else:
-            print("No Proton Drive folder found at common locations.")
+            print("No cloud drive folders found at common locations.")
             print("Checked:")
             for c in candidates:
                 print(f"  {c}")
             print("\nTip: Manually set target_directory in phone_sync_config.yaml")
-            print("Tip: Or add your path to proton_drive_paths in that file.")
+            print("Tip: Or add your path to cloud_drive_paths in that file.")
         return
 
     if args.stats:

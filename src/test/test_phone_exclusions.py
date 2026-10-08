@@ -5,7 +5,8 @@ Covers:
 - Nested path patterns like priv/static and tmp/cache.
 - Extension exclusions (.crypt14 etc.).
 - Built-in safety defaults merged with (not replaced by) user config.
-- proton_drive_paths config key driving find_proton_drive.
+- cloud_drive_paths config key driving find_cloud_drives (with the legacy
+  proton_drive_paths key still honoured).
 """
 
 import os
@@ -128,28 +129,48 @@ class ScanExclusionTests(unittest.TestCase):
         self.assertNotIn("thing.custom", found)
 
 
-class ProtonCandidatesTests(unittest.TestCase):
+class CloudDriveCandidatesTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.dir = Path(self.tmp.name).resolve()
 
-    def test_find_proton_drive_uses_given_candidates(self):
+    def test_find_cloud_drives_uses_given_candidates(self):
+        (self.dir / "MyDrive").mkdir()
+        found = phone_sync.find_cloud_drives([str(self.dir / "MyDrive")])
+        self.assertEqual(found, [self.dir / "MyDrive"])
+
+    def test_legacy_find_proton_drive_alias_still_works(self):
         (self.dir / "MyDrive").mkdir()
         found = phone_sync.find_proton_drive([str(self.dir / "MyDrive")])
         self.assertEqual(found, [self.dir / "MyDrive"])
 
-    def test_config_proton_drive_paths_drives_finder(self):
+    def test_config_cloud_drive_paths_drives_finder(self):
+        config = self.dir / "phone_sync_config.yaml"
+        config.write_text(
+            "cloud_drive_paths:\n"
+            f"  - \"{self.dir}/MyDrive\"\n"
+        )
+        cfg = phone_sync.load_config(str(config))
+        candidates = cfg.get("cloud_drive_paths") or \
+            phone_sync.DEFAULT_CLOUD_DRIVE_CANDIDATES
+        self.assertEqual(candidates, [f"{self.dir}/MyDrive"])
+
+    def test_legacy_proton_drive_paths_key_migrates(self):
         config = self.dir / "phone_sync_config.yaml"
         config.write_text(
             "proton_drive_paths:\n"
             f"  - \"{self.dir}/MyDrive\"\n"
         )
         cfg = phone_sync.load_config(str(config))
-        candidates = cfg.get("proton_drive_paths") or \
-            phone_sync.DEFAULT_PROTON_CANDIDATES
-        self.assertEqual(candidates, [f"{self.dir}/MyDrive"])
+        # The old key is treated as cloud_drive_paths.
+        self.assertEqual(cfg.get("cloud_drive_paths"), [f"{self.dir}/MyDrive"])
 
+    def test_default_candidates_cover_multiple_clouds(self):
+        text = "\n".join(phone_sync.DEFAULT_CLOUD_DRIVE_CANDIDATES)
+        for name in ("ProtonDrive", "GoogleDrive", "Dropbox", "OneDrive",
+                     "CloudDocs"):
+            self.assertIn(name, text)
 
 class PhoneSyncMergeTests(unittest.TestCase):
     def setUp(self):

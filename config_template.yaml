@@ -439,35 +439,46 @@ phone:
   # On macOS (running the daemon on the Mac itself):
   #   /Users/YOURNAME/Library/CloudStorage/ProtonDrive-.../My Files/misc
   #
-  # TIP: Run `python3 phone_sync.py --find-proton` to locate Proton Drive
+  # TIP: Run `./organize find-cloud-drives` to locate your cloud drive
   # folders (mainly useful on macOS).
   target_directory: "/storage/emulated/0/file_organizer_staging"
 
-  # ── Proton Drive candidate paths ───────────────────────────────────────────
-  # Where to look for the Proton Drive folder (`--find-proton` checks these).
-  # Wildcards like * are allowed. Add your own paths here if Proton Drive
-  # lives somewhere unusual; the built-in defaults are used for any paths
-  # you don't override.
-  proton_drive_paths:
-    # macOS
+  # ── Cloud drive candidate paths ───────────────────────────────────────────
+  # Where to look for cloud drive folders (`find-cloud-drives` checks
+  # these): Proton Drive, Google Drive, Dropbox, iCloud, OneDrive, and
+  # whatever else you add. Wildcards like * are allowed. The built-in
+  # defaults are used for any paths you don't override.
+  cloud_drive_paths:
+    # macOS — Apple File Provider mounts
     - "~/Library/CloudStorage/ProtonDrive-*"
+    - "~/Library/CloudStorage/GoogleDrive-*"
+    - "~/Library/CloudStorage/Dropbox-*"
+    - "~/Library/CloudStorage/OneDrive-*"
+    # macOS — classic sync-app folders
+    - "~/Google Drive"
+    - "~/GoogleDrive"
+    - "~/Dropbox"
+    - "~/OneDrive"
+    - "~/iCloud Drive"
+    - "~/Library/Mobile Documents/com~apple~CloudDocs"
     # Android — shared storage
     - "/storage/emulated/0/ProtonDrive"
     - "/storage/emulated/0/Proton Drive"
-    - "/storage/emulated/0/Documents/ProtonDrive"
-    - "/storage/emulated/0/Download/ProtonDrive"
-    # Android — app media (scoped storage)
-    - "/storage/emulated/0/Android/media/com.protontech.android.drive"
-    # Android — app data (may need root)
-    - "/storage/emulated/0/Android/data/com.protontech.android.drive/files"
+    - "/storage/emulated/0/GoogleDrive"
+    - "/storage/emulated/0/Google Drive"
+    - "/storage/emulated/0/Dropbox"
+    - "/storage/emulated/0/OneDrive"
     # Termux shared
     - "~/storage/shared/ProtonDrive"
     - "~/storage/shared/Proton Drive"
+    - "~/storage/shared/GoogleDrive"
+    - "~/storage/shared/Google Drive"
+    - "~/storage/shared/Dropbox"
 
   # ── Grace period (minutes) ─────────────────────────────────────────────────
   # Files must be at least this old before the daemon will copy them.
   # This gives you time to delete unwanted photos BEFORE they get backed up
-  # — solving the Proton Drive "too eager" backup problem.
+  # — solving the cloud "too eager" backup problem.
   #
   # Set to 0 to copy immediately. Recommended: 5-10 minutes.
   min_age_minutes: 10

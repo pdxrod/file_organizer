@@ -265,7 +265,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `stats` | Show the sync database statistics |
 | `test` | Single **dry-run** scan — no files copied |
 | `scan` | Single production scan |
-| `find-proton` | Locate the Proton Drive folder on the device |
+| `find-cloud-drives` | Locate your cloud drive folders (Proton Drive, Google Drive, Dropbox, …) |
 | `make-config` | Create phone_sync_config.yaml from the template |
 | `setup` | First-time setup wizard |
 
@@ -351,7 +351,7 @@ highlights:
 | `scan_interval_seconds` | How often to check for new files |
 | `include_extensions` / `exclude_extensions` | Extension filters |
 | `exclude_patterns` / `exclude_folder_names` | Never-copy lists (merged with defaults) |
-| `proton_drive_paths` | Where `--find-proton` looks |
+| `cloud_drive_paths` | Where `find-cloud-drives` looks (any cloud app — Proton, Google, Dropbox, …) |
 | `hold_app_generated_names` | Hold `Screenshot_…`, `YYYYMMDD_HHMMSS.jpg` etc. until renamed (item 13) |
 | `normalise_leading_dates` | `2026-09-23-party.jpg` → `20260923-party.jpg` on the copy (item 13) |
 
