@@ -356,14 +356,25 @@ class Config:
             if len(folders) != 2:
                 raise ConfigError(f"one_way_pairs[{i}] must have exactly 2 folders, got {len(folders)}")
 
-        # Template placeholders in paths mean the config was never
-        # personalised — fail fast with instructions (item 7).
-        self._validate_path_placeholders()
+        # Missing drives: REPORT them clearly and exit (a missing drive
+        # means the config points somewhere that is not there — the user
+        # must fix the config or plug the drive in).
+        missing = [
+            f"{key} ('{path}')"
+            for key, path in self.drives.items()
+            if not os.path.exists(path)
+        ]
+        if missing:
+            raise ConfigError(
+                "Drive(s) do not exist on this computer: "
+                + ", ".join(missing)
+                + ". Plug the drive in, or edit config.yaml and set your "
+                "real paths."
+            )
 
-        # Check drives exist (warn, don't fail — removable drives come and go)
-        for key, path in self.drives.items():
-            if not os.path.exists(path):
-                print(f"⚠️  Drive '{key}' ({path}) does not exist — will skip when needed", file=sys.stderr)
+        # Folders (sync pairs, source folders) which don't exist: WARN and
+        # skip — they come and go and are never fatal.
+        self._validate_path_placeholders()
 
         # Validate numeric ranges
         for field, low, high in [
@@ -378,14 +389,14 @@ class Config:
                 print(f"⚠️  {field}={val} is outside recommended range [{low}, {high}]", file=sys.stderr)
 
     def _validate_path_placeholders(self) -> None:
-        """Raise ConfigError if a configured path is a template placeholder
-        that does not exist (item 7).
+        """Warn (never fail) about configured paths that don't exist.
 
-        Removable drives genuinely come and go, so REAL missing paths only
-        warn (see above). But a missing path that still contains a template
-        placeholder (e.g. /Users/janedoe) means the config is an unedited
-        copy of config_template.yaml — exit with instructions instead of
-        silently doing nothing.
+        Drives and folders which don't exist are simply ignored — removable
+        drives genuinely come and go, and the user may not use every drive
+        in the template. A missing path that still contains a template
+        placeholder (e.g. /Users/janedoe or YourExternalDrive) gets a
+        LOUDER warning so the user knows the config looks unedited — but
+        the program keeps running and skips it.
         """
         def _is_placeholder(path: str) -> bool:
             return any(m in path.lower() for m in TEMPLATE_PLACEHOLDER_MARKERS)
@@ -394,17 +405,21 @@ class Config:
             if not path or os.path.exists(os.path.expanduser(path)):
                 return
             if _is_placeholder(path):
-                raise ConfigError(
-                    f"{what} '{path}' does not exist and still contains a "
-                    f"template placeholder (e.g. /Users/janedoe). "
-                    f"This looks like an unedited copy of "
-                    f"config_template.yaml. Edit config.yaml and set your "
-                    f"real paths, then run again."
+                print(
+                    f"⚠️  {what} '{path}' does not exist and still contains "
+                    f"a template placeholder (e.g. /Users/janedoe) — skipped. "
+                    f"If this is an unedited copy of config_template.yaml, "
+                    f"edit config.yaml and set your real paths.",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"⚠️  {what} '{path}' does not exist — will skip when "
+                    f"needed",
+                    file=sys.stderr,
                 )
 
         d = self.data
-        for key, path in d.get("drives", {}).items():
-            _check(path, f"Drive '{key}'")
         all_pairs = d.get("sync_pairs", []) + d.get("one_way_pairs", [])
         for i, pair in enumerate(all_pairs):
             for folder in pair.get("folders", []):

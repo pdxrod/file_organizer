@@ -178,8 +178,9 @@ def _collapse_folders(config: Config):
 
 
 def _run_collapse(config: Config, dry_run: bool = True) -> dict:
-    """Plan (and optionally apply) the (N)-family collapse across the
-    configured folders. Returns stats {"renamed", "deleted"}."""
+    """Plan (and optionally apply) the duplicate collapse across the
+    configured folders: (N)-rename families plus identical-content '_N'
+    duplicates. Returns stats {"renamed", "deleted"}."""
     from file_organizer.rename_family import collapse_in_tree, apply_collapse
     actions = []
     for folder in _collapse_folders(config):
@@ -187,7 +188,10 @@ def _run_collapse(config: Config, dry_run: bool = True) -> dict:
         if not root.exists():
             logger.warning("Collapse: skipping missing folder %s", root)
             continue
-        actions.extend(collapse_in_tree(root))
+        # keep_differing: siblings whose content differs from the winner
+        # are NOT deleted — numbered web-archive assets are different
+        # files, not duplicates.
+        actions.extend(collapse_in_tree(root, keep_differing=True))
     return apply_collapse(actions, dry_run=dry_run)
 
 def main(argv=None):
@@ -200,8 +204,9 @@ def main(argv=None):
     parser.add_argument("--git-init", action="store_true", help="Run auto-git: init, .gitignore, add, commit")
     parser.add_argument("--cleanup", action="store_true", help="Remove broken and stale symlinks from the organized folder")
     parser.add_argument("--collapse-renames", action="store_true",
-                        help="Collapse 'foo (1).png' rename families — shows a "
-                             "plan, applies only with --REAL")
+                        help="Collapse 'foo (1).png' families and delete "
+                             "identical '_N' duplicates — shows a plan, "
+                             "applies only with --REAL")
     parser.add_argument("--create-test", action="store_true", help="Create test environment")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")

@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from file_organizer import phone_sync  # noqa: E402
 from file_organizer.rename_family import (  # noqa: E402
     parse_family, plan_collapse, apply_collapse,
+    plan_underscore_duplicates,
 )
 
 import logging  # noqa: E402
@@ -116,6 +117,86 @@ class PlanCollapseTests(unittest.TestCase):
         self.assertEqual((self.dir / "foo.png").read_text(), "newest")
         self.assertFalse((self.dir / "foo (1).png").exists())
         self.assertFalse((self.dir / "foo (2).png").exists())
+
+    def test_keep_differing_skips_divergent_family(self):
+        # A web-archive family where the newest member differs from the
+        # base: renaming over the base would destroy its content — safe
+        # mode keeps the whole family untouched.
+        base = self._write("page.png", "base-content", age=self.old - 100)
+        mid = self._write("page (1).png", "base-content", age=self.old - 50)
+        new = self._write("page (2).png", "DIFFERENT", age=self.old)
+        actions = plan_collapse(self.dir, keep_differing=True)
+        self.assertEqual(actions, [])
+        self.assertTrue(base.exists() and mid.exists() and new.exists())
+
+    def test_keep_differing_identical_family_collapses(self):
+        # All members identical — safe mode still collapses the family.
+        self._write("page.png", "same", age=self.old - 100)
+        self._write("page (1).png", "same", age=self.old - 50)
+        self._write("page (2).png", "same", age=self.old)
+        actions = plan_collapse(self.dir, keep_differing=True)
+        kinds = {(a.kind, a.path.name) for a in actions}
+        self.assertEqual(kinds, {
+            ("rename", "page (2).png"),
+            ("delete", "page (1).png"),
+        })
+
+
+class UnderscoreDuplicateTests(unittest.TestCase):
+    """Plain '_N' duplicates (foo_1.png) — the thousands of leftovers from
+    the Mac's old behaviour. Content-checked: only IDENTICAL copies are
+    deleted; numbered assets that are really different files are kept."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+        self.old = time.time() - 7200
+
+    def _write(self, name, content):
+        p = self.dir / name
+        p.write_text(content)
+        os.utime(p, (self.old, self.old))
+        return p
+
+    def test_identical_underscore_copy_is_deleted(self):
+        base = self._write("donatelli-david.jpg", "photo")
+        dup = self._write("donatelli-david_1.jpg", "photo")
+        actions = plan_underscore_duplicates(self.dir)
+        self.assertEqual(
+            [(a.kind, a.path.name) for a in actions],
+            [("delete", "donatelli-david_1.jpg")],
+        )
+        apply_collapse(actions, dry_run=False)
+        self.assertTrue(base.exists())
+        self.assertFalse(dup.exists())
+
+    def test_different_content_numbered_file_is_kept(self):
+        # Web archives: combo_019.js is a different asset than combo.js.
+        self._write("combo.js", "var a = 1")
+        keep = self._write("combo_019.js", "var b = 2")
+        actions = plan_underscore_duplicates(self.dir)
+        self.assertEqual(actions, [])
+        self.assertTrue(keep.exists())
+
+    def test_no_base_file_leaves_numbered_name_alone(self):
+        # Legit numbered names like IMG_20260101_123456.jpg stay.
+        keep = self._write("IMG_20260101_123456.jpg", "x")
+        actions = plan_underscore_duplicates(self.dir)
+        self.assertEqual(actions, [])
+        self.assertTrue(keep.exists())
+
+    def test_multiple_identical_numbered_copies_all_deleted(self):
+        base = self._write("report.txt", "r")
+        self._write("report_1.txt", "r")
+        self._write("report_2.txt", "r")
+        self._write("report_3.txt", "r")
+        actions = plan_underscore_duplicates(self.dir)
+        self.assertEqual(len(actions), 3)
+        apply_collapse(actions, dry_run=False)
+        self.assertTrue(base.exists())
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
+                         ["report.txt"])
 
 
 class PhoneCopyOverwriteTests(unittest.TestCase):

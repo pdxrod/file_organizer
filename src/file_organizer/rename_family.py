@@ -16,6 +16,7 @@ always show a dry-run plan before deleting anything.
 """
 
 import logging
+import hashlib
 import os
 import re
 import time
@@ -35,6 +36,46 @@ _FAMILY_RE = re.compile(
     r"^(?P<base>.*?)\s*(?P<groups>(?:\(\d{1,3}\)\s*)+)"
     r"(?P<underscore>_\d+)?(?P<ext>\.[^.]+)?$"
 )
+
+# A plain "_N" suffix: foo_1.png, report_2.pdf. Handled SEPARATELY from the
+# (N)-family regex, with content comparison (see plan_underscore_duplicates)
+# because numbered names are often DIFFERENT files (web archives:
+# combo_019.js vs combo.js) and must not be deleted blindly.
+_UNDERSCORE_N_RE = re.compile(r"^(?P<base>.+?)_(?P<n>\d+)(?P<ext>\.[^.]+)?$")
+
+# Hashing is skipped above this size (treated as "content differs").
+_MAX_HASH_BYTES = 256 * 1024 * 1024
+
+
+def _content_hash(path: Path) -> Optional[str]:
+    """SHA-256 of a file's content, or None when it can't be read / is huge."""
+    try:
+        if path.stat().st_size > _MAX_HASH_BYTES:
+            return None
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+def files_differ(a: Path, b: Path) -> bool:
+    """True when two files have different content (size pre-check first).
+
+    Unknown content (unreadable or oversized files) counts as DIFFERENT so
+    nothing is ever deleted on a guess.
+    """
+    try:
+        if a.stat().st_size != b.stat().st_size:
+            return True
+    except OSError:
+        return True
+    ha, hb = _content_hash(a), _content_hash(b)
+    if ha is None or hb is None:
+        return True
+    return ha != hb
 
 
 @dataclass
@@ -67,7 +108,8 @@ class CollapseAction:
     target: Optional[Path] = None    # set for "rename"
 
 
-def plan_collapse(directory, min_age_seconds: int = 0) -> List[CollapseAction]:
+def plan_collapse(directory, min_age_seconds: int = 0,
+                  keep_differing: bool = False) -> List[CollapseAction]:
     """Plan the collapse of (N)-rename families inside one directory.
 
     The directory is scanned non-recursively. For every family the NEWEST
@@ -76,6 +118,10 @@ def plan_collapse(directory, min_age_seconds: int = 0) -> List[CollapseAction]:
     deleted. A single member with no base file is left alone (it may be a
     real name, e.g. a year suffix). Families whose newest file is younger
     than min_age_seconds are skipped entirely (grace period).
+
+    keep_differing: when True, a sibling whose CONTENT differs from the
+    winner is NOT deleted (safety for web-archive files where
+    saved_resource(1).html is a different asset, not a duplicate).
 
     Returns a list of actions; nothing is touched on disk.
     """
@@ -128,26 +174,100 @@ def plan_collapse(directory, min_age_seconds: int = 0) -> List[CollapseAction]:
                 )
                 continue
 
+        # keep_differing safety: when the winner is not the base and its
+        # content differs from the base's, renaming over the base would
+        # DESTROY the base's content — skip the whole family.
+        if newest != base and keep_differing and files_differ(newest, base):
+            logger.info(
+                "Kept family %s — the newest member's content differs "
+                "from the base file", base_name,
+            )
+            continue
+
         if newest == base:
             for m in members:
+                if keep_differing and files_differ(m, newest):
+                    logger.info("Kept %s — different content from the winner", m)
+                    continue
                 actions.append(CollapseAction("delete", m))
         else:
             actions.append(CollapseAction("rename", newest, base))
             for m in members:
-                if m != newest:
-                    actions.append(CollapseAction("delete", m))
+                if m == newest:
+                    continue
+                if keep_differing and files_differ(m, newest):
+                    logger.info("Kept %s — different content from the winner", m)
+                    continue
+                actions.append(CollapseAction("delete", m))
 
     return actions
 
 
-def collapse_in_tree(root, min_age_seconds: int = 0) -> List[CollapseAction]:
-    """Plan collapse actions for every directory under root (recursive)."""
+def plan_underscore_duplicates(directory, min_age_seconds: int = 0,
+                               identical_only: bool = True) -> List[CollapseAction]:
+    """Plan the deletion of plain '_N' duplicates (foo_1.png, report_2.pdf)
+    whose base file exists in the same directory.
+
+    Item 10 says our copy paths must never CREATE such names; these are
+    leftovers from the Mac's old behaviour. Because numbered names are
+    often DIFFERENT files (web archives: combo_019.js vs combo.js), the
+    default is identical_only=True: the _N copy is only deleted when its
+    content is IDENTICAL to the base. The base itself is never touched.
+
+    Returns a list of "delete" actions; nothing is touched on disk.
+    """
+    directory = Path(directory)
+    actions: List[CollapseAction] = []
+    if not directory.is_dir():
+        return actions
+    try:
+        names = {p.name: p for p in directory.iterdir() if p.is_file()}
+    except OSError:
+        return actions
+
+    now = time.time()
+    for name, path in names.items():
+        m = _UNDERSCORE_N_RE.match(name)
+        if not m:
+            continue
+        base_name = m.group("base") + (m.group("ext") or "")
+        base = names.get(base_name)
+        if base is None:
+            continue  # no base file — could be a legit numbered name
+        if min_age_seconds > 0:
+            try:
+                age = now - path.stat().st_mtime
+            except OSError:
+                age = float("inf")
+            if age < min_age_seconds:
+                continue
+        if identical_only and files_differ(path, base):
+            logger.info("Kept %s — different content from %s",
+                        path.name, base_name)
+            continue
+        actions.append(CollapseAction("delete", path))
+
+    return actions
+
+
+def collapse_in_tree(root, min_age_seconds: int = 0,
+                     keep_differing: bool = False) -> List[CollapseAction]:
+    """Plan collapse actions for every directory under root (recursive).
+
+    Covers (N)-rename families and identical-content '_N' duplicates.
+    """
     root = Path(root)
     actions: List[CollapseAction] = []
     if not root.is_dir():
         return actions
     for dirpath, _dirnames, _filenames in os.walk(root):
-        actions.extend(plan_collapse(dirpath, min_age_seconds=min_age_seconds))
+        actions.extend(plan_collapse(
+            dirpath, min_age_seconds=min_age_seconds,
+            keep_differing=keep_differing,
+        ))
+        actions.extend(plan_underscore_duplicates(
+            dirpath, min_age_seconds=min_age_seconds,
+        ))
     return actions
 
 

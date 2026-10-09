@@ -44,9 +44,11 @@ from typing import Optional, Iterator
 # (N)-family collapse (item 10). Relative import for package execution with a
 # fallback for standalone execution (python3 phone_sync.py on the phone).
 try:
-    from .rename_family import parse_family, plan_collapse, apply_collapse
+    from .rename_family import parse_family, plan_collapse, apply_collapse, \
+        plan_underscore_duplicates
 except ImportError:  # pragma: no cover - standalone script execution
-    from rename_family import parse_family, plan_collapse, apply_collapse
+    from rename_family import parse_family, plan_collapse, apply_collapse, \
+        plan_underscore_duplicates
 
 # App-generated name gate + leading-date normalisation (item 13).
 try:
@@ -1105,12 +1107,13 @@ class PhoneSync:
         self._running = False
 
     def _validate_template_paths(self) -> None:
-        """Refuse to run with unedited template paths (item 7).
+        """Warn (never fail) about unedited template paths (revised item 7).
 
         Real missing folders are skipped silently at scan time (they come
-        and go on phones). But a configured path that contains a template
-        placeholder (e.g. /Users/janedoe) and does not exist means the config
-        was never personalised — stop and tell the user to edit it.
+        and go on phones). A configured path that contains a template
+        placeholder (e.g. /Users/janedoe) and does not exist gets a LOUD
+        warning so the user knows the config looks unedited — but the
+        program keeps running and skips it.
         """
         problems = []
         target = self.config.get("target_directory")
@@ -1125,15 +1128,16 @@ class PhoneSync:
                 problems.append(f"source_directories: {raw}")
         if problems:
             msg = (
-                "\nERROR: your config still contains template placeholder "
-                "paths that do not exist on this device:\n  "
+                "\n⚠️  your config still contains template placeholder "
+                "paths that do not exist on this device — they are "
+                "skipped:\n  "
                 + "\n  ".join(problems)
-                + "\n\nEdit phone_sync_config.yaml and set your real "
-                "paths, then run again.\n"
+                + "\n\nIf this is an unedited copy of "
+                "config_template.yaml, edit phone_sync_config.yaml and "
+                "set your real paths.\n"
             )
-            logger.error(msg)
+            logger.warning(msg)
             print(msg, file=sys.stderr)
-            sys.exit(1)
 
     def _write_pid(self) -> None:
         pid_path = Path(_expand_path(self.config.get("pid_path", DEFAULT_PID)))
@@ -1281,7 +1285,15 @@ class PhoneSync:
             if not root.is_dir():
                 continue
             for dirpath, _dirnames, _filenames in os.walk(root):
-                actions = plan_collapse(dirpath, min_age_seconds=self.min_age)
+                actions = plan_collapse(
+                    dirpath, min_age_seconds=self.min_age
+                )
+                # Item 10: also delete identical-content '_N' duplicates
+                # (foo_1.png whose foo.png exists). Content check protects
+                # numbered files that are really different.
+                actions.extend(plan_underscore_duplicates(
+                    dirpath, min_age_seconds=self.min_age,
+                ))
                 if not actions:
                     continue
                 for a in actions:

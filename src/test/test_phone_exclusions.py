@@ -292,8 +292,8 @@ class PhoneSyncMergeTests(unittest.TestCase):
 
 
 class PhonePlaceholderTests(unittest.TestCase):
-    """Unedited template placeholders must stop the daemon with instructions
-    (item 7)."""
+    """Unedited template placeholders WARN but never stop the daemon
+    (revised item 7: missing paths are ignored)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -307,24 +307,38 @@ class PhonePlaceholderTests(unittest.TestCase):
         )
         return phone_sync.PhoneSync(str(config))
 
-    def test_janedoe_target_directory_exits_with_message(self):
-        with self.assertRaises(SystemExit):
-            self._daemon(
+    def test_janedoe_target_directory_warns_but_continues(self):
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            daemon = self._daemon(
                 "target_directory: \"/Users/janedoe/misc\"\n"
                 "source_directories: []\n"
             )
+        try:
+            self.assertIn("skipped", buf.getvalue())
+            self.assertIn("janedoe", buf.getvalue())
+        finally:
+            daemon.db.close()
 
-    def test_janedoe_source_directory_exits_with_message(self):
-        with self.assertRaises(SystemExit):
-            self._daemon(
+    def test_janedoe_source_directory_warns_but_continues(self):
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            daemon = self._daemon(
                 "target_directory: /tmp/staging\n"
                 "source_directories:\n"
                 "  - \"/Users/janedoe/Desktop\"\n"
             )
+        try:
+            self.assertIn("skipped", buf.getvalue())
+        finally:
+            daemon.db.close()
 
     def test_ordinary_missing_directories_are_allowed(self):
-        # Real phones/macs have folders that come and go; only placeholder
-        # paths are fatal.
+        # Real phones/macs have folders that come and go; nothing is fatal.
         daemon = self._daemon(
             "target_directory: /tmp/staging\n"
             "source_directories:\n"
