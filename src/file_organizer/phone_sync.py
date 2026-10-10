@@ -224,22 +224,18 @@ def _expand_path(raw: str) -> str:
 
 
 def _find_template(config_path: Path) -> Optional[Path]:
-    """Locate a template config next to the config path or next to this script.
+    """Locate the config template next to the config path or this script.
 
-    Since the single-template merge (item 5) the canonical template is
-    config_template.yaml, whose `phone:` section is extracted. The legacy
-    phone_daemon_config.template.yaml (pre-rename) is still honoured
-    if present.
+    There is exactly one template: config_template.yaml, whose `phone:`
+    section is extracted (item 5 merged the old phone_daemon_config
+    template into it).
     """
     bases = [config_path.parent, Path(__file__).resolve().parent]
     # Walk up from this file (src/file_organizer → src → project root) so
     # the shared config_template.yaml at the project root is found.
     for parent in Path(__file__).resolve().parent.parents:
         bases.append(parent)
-    candidates = []
-    for base in bases:
-        candidates.append(base / "config_template.yaml")
-        candidates.append(base / "phone_daemon_config.template.yaml")
+    candidates = [base / "config_template.yaml" for base in bases]
     return next((t for t in candidates if t.exists()), None)
 
 
@@ -253,7 +249,7 @@ def _extract_phone_section(content: str) -> str:
     de-dent it.
 
     If there is no `phone:` section, the content is returned unchanged
-    (legacy flat phone config).
+    (a flat config with no section header passes through).
     """
     lines = content.splitlines()
     out = []
@@ -387,21 +383,17 @@ def _make_phone_config_from_template(template: Path, config_path: Path) -> None:
     """Write a live phone config from a template.
 
     The merged config_template.yaml contributes only its `phone:` section
-    (de-dented, so it stays inside the built-in parser's flat subset). A
-    pre-rename flat phone_daemon_config.template.yaml is copied verbatim.
+    (de-dented, so it stays inside the built-in parser's flat subset).
     """
     content = template.read_text(encoding="utf-8")
-    if template.name == "config_template.yaml":
-        header = (
-            "# Generated from config_template.yaml (the phone: section).\n"
-            "# Edit THIS file for per-device settings — the template's\n"
-            "# phone: section is the source of defaults. No tabs in YAML!\n"
-        )
-        config_path.write_text(
-            header + _extract_phone_section(content), encoding="utf-8"
-        )
-    else:
-        shutil.copy2(template, config_path)
+    header = (
+        "# Generated from config_template.yaml (the phone: section).\n"
+        "# Edit THIS file for per-device settings — the template's\n"
+        "# phone: section is the source of defaults. No tabs in YAML!\n"
+    )
+    config_path.write_text(
+        header + _extract_phone_section(content), encoding="utf-8"
+    )
 
 
 def _check_no_tabs(content: str, path: str) -> None:
@@ -567,10 +559,6 @@ def resolve_config_path(requested: str) -> str:
     current working directory, fall back to the same filename next to this
     script. This lets `python3 /path/to/phone_sync.py` find a config that
     ships alongside the script regardless of where it is launched from.
-
-    Also falls back to the pre-rename legacy name phone_daemon_config.yaml
-    when the new phone_sync_config.yaml is absent, so existing phone
-    setups keep their settings.
     """
     p = Path(requested)
     if p.is_absolute() or p.exists():
@@ -578,14 +566,6 @@ def resolve_config_path(requested: str) -> str:
     candidate = Path(__file__).resolve().parent / requested
     if candidate.exists():
         return str(candidate)
-    # Legacy name (pre item-2 rename).
-    if requested == DEFAULT_CONFIG:
-        legacy = Path(__file__).resolve().parent / "phone_daemon_config.yaml"
-        if legacy.exists():
-            return str(legacy)
-        cwd_legacy = Path.cwd() / "phone_daemon_config.yaml"
-        if cwd_legacy.exists():
-            return str(cwd_legacy)
     return requested
 
 

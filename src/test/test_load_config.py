@@ -25,7 +25,7 @@ class LoadConfigTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.dir = Path(self.tmp.name)
         self.config = self.dir / "phone_sync_config.yaml"
-        self.template = self.dir / "phone_daemon_config.template.yaml"  # legacy name
+        self.template = self.dir / "config_template.yaml"
 
     def test_missing_config_is_created_from_template(self):
         self.template.write_text(TEMPLATE_YAML)
@@ -205,13 +205,6 @@ class LoadConfigTests(unittest.TestCase):
                 sys.modules["yaml"] = orig_yaml
         self.assertEqual(cfg["target_directory"], "/storage/emulated/0/staging")
         self.assertEqual(cfg["min_age_minutes"], 5)
-
-    def test_legacy_flat_phone_template_still_honoured(self):
-        """Existing phone_daemon_config.template.yaml files keep working
-        (copied verbatim when no config_template.yaml is present)."""
-        self.template.write_text(TEMPLATE_YAML)
-        cfg = phone_sync.load_config(str(self.config))
-        self.assertEqual(cfg["target_directory"], "/storage/emulated/0/staging")
 
     def test_json_config_still_parses_without_pyyaml(self):
         """The JSON fallback must keep working when PyYAML is unavailable."""

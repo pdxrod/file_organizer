@@ -30,7 +30,6 @@ test/organized/something/
 # Live configs — created next to organize, never committed
 /config.yaml
 /config.yaml.bak
-/phone_daemon_config.yaml
 /phone_sync_config.yaml
 # The soft-link folder (item 15) lives inside this file_organizer folder
 /organized

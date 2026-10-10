@@ -151,12 +151,9 @@ def run_computer_cli(args):
 
 
 def phone_config_path():
-    """Live phone config next to organize; legacy name honoured."""
-    new = HERE / "phone_sync_config.yaml"
-    legacy = HERE / "phone_daemon_config.yaml"
-    if new.exists() or not legacy.exists():
-        return str(new)
-    return str(legacy)
+    """Live phone config next to organize (created from the template's
+    phone: section on first run)."""
+    return str(HERE / "phone_sync_config.yaml")
 
 
 def run_phone_cli(args):
