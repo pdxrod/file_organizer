@@ -10,7 +10,7 @@ your computer, cloud drives, and Android phone.
 > - Start in **test mode** and review the logs before real runs.
 > - Review your config carefully — folder sync and deduplication can
 >   delete real files when misconfigured.
-> - No warranty is provided — see LICENSE.
+> - No warranty is provided.
 
 ---
 
@@ -68,9 +68,12 @@ config_template.yaml
   `computer:` section the first time you run the program.
 - On the **phone**, `phone_sync_config.yaml` is created automatically from
   the `phone:` section the first time you run `phone_sync`.
-- The template uses placeholder paths like `/Users/janedoe`. If you run the
-  program with an unedited config, it **stops and tells you exactly what to
-  edit** — it will not silently do nothing.
+- The template uses placeholder paths like `/Users/janedoe` and
+  `/Volumes/YourExternalDrive`. If you run the program with an unedited
+  config, it **reports every placeholder or missing path loudly and keeps
+  running** — those paths are skipped, so nothing is copied from them. It
+  will not silently do nothing: the warnings tell you exactly what to
+  edit.
 
 ### Editing a config file
 
@@ -288,10 +291,12 @@ Debugging in the phone's Developer Options.
 
 ## Test mode
 
-`./organize create-test` builds a small environment with sample files under
-`src/test/`. `./organize test` then runs a full dry-run cycle against it, so
-you can see exactly what the program would do before you let it near your
-real files. Nothing outside the test folders is touched.
+`./organize test` runs a full **dry-run** cycle against the folders in your
+`config.yaml` — it scans, plans the link tree and the syncs, and changes
+nothing, so you can see exactly what the program would do before you let it
+near your real files. `./organize create-test` additionally builds a small
+sample environment with files under `src/test/` (sample documents, pictures,
+a git/venv project) that you can point a config at to try the program out.
 
 The phone equivalent is `./organize test` on the phone (dry-run scan of the
 real folders — it copies nothing).
@@ -379,4 +384,4 @@ If anything is unclear, stay in test mode.
 
 ---
 
-License: MIT — see LICENSE file.
+License: MIT.
