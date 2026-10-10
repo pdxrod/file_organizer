@@ -17,8 +17,8 @@
 #
 # RULES
 # - Never use TABS in this file — YAML requires spaces.
-# - A DRIVE which does not exist is REPORTED and the program EXITS —
-#   plug the drive in, or comment the drive out, and run again.
+# - A DRIVE which does not exist is REPORTED and SKIPPED — plug the
+#   drive in and rerun to use it, or edit the path in config.yaml.
 # - FOLDERS (sync pairs, source folders) which do not exist are just
 #   skipped with a warning — they come and go.
 # - Placeholder paths like /Users/janedoe or /Volumes/YourExternalDrive
@@ -35,8 +35,8 @@ computer:
   drives:
     # Drive shortcuts — including the ADDRESSES OF YOUR CLOUD DRIVES on
     # this computer. Use these names in sync_pairs and source_folders
-    # below. A drive which is not available is reported and the program
-    # exits — plug it in or comment it out.
+    # below. A drive which is not available is reported and skipped —
+    # plug it in and rerun, or edit the path.
     # Replace the placeholder paths with your real ones.
     MAIN_DRIVE: "/Users/janedoe"
     EXTERNAL_DRIVE: "/Volumes/YourExternalDrive"

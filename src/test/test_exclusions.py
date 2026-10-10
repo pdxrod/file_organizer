@@ -168,19 +168,24 @@ class TemplatePlaceholderTests(unittest.TestCase):
         path.write_text(text)
         return cfgmod.Config(str(path))
 
-    def test_missing_janedoe_drive_reports_and_exits(self):
-        # A missing drive is reported clearly and the program exits —
-        # the config points somewhere that is not there.
-        with self.assertRaises(cfgmod.ConfigError) as cm:
-            self._load(
+    def test_missing_janedoe_drive_warns_and_continues(self):
+        # A missing drive is reported clearly and the program KEEPS
+        # RUNNING — removable drives come and go, so the missing drive
+        # is skipped and everything else still works.
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            cfg = self._load(
                 "output_base: /tmp/never-created\n"
                 "drives:\n"
                 "  MAIN_DRIVE: \"/Users/janedoe\"\n"
             )
-        msg = str(cm.exception)
+        self.assertEqual(cfg.drives["MAIN_DRIVE"], "/Users/janedoe")
+        msg = buf.getvalue()
         self.assertIn("MAIN_DRIVE", msg)
         self.assertIn("/Users/janedoe", msg)
-        self.assertIn("do not exist", msg)
+        self.assertIn("does not exist", msg)
 
     def test_missing_placeholder_sync_pair_warns_not_raises(self):
         import io
@@ -196,16 +201,25 @@ class TemplatePlaceholderTests(unittest.TestCase):
             )
         self.assertIn("skipped", buf.getvalue())
 
-    def test_real_missing_drive_reports_and_exits(self):
-        # A genuinely missing drive (unmounted volume) also reports and
-        # exits — the user must plug it in or fix the config.
-        with self.assertRaises(cfgmod.ConfigError) as cm:
-            self._load(
+    def test_real_missing_drive_warns_and_continues(self):
+        # A genuinely missing drive (unmounted volume) also warns and the
+        # program keeps running — the drive is skipped until it is plugged
+        # in again.
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            cfg = self._load(
                 "output_base: /tmp/never-created\n"
                 "drives:\n"
                 "  EXTERNAL_DRIVE: \"/Volumes/definitely-not-mounted-xyz\"\n"
             )
-        self.assertIn("EXTERNAL_DRIVE", str(cm.exception))
+        self.assertEqual(
+            cfg.drives["EXTERNAL_DRIVE"],
+            "/Volumes/definitely-not-mounted-xyz",
+        )
+        self.assertIn("EXTERNAL_DRIVE", buf.getvalue())
+        self.assertIn("does not exist", buf.getvalue())
 
     def test_existing_placeholder_path_is_fine(self):
         # If a path contains 'janedoe' but DOES exist, it is a real path.

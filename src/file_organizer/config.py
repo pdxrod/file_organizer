@@ -356,20 +356,19 @@ class Config:
             if len(folders) != 2:
                 raise ConfigError(f"one_way_pairs[{i}] must have exactly 2 folders, got {len(folders)}")
 
-        # Missing drives: REPORT them clearly and exit (a missing drive
-        # means the config points somewhere that is not there — the user
-        # must fix the config or plug the drive in).
-        missing = [
-            f"{key} ('{path}')"
-            for key, path in self.drives.items()
-            if not os.path.exists(path)
-        ]
-        if missing:
-            raise ConfigError(
-                "Drive(s) do not exist on this computer: "
-                + ", ".join(missing)
-                + ". Plug the drive in, or edit config.yaml and set your "
-                "real paths."
+        # Missing drives: REPORT them clearly and keep running. Removable
+        # drives genuinely come and go, so a missing drive is skipped (the
+        # scanner and sync engine already skip missing paths) — but the
+        # user is still told exactly which drives are missing so they can
+        # plug them in or fix config.yaml.
+        for key, path in self.drives.items():
+            if not path or os.path.exists(os.path.expanduser(path)):
+                continue
+            print(
+                f"⚠️  Drive {key} ('{path}') does not exist — will skip "
+                f"anything on it. Plug the drive in, or edit config.yaml "
+                f"and set your real paths.",
+                file=sys.stderr,
             )
 
         # Folders (sync pairs, source folders) which don't exist: WARN and
@@ -391,9 +390,10 @@ class Config:
     def _validate_path_placeholders(self) -> None:
         """Warn (never fail) about configured paths that don't exist.
 
-        Drives and folders which don't exist are simply ignored — removable
+        Drives and folders which don't exist are simply skipped — removable
         drives genuinely come and go, and the user may not use every drive
-        in the template. A missing path that still contains a template
+        in the template. Missing drives get their own warning in
+        _validate(); a missing folder here that still contains a template
         placeholder (e.g. /Users/janedoe or YourExternalDrive) gets a
         LOUDER warning so the user knows the config looks unedited — but
         the program keeps running and skips it.
