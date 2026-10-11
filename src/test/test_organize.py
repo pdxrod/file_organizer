@@ -108,6 +108,12 @@ class SubcommandMappingTests(unittest.TestCase):
         self.assertNotIn("find-proton", organize.PHONE_COMMANDS)
         self.assertNotIn("--find-proton", organize.PHONE_PASSTHROUGH)
 
+    def test_phone_rename_maps_to_rename_held(self):
+        mapped, handled = organize.map_command("phone", ["rename"])
+        self.assertEqual(mapped, ["--rename-held"])
+        self.assertIsNone(handled)
+        self.assertIn("--rename-held", organize.PHONE_PASSTHROUGH)
+
     def test_unknown_flags_pass_through(self):
         mapped, handled = organize.map_command(
             "computer", ["--REAL", "--scan-once"]

@@ -954,6 +954,105 @@ def scan_sources(
                 yield (Path(dirpath_str) / fname, st.st_mtime)
 
 
+# ── Rename held files ('organize rename') ──────────────────────────────────
+
+def apply_rename(filepath: Path, new_name: str) -> Path:
+    """Rename `filepath` to `new_name` in the same directory (real rename).
+
+    Friendly rules for the interactive 'organize rename' command:
+    - Empty/whitespace input → ValueError (the caller treats it as "keep").
+    - Names containing path separators, or "." / "..", are refused.
+    - No extension in new_name → the old extension is appended, so
+      renaming bank.jpeg to "bank-statement" gives bank-statement.jpeg.
+    - Never overwrite: an existing target is refused with ValueError.
+
+    Returns the new Path on success.
+    """
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise ValueError("empty name — keeping the old one")
+    if new_name in (".", "..") or "/" in new_name or "\\" in new_name:
+        raise ValueError(f"'{new_name}' is not a plain file name")
+    old_suffix = filepath.suffix
+    if old_suffix and not Path(new_name).suffix:
+        new_name += old_suffix
+    target = filepath.parent / new_name
+    if target.exists():
+        raise ValueError(f"'{target.name}' already exists — not overwriting")
+    filepath.rename(target)
+    return target
+
+
+def collect_held_files(sync: "PhoneSync") -> list:
+    """Held (app-generated) files in the phone's source directories.
+
+    Uses the same exclude/extension/folder filters as a normal scan, but
+    min_age = 0 — a fresh screenshot can be renamed straight away. The
+    list is sorted by path for a stable prompt order.
+    """
+    if not sync.hold_app_generated_names:
+        return []
+    include_ext, exclude_ext, exclude_pat = sync._scan_filters()
+    return sorted(
+        filepath
+        for filepath, _mtime in scan_sources(
+            sync.source_dirs, include_ext, exclude_ext, exclude_pat,
+            sync.exclude_folder_patterns, sync.exclude_folder_names,
+            sync.max_size_mb, 0,
+        )
+        if is_app_generated(filepath.name)
+    )
+
+
+def rename_held_interactive(
+    sync: "PhoneSync", input_fn=input, print_fn=print
+) -> dict:
+    """'organize rename' — walk the held files one by one and rename them.
+
+    For each held file the user is prompted:
+        name: BBl-Screenshot-1788321667280.jpeg new name:
+    Type a new name and press Enter to rename; press Enter alone to keep
+    the old name. A new name without an extension keeps the old one.
+    input_fn/print_fn are injectable for tests.
+
+    Returns {"renamed": n, "kept": m}.
+    """
+    files = collect_held_files(sync)
+    stats = {"renamed": 0, "kept": 0}
+    if not files:
+        print_fn("Nothing to rename — no held app-generated files found.")
+        return stats
+    print_fn(
+        f"{len(files)} held file(s). Type a new name for each and press "
+        f"Enter; press Enter alone to keep the old name."
+    )
+    try:
+        for filepath in files:
+            while True:
+                answer = input_fn(f"name: {filepath.name} new name: ")
+                if not answer.strip():
+                    print_fn(f"  kept {filepath.name}")
+                    stats["kept"] += 1
+                    break
+                try:
+                    new_path = apply_rename(filepath, answer)
+                except (ValueError, OSError) as e:
+                    print_fn(f"  {e}")
+                    continue  # ask again for the same file
+                stats["renamed"] += 1
+                if is_app_generated(new_path.name):
+                    print_fn(
+                        f"  renamed to {new_path.name} — note: the name "
+                        f"still looks app-generated, so it will be held again"
+                    )
+                else:
+                    print_fn(f"  renamed to {new_path.name}")
+                break
+    except (KeyboardInterrupt, EOFError):
+        print_fn("\nStopped.")
+    return stats
+
+
 # ── Cloud drive finder ──────────────────────────────────────────────────────
 
 def find_cloud_drives(candidates: Optional[list] = None) -> list[Path]:
@@ -1601,6 +1700,10 @@ def main(argv=None):
         help="Create phone_sync_config.yaml from the template if missing, then exit",
     )
     parser.add_argument(
+        "--rename-held", dest="rename_held", action="store_true",
+        help="Interactively rename held app-generated files, one by one",
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true",
         help="Verbose logging",
     )
@@ -1613,6 +1716,14 @@ def main(argv=None):
         cfg = load_config(args.config)
         print(f"Config ready at {args.config} "
               f"({len(cfg)} settings). Edit it and run again.")
+        return
+
+    if args.rename_held:
+        sync = PhoneSync(args.config)
+        stats = rename_held_interactive(sync)
+        print(
+            f"\nDone: {stats['renamed']} renamed, {stats['kept']} kept."
+        )
         return
 
     if args.find_cloud_drives:

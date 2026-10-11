@@ -270,6 +270,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `scan` | Single production scan |
 | `find-cloud-drives` | Locate your cloud drive folders (Proton Drive, Google Drive, Dropbox, …) |
 | `make-config` | Create phone_sync_config.yaml from the template |
+| `rename` | Rename held app-generated files, one by one (`name: X new name: ` prompts) |
 | `setup` | First-time setup wizard |
 
 ## Phone ↔ computer over USB (`organize pull`)
@@ -359,7 +360,7 @@ highlights:
 | `cloud_drive_paths` | Where `find-cloud-drives` looks (any cloud app — Proton, Google, Dropbox, …) |
 | `sync_cloud_drives` | Copy new files into every cloud drive found on the phone (into a `file_organizer` subfolder) |
 | `min_free_space_mb` | Free-space guard — the daemon stops copying when the target has less than this |
-| `hold_app_generated_names` | Hold `Screenshot_…`, `YYYYMMDD_HHMMSS.jpg` etc. until renamed (item 13) |
+| `hold_app_generated_names` | Hold `Screenshot_…`, `YYYYMMDD_HHMMSS.jpg` etc. until renamed — rename them with `./organize rename` (item 13) |
 | `normalise_leading_dates` | `2026-09-23-party.jpg` → `20260923-party.jpg` on the copy (item 13) |
 
 ## Safety checklist before real runs

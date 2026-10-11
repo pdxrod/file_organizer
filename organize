@@ -95,13 +95,14 @@ PHONE_COMMANDS = {
     "stats": ["--stats"],
     "find-cloud-drives": ["--find-cloud-drives"],
     "make-config": ["--make-config"],
+    "rename": ["--rename-held"],             # rename held files, one by one
 }
 
 # Phone flags that pass straight through to phone_sync.
 PHONE_PASSTHROUGH = (
     "--scan-once", "--dry-run", "--background", "--daemon",
     "--find-cloud-drives", "--stats", "--status",
-    "--stop", "--make-config",
+    "--stop", "--make-config", "--rename-held",
     "-v", "--verbose", "--config", "-h", "--help",
 )
 
@@ -518,6 +519,7 @@ def usage(platform):
             "On a phone (run there instead):",
             "  ./organize test    dry-run scan     ./organize scan    production scan",
             "  ./organize start   run in the background    ./organize stop",
+            "  ./organize rename  rename held files, one by one",
         ]
     else:
         lines += [
@@ -532,10 +534,11 @@ def usage(platform):
             "  ./organize stats         sync database statistics",
             "  ./organize find-cloud-drives  locate your cloud drive folders",
             "  ./organize make-config   create phone_sync_config.yaml",
+            "  ./organize rename        rename held files, one by one",
             "  ./organize setup         first-time setup wizard",
             "",
             "Flags (phone): --scan-once --dry-run --background --find-cloud-drives",
-            "  --stats --status --stop --make-config --config FILE -v",
+            "  --stats --status --stop --make-config --rename-held --config FILE -v",
             "",
             "On a computer (run there instead):",
             "  ./organize test    dry-run scan     ./organize test-real  production",
