@@ -123,9 +123,10 @@ class RenameInteractiveTests(unittest.TestCase):
         return phone_sync.PhoneSync(str(config))
 
     def test_renames_keeps_and_reprompts_on_bad_name(self):
+        # Names without any YYYYMMDD / YYYY-MM-DD date, so no prefill.
         (self.src / "BBl-Screenshot-1700019577590.jpeg").write_text("x")
-        (self.src / "Screenshot_2026-01-01.png").write_text("x")
-        (self.src / "Screenshot_2026-02-02.png").write_text("x")
+        (self.src / "Snapchat-12345.png").write_text("x")
+        (self.src / "dsc_0001.jpg").write_text("x")
         sync = self._sync()
 
         prompts = []
@@ -137,23 +138,111 @@ class RenameInteractiveTests(unittest.TestCase):
             ),
             print_fn=lambda msg: None,
         )
-        self.assertEqual(stats, {"renamed": 2, "kept": 1})
+        self.assertEqual(stats, {"renamed": 2, "kept": 1, "deleted": 0})
         # File 1 renamed, extension kept.
         self.assertTrue((self.src / "wedding-photo.jpeg").exists())
         self.assertFalse(
             (self.src / "BBl-Screenshot-1700019577590.jpeg").exists()
         )
         # File 2 kept on empty input.
-        self.assertTrue((self.src / "Screenshot_2026-01-01.png").exists())
+        self.assertTrue((self.src / "Snapchat-12345.png").exists())
         # File 3: bad name re-prompts, then renames.
-        self.assertTrue((self.src / "receipt.png").exists())
-        self.assertFalse((self.src / "Screenshot_2026-02-02.png").exists())
+        self.assertTrue((self.src / "receipt.jpg").exists())
+        self.assertFalse((self.src / "dsc_0001.jpg").exists())
         # The prompt is exactly the format the user asked for.
         self.assertEqual(
             prompts[0],
-            "name: BBl-Screenshot-1700019577590.jpeg new name: ",
+            "name: BBl-Screenshot-1700019577590.jpeg "
+            "new name (d for delete): ",
         )
         self.assertEqual(len(prompts), 4)
+
+    def test_d_deletes_the_file(self):
+        (self.src / "Snapchat-12345.png").write_text("x")
+        sync = self._sync()
+        messages = []
+        stats = rename_held_interactive(
+            sync,
+            input_fn=lambda prompt: "d",
+            print_fn=messages.append,
+        )
+        self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 1})
+        self.assertFalse((self.src / "Snapchat-12345.png").exists())
+        self.assertTrue(any("deleted Snapchat-12345.png" in m for m in messages))
+
+    def test_uppercase_D_deletes_the_file(self):
+        (self.src / "Snapchat-12345.png").write_text("x")
+        sync = self._sync()
+        stats = rename_held_interactive(
+            sync,
+            input_fn=lambda prompt: "D",
+            print_fn=lambda msg: None,
+        )
+        self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 1})
+        self.assertFalse((self.src / "Snapchat-12345.png").exists())
+
+    def test_date_prefill_prompt_and_rename(self):
+        # A YYYY-MM-DD date in the name prefills the normalised date.
+        (self.src / "Screenshot-2026-09-05-999.txt").write_text("x")
+        sync = self._sync()
+        prompts = []
+        stats = rename_held_interactive(
+            sync,
+            input_fn=lambda prompt: (
+                prompts.append(prompt) or "party"
+            ),
+            print_fn=lambda msg: None,
+        )
+        self.assertEqual(
+            prompts[0],
+            "name: Screenshot-2026-09-05-999.txt "
+            "new name (d for delete): 20260905-",
+        )
+        self.assertEqual(stats, {"renamed": 1, "kept": 0, "deleted": 0})
+        self.assertTrue((self.src / "20260905-party.txt").exists())
+        self.assertFalse(
+            (self.src / "Screenshot-2026-09-05-999.txt").exists()
+        )
+
+    def test_eight_digit_date_prefill(self):
+        (self.src / "Screenshot-20260905-999.jpg").write_text("x")
+        sync = self._sync()
+        prompts = []
+        stats = rename_held_interactive(
+            sync,
+            input_fn=lambda prompt: (
+                prompts.append(prompt) or "party"
+            ),
+            print_fn=lambda msg: None,
+        )
+        self.assertTrue(prompts[0].endswith("new name (d for delete): 20260905-"))
+        self.assertTrue((self.src / "20260905-party.jpg").exists())
+
+    def test_date_prefill_enter_alone_keeps(self):
+        (self.src / "Screenshot-2026-09-05-999.txt").write_text("x")
+        sync = self._sync()
+        stats = rename_held_interactive(
+            sync,
+            input_fn=lambda prompt: "",
+            print_fn=lambda msg: None,
+        )
+        self.assertEqual(stats, {"renamed": 0, "kept": 1, "deleted": 0})
+        self.assertTrue(
+            (self.src / "Screenshot-2026-09-05-999.txt").exists()
+        )
+
+    def test_date_prefill_d_deletes(self):
+        (self.src / "Screenshot-2026-09-05-999.txt").write_text("x")
+        sync = self._sync()
+        stats = rename_held_interactive(
+            sync,
+            input_fn=lambda prompt: "d",
+            print_fn=lambda msg: None,
+        )
+        self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 1})
+        self.assertFalse(
+            (self.src / "Screenshot-2026-09-05-999.txt").exists()
+        )
 
     def test_nothing_to_rename(self):
         sync = self._sync()
@@ -163,20 +252,20 @@ class RenameInteractiveTests(unittest.TestCase):
             input_fn=lambda prompt: "",
             print_fn=messages.append,
         )
-        self.assertEqual(stats, {"renamed": 0, "kept": 0})
+        self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 0})
         self.assertIn("Nothing to rename", messages[0])
 
     def test_warns_when_new_name_still_looks_app_generated(self):
-        (self.src / "Screenshot_2026-01-01.png").write_text("x")
+        (self.src / "Snapchat-123.png").write_text("x")
         sync = self._sync()
         messages = []
         stats = rename_held_interactive(
             sync,
-            input_fn=lambda prompt: "Screenshot_2026-01-02",
+            input_fn=lambda prompt: "Snapchat-456",
             print_fn=messages.append,
         )
-        self.assertEqual(stats, {"renamed": 1, "kept": 0})
-        self.assertTrue((self.src / "Screenshot_2026-01-02.png").exists())
+        self.assertEqual(stats, {"renamed": 1, "kept": 0, "deleted": 0})
+        self.assertTrue((self.src / "Snapchat-456.png").exists())
         self.assertTrue(any("still looks app-generated" in m for m in messages))
 
     def test_eof_stops_gracefully(self):
@@ -190,9 +279,45 @@ class RenameInteractiveTests(unittest.TestCase):
         stats = rename_held_interactive(
             sync, input_fn=_eof, print_fn=messages.append,
         )
-        self.assertEqual(stats, {"renamed": 0, "kept": 0})
+        self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 0})
         self.assertTrue(any("Stopped" in m for m in messages))
         self.assertTrue((self.src / "Screenshot_2026-01-01.png").exists())
+
+
+class DatePrefixInTests(unittest.TestCase):
+    """The prompt prefill: normalised YYYYMMDD- of a date in the name."""
+
+    def test_dashed_date_anywhere(self):
+        self.assertEqual(
+            phone_sync.date_prefix_in("Screenshot-2026-09-05-999.txt"),
+            "20260905-",
+        )
+
+    def test_eight_digit_date(self):
+        self.assertEqual(
+            phone_sync.date_prefix_in("Screenshot-20260905-999.jpg"),
+            "20260905-",
+        )
+
+    def test_underscore_and_dot_separators(self):
+        self.assertEqual(phone_sync.date_prefix_in("a_2026_09_05_b"), "20260905-")
+        self.assertEqual(phone_sync.date_prefix_in("a.2026.09.05.b"), "20260905-")
+
+    def test_invalid_month_or_day_rejected(self):
+        self.assertEqual(phone_sync.date_prefix_in("x-2026-24-05-y"), "")
+        self.assertEqual(phone_sync.date_prefix_in("x-2026-09-45-y"), "")
+        self.assertEqual(
+            phone_sync.date_prefix_in("IMG-20241319-WA0000.jpg"), ""
+        )  # month 13 is not a date
+
+    def test_no_date_returns_empty(self):
+        self.assertEqual(phone_sync.date_prefix_in("holiday-photo.png"), "")
+        self.assertEqual(
+            phone_sync.date_prefix_in("BBl-Screenshot-1788321667280.jpeg"), ""
+        )  # phone timestamp, not a 19xx/20xx date
+
+    def test_date_glued_to_digits_ignored(self):
+        self.assertEqual(phone_sync.date_prefix_in("12026090599.jpg"), "")
 
 
 if __name__ == "__main__":

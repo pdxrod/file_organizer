@@ -52,9 +52,11 @@ except ImportError:  # pragma: no cover - standalone script execution
 
 # App-generated name gate + leading-date normalisation (item 13).
 try:
-    from .filename_rules import is_app_generated, normalise_leading_date
+    from .filename_rules import is_app_generated, normalise_leading_date, \
+        date_prefix_in
 except ImportError:  # pragma: no cover - standalone script execution
-    from filename_rules import is_app_generated, normalise_leading_date
+    from filename_rules import is_app_generated, normalise_leading_date, \
+        date_prefix_in
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -1004,33 +1006,91 @@ def collect_held_files(sync: "PhoneSync") -> list:
     )
 
 
+def _input_with_prefill(prompt: str, prefill: str, input_fn=input) -> str:
+    """input_fn(prompt) with `prefill` already on the line when possible.
+
+    On an interactive terminal (input_fn is the builtin input and stdin is
+    a tty) the readline module pre-inserts the prefill as editable text, so
+    the user sees e.g.
+        name: Screenshot-2026-09-05-999.txt new name (d for delete): 20260905-▏
+    and can append to it, edit it, or clear it. Where readline is
+    unavailable (or input_fn is a test double), the prefill is printed
+    after the prompt and prepended to the typed text instead:
+    'd' still means delete and Enter alone still means keep.
+    """
+    if not prefill:
+        return input_fn(prompt)
+    if input_fn is input and sys.stdin.isatty():
+        try:
+            import readline
+
+            def _hook():
+                readline.insert_text(prefill)
+                readline.redisplay()
+
+            readline.set_pre_input_hook(_hook)
+            try:
+                return input_fn(prompt)
+            finally:
+                readline.set_pre_input_hook()
+        except Exception:
+            pass  # no readline / no hook support — use the printed prefill
+    answer = input_fn(prompt + prefill)
+    if answer.strip().lower() == "d":
+        return "d"  # delete wins over the printed prefill
+    if not answer.strip():
+        return ""
+    return prefill + answer
+
+
 def rename_held_interactive(
     sync: "PhoneSync", input_fn=input, print_fn=print
 ) -> dict:
-    """'organize rename' — walk the held files one by one and rename them.
+    """'organize rename' — walk the held files one by one, renaming,
+    keeping, or deleting them.
 
     For each held file the user is prompted:
-        name: BBl-Screenshot-1788321667280.jpeg new name:
-    Type a new name and press Enter to rename; press Enter alone to keep
-    the old name. A new name without an extension keeps the old one.
+        name: BBl-Screenshot-1788321667280.jpeg new name (d for delete):
+    - Type a new name and press Enter to rename (no extension keeps the
+      old one).
+    - Press Enter alone to keep the old name.
+    - Type 'd' and press Enter to delete the file.
+    When the file name contains a YYYYMMDD or YYYY-MM-DD date, the prompt
+    is prefilled with the normalised date, e.g.:
+        name: Screenshot-2026-09-05-999.txt new name (d for delete): 20260905-
+    and the user fills in the rest of the name.
     input_fn/print_fn are injectable for tests.
 
-    Returns {"renamed": n, "kept": m}.
+    Returns {"renamed": n, "kept": m, "deleted": k}.
     """
     files = collect_held_files(sync)
-    stats = {"renamed": 0, "kept": 0}
+    stats = {"renamed": 0, "kept": 0, "deleted": 0}
     if not files:
         print_fn("Nothing to rename — no held app-generated files found.")
         return stats
     print_fn(
         f"{len(files)} held file(s). Type a new name for each and press "
-        f"Enter; press Enter alone to keep the old name."
+        f"Enter; press Enter alone to keep the old name; 'd' deletes it."
     )
     try:
         for filepath in files:
+            prefill = date_prefix_in(filepath.name)
             while True:
-                answer = input_fn(f"name: {filepath.name} new name: ")
-                if not answer.strip():
+                answer = _input_with_prefill(
+                    f"name: {filepath.name} new name (d for delete): ",
+                    prefill,
+                    input_fn,
+                )
+                if answer.strip().lower() == "d":
+                    try:
+                        filepath.unlink()
+                    except OSError as e:
+                        print_fn(f"  could not delete: {e}")
+                        continue  # ask again for the same file
+                    print_fn(f"  deleted {filepath.name}")
+                    stats["deleted"] += 1
+                    break
+                if not answer.strip() or answer.strip() == prefill.strip():
                     print_fn(f"  kept {filepath.name}")
                     stats["kept"] += 1
                     break
@@ -1722,7 +1782,8 @@ def main(argv=None):
         sync = PhoneSync(args.config)
         stats = rename_held_interactive(sync)
         print(
-            f"\nDone: {stats['renamed']} renamed, {stats['kept']} kept."
+            f"\nDone: {stats['renamed']} renamed, {stats['kept']} kept, "
+            f"{stats['deleted']} deleted."
         )
         return
 

@@ -98,3 +98,31 @@ def normalise_leading_date(name: str) -> str:
         + m.group("y") + m.group("m") + m.group("d")
         + m.group("rest")
     )
+
+
+# A date anywhere in a name: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD or
+# plain YYYYMMDD, not glued to other digits on either side (so a phone
+# timestamp like 1788321667280 or 12026090599 never counts as a date).
+_DATE_ANYWHERE = re.compile(
+    r"(?<!\d)"
+    r"(?:(?P<y>(?:19|20)\d{2})[-_.](?P<m>\d{2})[-_.](?P<d>\d{2})"
+    r"|(?P<y2>(?:19|20)\d{2})(?P<m2>\d{2})(?P<d2>\d{2}))"
+    r"(?!\d)"
+)
+
+
+def date_prefix_in(name: str) -> str:
+    """The 'YYYYMMDD-' prompt prefill for 'organize rename': the normalised
+    date of the first valid YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD or
+    YYYYMMDD date found anywhere in `name` (month 1-12, day 1-31). '' when
+    there is none — e.g. 'Screenshot-2026-09-05-999.txt' → '20260905-'.
+    """
+    if not isinstance(name, str) or not name:
+        return ""
+    for m in _DATE_ANYWHERE.finditer(name):
+        y = m.group("y") or m.group("y2")
+        month = m.group("m") or m.group("m2")
+        day = m.group("d") or m.group("d2")
+        if 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+            return f"{y}{month}{day}-"
+    return ""

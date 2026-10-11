@@ -270,7 +270,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `scan` | Single production scan |
 | `find-cloud-drives` | Locate your cloud drive folders (Proton Drive, Google Drive, Dropbox, …) |
 | `make-config` | Create phone_sync_config.yaml from the template |
-| `rename` | Rename held app-generated files, one by one (`name: X new name: ` prompts) |
+| `rename` | Rename held app-generated files one by one (`name: X new name (d for delete): ` — Enter keeps, `d` deletes; a date in the name is prefilled as `YYYYMMDD-`) |
 | `setup` | First-time setup wizard |
 
 ## Phone ↔ computer over USB (`organize pull`)
