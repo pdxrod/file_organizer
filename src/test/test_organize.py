@@ -138,6 +138,20 @@ class UsageTests(unittest.TestCase):
         for platform in ("computer", "phone"):
             self.assertIn("config_template.yaml", organize.usage(platform))
 
+    def test_computer_usage_says_phone_config_is_created_on_the_phone(self):
+        text = organize.usage("computer")
+        self.assertIn("phone_sync_config.yaml", text)
+        self.assertIn("section on the phone", text)
+        # Regression: a computer run only ever creates config.yaml, so the
+        # old "Both are created ... the first time you run" claim is gone.
+        self.assertNotIn("Both are created", text)
+
+    def test_phone_usage_says_computer_config_is_created_on_the_computer(self):
+        text = organize.usage("phone")
+        self.assertIn("phone_sync_config.yaml next to organize", text)
+        self.assertIn("template on the computer", text)
+        self.assertNotIn("Both are created", text)
+
 
 class ProjectRootTests(unittest.TestCase):
     def test_find_project_root_locates_template(self):

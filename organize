@@ -543,13 +543,24 @@ def usage(platform):
             "On a computer (run there instead):",
             "  ./organize test    dry-run scan     ./organize test-real  production",
         ]
-    lines += [
-        "",
-        "Config: the computer uses config.yaml next to organize; the phone",
-        "uses phone_sync_config.yaml. Both are created from config_template.yaml",
-        "the first time you run — edit them (spaces, never tabs) and you're set.",
-        "",
-    ]
+    if platform == "computer":
+        lines += [
+            "",
+            "Config: this computer uses config.yaml next to organize — created",
+            "from config_template.yaml the first time you run. The phone's",
+            "phone_sync_config.yaml is created from the same template's 'phone:'",
+            "section on the phone. Edit them with spaces, never tabs.",
+            "",
+        ]
+    else:
+        lines += [
+            "",
+            "Config: this phone uses phone_sync_config.yaml next to organize —",
+            "created from the 'phone:' section of config_template.yaml the first",
+            "time you run. The computer's config.yaml is created from the same",
+            "template on the computer. Edit them with spaces, never tabs.",
+            "",
+        ]
     return "\n".join(lines)
 
 
