@@ -278,7 +278,9 @@ dbg()  { [[ "${VERBOSE:-false}" == "true" ]] && log "DEBUG $*" || true; }
 
 list_devices() {
     local devices
-    devices=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' | awk '{print $1}')
+    # `|| true`: with `set -euo pipefail`, grep exiting 1 on an empty
+    # device list would otherwise kill the script silently (no message).
+    devices=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' | awk '{print $1}' || true)
     if [[ -z "$devices" ]]; then
         echo "No devices connected."
         echo ""
@@ -666,7 +668,9 @@ main() {
     if [[ -n "$device_id" ]]; then
         devices="$device_id"
     else
-        devices=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' | awk '{print $1}')
+        # `|| true` as in list_devices: an empty adb device list must
+        # fall through to the friendly message, not die on errexit.
+        devices=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' | awk '{print $1}' || true)
     fi
 
     if [[ -z "$devices" ]]; then

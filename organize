@@ -106,6 +106,9 @@ PHONE_PASSTHROUGH = (
     "-v", "--verbose", "--config", "-h", "--help",
 )
 
+# organize ADB subcommand → phone_pull.sh flag (pull is its default mode).
+ADB_MODE_FLAGS = {"pull": [], "push": ["--push"], "list": ["--list"]}
+
 
 def map_command(platform, argv):
     """Map a leading subcommand to CLI args for the platform CLI.
@@ -455,12 +458,27 @@ def computer_clean(log):
 
 
 def computer_pull_push_list(log, argv):
-    """ADB phone sync — delegate to src/phone_pull.sh."""
+    """ADB phone sync — delegate to src/phone_pull.sh.
+
+    argv[0] is the organize subcommand (pull/push/list); it becomes the
+    matching phone_pull.sh flag (pull is the script's default mode) and
+    the remaining args (--dry-run, --device X, -v) pass straight through.
+    """
     script = SRC / "phone_pull.sh"
     if not script.exists():
         log(f"Phone sync tool not found: {script}")
         raise SystemExit(1)
-    subprocess.run(["bash", str(script)] + argv[1:])
+    subprocess.run(["bash", str(script)] + adb_argv(argv))
+
+
+def adb_argv(argv):
+    """phone_pull.sh argv for an organize ADB subcommand (pull/push/list).
+
+    The leading subcommand maps to phone_pull.sh's own flag; the rest of
+    the args pass straight through.
+    """
+    flags = ADB_MODE_FLAGS.get(argv[0], [])
+    return flags + list(argv[1:])
 
 
 def computer_gui(log):

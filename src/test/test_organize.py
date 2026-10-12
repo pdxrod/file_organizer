@@ -79,6 +79,23 @@ class SubcommandMappingTests(unittest.TestCase):
             self.assertEqual(handled, cmd, cmd)
             self.assertEqual(mapped, [cmd])
 
+    def test_adb_subcommands_map_to_phone_pull_flags(self):
+        # Regression: `list` and `push` used to be dropped, so every ADB
+        # subcommand ran phone_pull.sh with no flags (plain pull mode).
+        self.assertEqual(organize.adb_argv(["pull"]), [])
+        self.assertEqual(organize.adb_argv(["push"]), ["--push"])
+        self.assertEqual(organize.adb_argv(["list"]), ["--list"])
+
+    def test_adb_subcommand_extra_flags_pass_through(self):
+        self.assertEqual(
+            organize.adb_argv(["push", "--dry-run"]),
+            ["--push", "--dry-run"],
+        )
+        self.assertEqual(
+            organize.adb_argv(["pull", "--device", "R5G123", "-v"]),
+            ["--device", "R5G123", "-v"],
+        )
+
     def test_phone_scan_is_production(self):
         mapped, handled = organize.map_command("phone", ["scan"])
         self.assertEqual(mapped, ["--scan-once"])
