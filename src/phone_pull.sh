@@ -676,7 +676,7 @@ main() {
     if [[ -z "$devices" ]]; then
         err "No devices connected. Connect a phone and enable USB debugging."
         echo ""
-        echo "Tip: Run '$0 --list' to see connected devices."
+        echo "Tip: Run ./organize list to see connected devices."
         exit 1
     fi
 

@@ -79,6 +79,13 @@ class PhonePullScriptTests(unittest.TestCase):
             "No devices connected. Connect a phone and enable USB debugging.",
             proc.stdout + proc.stderr,
         )
+        # The tip must point at the public `organize` CLI, not the
+        # internal script path bash invokes it with ($0).
+        self.assertIn(
+            "Tip: Run ./organize list to see connected devices.",
+            proc.stdout + proc.stderr,
+        )
+        self.assertNotIn("phone_pull.sh", proc.stdout + proc.stderr)
 
 
 if __name__ == "__main__":
