@@ -534,7 +534,7 @@ def usage(platform):
             "Flags (computer): --REAL --scan-once --sync-only --dedupe-only",
             "  --git-preview --git-init --cleanup --collapse-renames --config FILE -v",
             "",
-            "On a phone (run there instead):",
+            "On a phone (run these instead):",
             "  ./organize test    dry-run scan     ./organize scan    production scan",
             "  ./organize start   run in the background    ./organize stop",
             "  ./organize rename  rename held files, one by one",
