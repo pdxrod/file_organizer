@@ -72,6 +72,11 @@ class SubcommandMappingTests(unittest.TestCase):
         mapped, _ = organize.map_command("computer", ["test-real"])
         self.assertEqual(mapped, ["--REAL", "--scan-once"])
 
+    def test_computer_auto_is_production(self):
+        mapped, handled = organize.map_command("computer", ["auto"])
+        self.assertEqual(mapped, ["--REAL", "--scan-once"])
+        self.assertIsNone(handled)
+
     def test_computer_lifecycle_commands_handled_here(self):
         for cmd in ("start", "stop", "restart", "status", "log", "clean",
                     "gui", "web", "pull", "push", "list", "setup"):
@@ -98,6 +103,11 @@ class SubcommandMappingTests(unittest.TestCase):
 
     def test_phone_scan_is_production(self):
         mapped, handled = organize.map_command("phone", ["scan"])
+        self.assertEqual(mapped, ["--scan-once"])
+        self.assertIsNone(handled)
+
+    def test_phone_auto_is_production(self):
+        mapped, handled = organize.map_command("phone", ["auto"])
         self.assertEqual(mapped, ["--scan-once"])
         self.assertIsNone(handled)
 
@@ -150,6 +160,10 @@ class UsageTests(unittest.TestCase):
         text = organize.usage("phone")
         self.assertIn("./organize scan", text)
         self.assertIn("phone", text)
+
+    def test_usage_mentions_auto_on_both_platforms(self):
+        for platform in ("computer", "phone"):
+            self.assertIn("./organize auto", organize.usage(platform))
 
     def test_usage_mentions_config_files(self):
         for platform in ("computer", "phone"):

@@ -68,6 +68,7 @@ COMPUTER_COMMANDS = {
     "test": ["--scan-once"],                 # dry-run scan (safe)
     "test-real": ["--REAL", "--scan-once"],  # production one-shot
     "scan": ["--REAL", "--scan-once"],       # alias of test-real
+    "auto": ["--REAL", "--scan-once"],       # production scan — just works
     "sync": ["--REAL", "--sync-only"],
     "dedupe": ["--REAL", "--dedupe-only"],
     "cleanup": ["--REAL", "--cleanup"],
@@ -89,6 +90,7 @@ PHONE_COMMANDS = {
     "dry-run": ["--scan-once", "--dry-run"],
     "scan": ["--scan-once"],                 # production one-shot
     "scan-once": ["--scan-once"],
+    "auto": ["--scan-once"],                 # production scan — just works
     "start": ["--background"],               # fork to the background
     "stop": ["--stop"],
     "status": ["--status"],
@@ -514,6 +516,7 @@ def usage(platform):
             "Commands for THIS device (computer):",
             "  ./organize test          dry-run scan — safe, changes nothing",
             "  ./organize test-real     one production scan (alias: scan)",
+            "  ./organize auto          production scan — just works",
             "  ./organize start         run in the background, repeatedly",
             "  ./organize stop          stop the background program",
             "  ./organize restart       stop, wait, start again",
@@ -536,6 +539,7 @@ def usage(platform):
             "",
             "On a phone (run these instead):",
             "  ./organize test    dry-run scan     ./organize scan    production scan",
+            "  ./organize auto    production scan — just works",
             "  ./organize start   run in the background    ./organize stop",
             "  ./organize rename  rename held files, one by one",
         ]
@@ -544,6 +548,7 @@ def usage(platform):
             "Commands for THIS device (phone):",
             "  ./organize test          dry-run scan — safe, copies nothing",
             "  ./organize scan          one production scan (alias: scan-once)",
+            "  ./organize auto          production scan — just works",
             "  ./organize start         run in the background",
             "  ./organize stop          stop the background program",
             "  ./organize restart       stop, wait, start again",
@@ -559,7 +564,7 @@ def usage(platform):
             "  --stats --status --stop --make-config --rename-held --config FILE -v",
             "",
             "On a computer (run there instead):",
-            "  ./organize test    dry-run scan     ./organize test-real  production",
+            "  ./organize test    dry-run scan     ./organize auto    production scan",
         ]
     if platform == "computer":
         lines += [

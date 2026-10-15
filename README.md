@@ -42,6 +42,7 @@ which commands to use.
 ./organize test         # dry-run scan (safe) — both platforms
 ./organize test-real    # computer: one production scan
 ./organize scan         # phone: one production scan
+./organize auto         # production scan — just works (both platforms)
 ./organize start        # run in the background   ./organize stop
 ./organize log          # follow the log   ./organize status
 ./organize setup        # first-time setup (config + will-it-work report)
@@ -244,7 +245,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `stop` / `restart` / `status` | Control the background process |
 | `log` | Tail `~/.file_organizer.log` |
 | `test` | Single **dry-run** cycle — nothing real is changed |
-| `test-real` (alias `scan`) | Single production cycle |
+| `test-real` (aliases `scan`, `auto`) | Single production cycle |
 | `sync` | Folder synchronization only |
 | `dedupe` | Deduplication only |
 | `clean` | Wipe the `organized` folder and the log, then a fresh scan |
@@ -267,7 +268,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `log` | Tail the log |
 | `stats` | Show the sync database statistics |
 | `test` | Single **dry-run** scan — no files copied |
-| `scan` | Single production scan |
+| `scan` (alias `auto`) | Single production scan |
 | `find-cloud-drives` | Locate your cloud drive folders (Proton Drive, Google Drive, Dropbox, …) |
 | `make-config` | Create phone_sync_config.yaml from the template |
 | `rename` | Rename held app-generated files one by one (`name: X new name (d for delete): ` — Enter keeps, `d` deletes; a date in the name is prefilled as `YYYYMMDD-`) |
