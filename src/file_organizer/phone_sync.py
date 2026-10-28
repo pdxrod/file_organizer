@@ -180,6 +180,49 @@ def compute_idle_sleep(base: int, factor: int, max_multiplier: int, streak: int)
     return base * multiplier
 
 
+def usb_plugged_in(
+    power_supply_root: str = "/sys/class/power_supply",
+    android_usb_root: str = "/sys/class/android_usb",
+) -> bool:
+    """Best-effort: is this device currently plugged into USB? (Android)
+
+    ADB only lets the COMPUTER initiate transfers, so a plugged-in phone
+    cannot push files over the wire itself. What it CAN do is keep its
+    file_organizer_staging folder fresh the moment USB appears — the
+    computer's auto cycle (or `./organize pull`) then collects the files.
+
+    Checks the kernel power-supply class (type == USB and present) and the
+    legacy android_usb interface (state == CONFIGURED). Returns False on
+    non-Android platforms and whenever the sysfs entries are absent or
+    unreadable — the daemon must never crash on kernel differences.
+    """
+    try:
+        if os.path.isdir(power_supply_root):
+            for entry in sorted(os.listdir(power_supply_root)):
+                p = Path(power_supply_root) / entry
+                try:
+                    kind = (p / "type").read_text().strip()
+                    if kind != "USB":
+                        continue
+                    present = (p / "present").read_text().strip()
+                    if present not in ("", "0"):
+                        return True
+                except OSError:
+                    continue
+        if os.path.isdir(android_usb_root):
+            for entry in sorted(os.listdir(android_usb_root)):
+                p = Path(android_usb_root) / entry
+                try:
+                    state = (p / "state").read_text().strip().upper()
+                    if state == "CONFIGURED":
+                        return True
+                except OSError:
+                    continue
+    except OSError:
+        return False
+    return False
+
+
 # Template placeholders that mean "this config has not been personalised yet".
 # Keep in sync with TEMPLATE_PLACEHOLDER_MARKERS in config.py.
 PLACEHOLDER_MARKERS = (
@@ -1172,6 +1215,11 @@ class PhoneSync:
         self._scan_count = 0
         self._total_copied = 0
         self._total_bytes = 0
+        # USB plug-in tracking: when the phone gets plugged into the
+        # computer, scan immediately (and stay at the base interval while
+        # plugged) so file_organizer_staging is fresh for the computer's
+        # auto pull.
+        self._usb_was_plugged = False
 
         # Resolve paths
         self.target_dir = Path(
@@ -1649,6 +1697,16 @@ class PhoneSync:
         if pruned:
             logger.info("Pruned %d stale DB entries (files no longer exist)", pruned)
 
+        # USB plug-in: the scan above IS the phone's half of the push —
+        # files are staged now. ADB only lets the computer initiate
+        # transfers, so when the phone is plugged in, the computer's auto
+        # cycle (or ./organize pull) collects them.
+        if usb_plugged_in():
+            logger.info(
+                "USB plugged in — staged files are ready for the computer "
+                "to pull (./organize pull, or the computer's auto cycle)."
+            )
+
         return stats
 
     def run_daemon(self) -> None:
@@ -1675,9 +1733,23 @@ class PhoneSync:
                     db_stats["total_files"],
                 )
 
+                # USB plug-in (phone's half of the push to the computer):
+                # while plugged in, keep scanning at the base interval so
+                # file_organizer_staging is always fresh for the computer's
+                # auto pull; a fresh plug-in resets the backoff.
+                plugged = usb_plugged_in()
+                if plugged and not self._usb_was_plugged:
+                    logger.info(
+                        "USB plugged in — staging stays fresh for the "
+                        "computer's auto pull."
+                    )
+                self._usb_was_plugged = plugged
+
                 # Idle backoff (item 14): cycles that copy nothing sleep
-                # progressively longer, up to scan_interval * backoff_max.
-                if stats["copied"] == 0:
+                # progressively longer, up to scan_interval * backoff_max —
+                # unless the phone is plugged in, in which case the daemon
+                # stays at the base interval for the computer's pull.
+                if stats["copied"] == 0 and not plugged:
                     self.idle_streak += 1
                 else:
                     self.idle_streak = 0
@@ -1691,9 +1763,19 @@ class PhoneSync:
                 )
 
                 # Sleep in small increments so we can respond to signals
+                # — and to a phone being plugged in mid-sleep, which
+                # triggers an immediate fresh scan for the computer.
                 if self._running:
                     for _ in range(sleep_for):
                         if not self._running:
+                            break
+                        if not self._usb_was_plugged and usb_plugged_in():
+                            logger.info(
+                                "USB plugged in during sleep — resuming "
+                                "scan cycle immediately."
+                            )
+                            self._usb_was_plugged = True
+                            self.idle_streak = 0
                             break
                         time.sleep(1)
 

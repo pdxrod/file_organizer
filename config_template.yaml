@@ -336,9 +336,17 @@ computer:
   # machine.  remote_stage is what gets synced back to the phone in push
   # mode.  Both resolve drive: references like MAIN_DRIVE, etc.
   # Change these to whatever cloud drive or external disk you use.
+  #
+  # Note: on macOS the Proton Drive mount root IS the drive root — the
+  # phone/web app's "My Files" level does not exist as a folder here, so
+  # reference its contents directly (e.g. PROTON_DRIVE/misc).
   phone_pull:
+    # auto_pull: each production auto cycle runs phone_pull.sh pull when a
+    # phone is connected (it exits quietly when none is). Set false to
+    # only pull with `./organize pull`.
+    auto_pull: true
     local_stage: "MAIN_DRIVE/misc"
-    remote_stage: "PROTON_DRIVE/My Files/misc"
+    remote_stage: "PROTON_DRIVE/misc"
     adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
     # Directories on the phone to pull (relative to /storage/emulated/0).
     # The phone program stages grace-period-filtered, deduped files into
@@ -444,7 +452,7 @@ phone:
   # own output every scan.
   #
   # On macOS (running the daemon on the Mac itself):
-  #   /Users/YOURNAME/Library/CloudStorage/ProtonDrive-.../My Files/misc
+  #   /Users/YOURNAME/Library/CloudStorage/ProtonDrive-.../misc
   #
   # TIP: Run `./organize find-cloud-drives` to locate your cloud drive
   # folders (mainly useful on macOS).

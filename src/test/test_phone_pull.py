@@ -87,6 +87,20 @@ class PhonePullScriptTests(unittest.TestCase):
         )
         self.assertNotIn("phone_pull.sh", proc.stdout + proc.stderr)
 
+    def test_quiet_mode_suppresses_info_but_keeps_errors(self):
+        """Regression: ./organize auto runs phone_pull.sh with --quiet; the
+        friendly tip and INFO chatter must go away while the no-device
+        ERROR line stays visible for the caller to log."""
+        proc = self._run("--quiet")
+        self.assertEqual(proc.returncode, 1)
+        combined = proc.stdout + proc.stderr
+        self.assertIn(
+            "No devices connected. Connect a phone and enable USB debugging.",
+            combined,
+        )
+        self.assertNotIn("Tip: Run ./organize list", combined)
+        self.assertNotIn("[phone_pull] INFO", combined)
+
 
 if __name__ == "__main__":
     unittest.main()

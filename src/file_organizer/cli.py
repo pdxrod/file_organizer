@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CLI entry point for file_organizer."""
 
-import os, sys, argparse, logging, signal, time
+import os, sys, argparse, logging, signal, subprocess, time
 from pathlib import Path
 
 from file_organizer.config import Config, ConfigError, report_first_run, resolve_log_path, find_project_root, ensure_output_dir
@@ -27,6 +27,58 @@ def setup_logging(verbose: bool = False, config_path: str = "config.yaml"):
             logging.FileHandler(resolve_log_path(config_path)),
         ],
     )
+
+def auto_pull_enabled(config: Config) -> bool:
+    """Should a production auto cycle attempt the ADB phone pull?
+
+    True unless phone_pull.auto_pull is explicitly false in config.yaml.
+    The pull itself is best-effort — phone_pull.sh exits quietly when no
+    device is connected.
+    """
+    pp = config.raw_config.get("phone_pull") or {}
+    return bool(pp.get("auto_pull", True))
+
+
+def run_auto_phone_pull(config: Config) -> bool:
+    """Best-effort ADB phone pull for production auto cycles.
+
+    Runs src/phone_pull.sh in quiet pull mode. Returns True when a pull
+    actually ran, False when it was skipped or nothing was connected.
+    Never raises — a broken adb setup must not break the organize cycle.
+    """
+    if not auto_pull_enabled(config):
+        return False
+    script = Path(__file__).resolve().parent.parent / "phone_pull.sh"
+    if not script.exists():
+        logger.warning("Auto phone pull: script not found (%s)", script)
+        return False
+    timeout = int(config.raw_config.get("sync_timeout_minutes", 60) or 60) * 60
+    logger.info("Auto phone pull: checking for a connected phone...")
+    try:
+        result = subprocess.run(
+            ["bash", str(script), "--quiet"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("Auto phone pull: timed out after %ds", timeout)
+        return False
+    except OSError as e:
+        logger.warning("Auto phone pull: could not run phone_pull.sh: %s", e)
+        return False
+
+    out = (result.stdout or "").strip()
+    err = (result.stderr or "").strip()
+    if result.returncode == 0:
+        if out:
+            for line in out.splitlines():
+                logger.info("Auto phone pull: %s", line)
+        return True
+    # No phone attached (or adb missing) is a normal state, not an error.
+    if err:
+        for line in err.splitlines():
+            logger.info("Auto phone pull: %s", line)
+    return False
+
 
 def compute_idle_sleep(base: int, factor: int, max_multiplier: int, streak: int) -> int:
     """Sleep duration for a daemon cycle after `streak` idle cycles.
@@ -118,7 +170,16 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     if not dry_run:
         actions["orphans_removed"] += organizer.clean_orphaned_links(valid_files)
 
-    # 4. Sync — run in background thread so slow ProtonDrive/external
+    # 4. Auto phone pull — if a phone is connected, pull its
+    # file_organizer_staging files onto this computer BEFORE the folder
+    # sync starts, so the pulled files ride along to the cloud drive in
+    # the same cycle. Best-effort: no device = one quiet log line.
+    if not dry_run:
+        pulled = run_auto_phone_pull(config)
+        if pulled:
+            logger.info("Auto phone pull: pulled phone files into staging")
+
+    # 5. Sync — run in background thread so slow ProtonDrive/external
     # drives don't block the fast scan + organize work
     if config.raw_config.get("enable_folder_sync", False) and not dry_run:
         logger.info("Starting background folder sync...")
@@ -133,19 +194,19 @@ def run_full_cycle(config: Config, dry_run: bool = False):
         sync_thread = threading.Thread(target=background_sync, daemon=True)
         sync_thread.start()
 
-    # 5. Softlink handling (exclude patterns for rsync)
+    # 6. Softlink handling (exclude patterns for rsync)
     exclude_for_rsync = softlink_handler.get_rsync_exclude_patterns()
     if exclude_for_rsync:
         logger.info("Excluding from sync: %s", exclude_for_rsync[:10])
 
-    # 6. Auto-git (only in production mode — this makes real changes)
+    # 7. Auto-git (only in production mode — this makes real changes)
     if auto_git.enabled and not dry_run:
         logger.info("Auto-git scan...")
         git_summary = auto_git.scan_and_init()
         logger.info("Auto-git: %s", git_summary)
         actions["git_initialized"] += git_summary.get("initialized", 0)
 
-    # 7. Dedup
+    # 8. Dedup
     if config.raw_config.get("enable_duplicate_detection", False):
         logger.info("Running deduplication...")
         dedup_summary = dedup.run(dry_run=dry_run)
@@ -388,7 +449,13 @@ def main(argv=None):
 
     # One-shot cycle
     try:
-        run_full_cycle(config, dry_run=not real_mode)
+        _, sync_thread = run_full_cycle(config, dry_run=not real_mode)
+        # The folder sync runs in a background daemon thread; a one-shot
+        # run must wait for it or the process exit kills the rsyncs
+        # mid-transfer (cloud drives dislike that, and the sync would
+        # silently never finish).
+        if sync_thread is not None:
+            sync_thread.join()
     except KeyboardInterrupt:
         logger.info("Interrupted by user. Exiting.")
         return

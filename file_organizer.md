@@ -35,7 +35,7 @@ Synchronising .git and similar folders is a pain. See if you can figure somethin
 before backing up a folder containing a .git folder, or .venv, etc. - see softlink_folder_patterns: - the current file_organiser copies the .git or .venv etc. folder to ~/organised (spelt with an S), and replaces the original with a soft link. Thus
 /Users/janedoe/dev/ml/Kun/.git 
 becomes a soft link pointing to
-/Users/janedoe/organised/Users/janedoe/dev/ml/Kun/.git
+/Users/janedoe/organized/Users/janedoe/dev/ml/Kun/.git
 but git doesn't work well with soft links. See what you can do, and let me know what you're doing, please. 
 
 Getting and Gitting
@@ -65,7 +65,7 @@ What I need to do, is,
 
 2. The other problem is the opposite; it's too 'eager'. As soon as a photo, for example, gets created, it backs it up. But I delete most of my photos - like most people, I experiment. Now, I have to delete them in two places (or maybe three, if the file_organizer finds them and puts them on the Mac!) 
 
-I may not be able to have a full-on file_organizer funning on my phones, but I'd like daemons which run continuously and occasionally copy new files - from Documents, Download, Pictures, DCIM and maybe some other places onto the 'My Files/misc' folder on Proton Drive. Is this possible?
+I may not be able to have a full-on file_organizer funning on my phones, but I'd like daemons which run continuously and occasionally copy new files - from Documents, Download, Pictures, DCIM and maybe some other places onto the 'misc' folder on Proton Drive. Is this possible?
 
 Problem	Solution
 Under-backup: .txt, .png, screenshots in DCIM, Documents, etc. never get backed up by Proton Drive	
@@ -78,7 +78,7 @@ phone_daemon.py (755 lines) — The core daemon:
 Runs on Android via Termux or macOS
 Content-hash tracking (SHA-256 + SQLite) — rename/move a file, it won't re-copy
 Grace period (min_age_minutes) gives you time to delete unwanted files
-Preserves folder structure: DCIM/Camera/IMG_001.jpg → ProtonDrive/My Files/misc/DCIM/Camera/IMG_001.jpg
+Preserves folder structure: DCIM/Camera/IMG_001.jpg → ProtonDrive/misc/DCIM/Camera/IMG_001.jpg
 All the modes: --scan-once, --dry-run, --daemon, --status, --stop, --find-proton, --stats
 Tested: files copy correctly, already-synced files are skipped, min_age filtering works, .tmp files excluded
 phone_daemon_config.yaml (102 lines) — Heavily commented config template for your phones
@@ -97,8 +97,8 @@ Phone (Termux)                    Mac                          Cloud
 ┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
 │ phone_daemon.py │     │ file_organizer        │     │ Proton Drive    │
 │                 │     │                       │     │                 │
-│ DCIM/Camera ────┼──►  │ ~/PhoneMedia/ ───► sync_pairs ──►  My Files/ │
-│ DCIM/Screenshots│     │ (via phone_pull.sh)   │     │     misc/       │
+│ DCIM/Camera ────┼──►  │ ~/PhoneMedia/ ───► sync_pairs ──►   misc/  │
+│ DCIM/Screenshots│     │ (via phone_pull.sh)   │     │                 │
 │ Pictures ───────┤     │                       │     │                 │
 │ Documents ──────┤     │ ~/organized/          │     │                 │
 │ Download ───────┤     │ (soft-link tree)      │     │                 │

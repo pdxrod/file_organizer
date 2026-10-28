@@ -206,7 +206,7 @@ Phone (Termux)                         Computer                        Cloud
 ┌───────────────────────┐   ┌───────────────────────────┐   ┌──────────────────┐
 │ phone_sync            │   │ file_organizer            │   │ Proton Drive /   │
 │                       │   │                           │   │ Google Drive     │
-│ DCIM/Camera ──────────┼──►│ MAIN_DRIVE/Pictures…     │──►│ My Files/…       │
+│ DCIM/Camera ──────────┼──►│ MAIN_DRIVE/Pictures…     │──►│ misc/…           │
 │ DCIM/Screenshots      │   │ MAIN_DRIVE/Music, misc    │   │                  │
 │ Pictures ─────────────┤   │         │                 │   │                  │
 │ Documents ────────────┤   │         ▼                 │   │                  │
@@ -224,6 +224,9 @@ Phone (Termux)                         Computer                        Cloud
    a `staging_map:` override first, then a same-named folder under
    MAIN_DRIVE (e.g. `staging/Music` → `MAIN_DRIVE/Music`), then
    `MAIN_DRIVE/misc` (created on demand) for anything it can't place.
+   With `phone_pull.auto_pull: true` (the default), every production
+   `./organize auto` cycle does this pull automatically when a phone is
+   connected — no separate `pull` command needed.
 3. The computer's sync pairs then mirror those folders to Proton Drive,
    Google Drive, or an external disk.
 4. `./organize push` copies files from the cloud back to the phone.
@@ -283,6 +286,10 @@ copied. Deleting it later removes it from staging on the next cleanup.
 ./organize pull --device ID        # one specific phone
 ./organize pull --dry-run          # show what would transfer
 ```
+
+`./organize auto` already pulls automatically when a phone is connected
+(`phone_pull.auto_pull: true` — the default); the commands above are for
+manual or one-off use.
 
 (These forward to `src/phone_pull.sh`; you can still call that directly.)
 All paths come from the `phone_pull:` section of `config.yaml`. On macOS,

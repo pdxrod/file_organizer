@@ -68,7 +68,7 @@ defaults = {
     'adb_path': 'adb',
     'phone_source_dirs': ['DCIM/Camera', 'DCIM/Screenshots', 'Pictures',
                           'Download', 'Documents', 'Movies', 'Music'],
-    'phone_push_dir': 'ProtonDrive/My Files/misc',
+    'phone_push_dir': 'ProtonDrive/misc',
     'android_base': '/storage/emulated/0',
     'min_age_minutes': 5,
     'state_file': '~/.phone_pull_state',
@@ -233,6 +233,7 @@ OPTIONS:
   --device ID      Use a specific device (default: all connected)
   --push           Push mode: copy files from remote_stage TO the phone
   --dry-run        Show what would be synced without copying
+  --quiet          Only print warnings/errors (used by ./organize auto)
   --verbose        Verbose output
 
 DESCRIPTION:
@@ -269,7 +270,7 @@ EOF
 # ── Logging ──────────────────────────────────────────────────────────────────
 
 log()  { echo "$(date '+%Y-%m-%d %H:%M:%S') [phone_pull] $*"; }
-info() { log "INFO  $*"; }
+info() { [[ "${QUIET:-false}" != "true" ]] && log "INFO  $*" || true; }
 warn() { log "WARN  $*" >&2; }
 err()  { log "ERROR $*" >&2; }
 dbg()  { [[ "${VERBOSE:-false}" == "true" ]] && log "DEBUG $*" || true; }
@@ -614,6 +615,7 @@ main() {
     local device_id=""
     local dry_run="false"
     VERBOSE="false"
+    QUIET="false"
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -636,6 +638,10 @@ main() {
                 ;;
             --dry-run)
                 dry_run="true"
+                shift
+                ;;
+            --quiet|-q)
+                QUIET="true"
                 shift
                 ;;
             --verbose|-v)
@@ -675,8 +681,10 @@ main() {
 
     if [[ -z "$devices" ]]; then
         err "No devices connected. Connect a phone and enable USB debugging."
-        echo ""
-        echo "Tip: Run ./organize list to see connected devices."
+        if [[ "${QUIET:-false}" != "true" ]]; then
+            echo ""
+            echo "Tip: Run ./organize list to see connected devices."
+        fi
         exit 1
     fi
 
@@ -693,8 +701,9 @@ main() {
         esac
     done
 
-    # Reminder about file_organizer
-    if [[ "$mode" == "pull" && "$dry_run" != "true" ]]; then
+    # Reminder about file_organizer (suppressed in --quiet mode, which
+    # ./organize auto uses for its background phone pull).
+    if [[ "$mode" == "pull" && "$dry_run" != "true" && "${QUIET:-false}" != "true" ]]; then
         local file_count
         file_count=$(find "${LOCAL_STAGE}" -type f 2>/dev/null | wc -l | tr -d ' ')
         echo ""

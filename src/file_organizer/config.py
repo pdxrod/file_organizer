@@ -121,6 +121,9 @@ DEFAULTS: Dict[str, Any] = {
     "log_path": "~/.file_organizer.log",
     "pid_path": "/tmp/file_organizer.pid",
     "phone_pull": {
+        # auto_pull: production auto cycles run phone_pull.sh pull when a
+        # phone is connected (the script exits quietly when none is).
+        "auto_pull": True,
         "local_stage": "~/misc",
         "remote_stage": "~/misc",
         "adb_path": "adb",
