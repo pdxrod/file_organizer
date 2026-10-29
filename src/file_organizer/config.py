@@ -109,6 +109,10 @@ DEFAULTS: Dict[str, Any] = {
     # than sync_lock_stale_minutes (crashed runs) are taken over.
     "sync_lock_enabled": True,
     "sync_lock_stale_minutes": 120,
+    # Direct subfolder NAMES the sync engine never copies, on top of
+    # exclude_patterns. Put the file_organizer checkout folders here so
+    # the organizers never mirror their own source code between machines.
+    "sync_exclude_folder_names": [],
     "rsync_disable_mmap": True,
     "max_soft_links_per_file": 10,
     "enable_semantic_categories": True,

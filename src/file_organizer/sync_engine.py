@@ -40,6 +40,11 @@ class SyncEngine:
         self._timeout: int = (config.raw_config.get("sync_timeout_minutes", 60) or 60) * 60
         self._chunk_subfolders: int = config.raw_config.get("sync_chunk_subfolders", 30)
         self._exclude_patterns: list[str] = config.raw_config.get("exclude_patterns", []) or []
+        # Direct subfolder NAMES never synced (item: organizers must not
+        # mirror their own checkouts between machines). Applied by the
+        # chunker and as --exclude /name/ in every rsync run.
+        self._exclude_folder_names: list[str] = \
+            config.raw_config.get("sync_exclude_folder_names", []) or []
         # Cross-device sync coordination (see _shared_lock_dir).
         self._lock_enabled: bool = bool(
             config.raw_config.get("sync_lock_enabled", True)
@@ -179,6 +184,11 @@ class SyncEngine:
         for name in (exclude_subdirs or []):
             args.extend(["--exclude", f"/{name}/"])
 
+        # sync_exclude_folder_names: never sync these subfolders at all
+        # (e.g. the file_organizer checkouts inside a synced tree).
+        for name in self._exclude_folder_names:
+            args.extend(["--exclude", f"/{name}/"])
+
         # Exclude patterns from config. Version-control folders (.git etc.)
         # are part of the built-in exclude_patterns safety defaults — they
         # are always merged in by Config.load(), so no separate hard-coded
@@ -236,6 +246,20 @@ class SyncEngine:
             logger.error("rsync not found — please install rsync")
             return False
 
+    def _sync_subdirs(self, source: Path) -> list:
+        """Direct subfolder names eligible for sync, excluding folders the
+        user asked never to sync (sync_exclude_folder_names — e.g. the
+        file_organizer checkouts themselves, so the organizers never
+        mirror their own source code between machines).
+        """
+        try:
+            subdirs = sorted(
+                p.name for p in source.iterdir() if p.is_dir()
+            )
+        except OSError:
+            return []
+        return [n for n in subdirs if n not in self._exclude_folder_names]
+
     def _run_rsync_many(self, source: Path, target: Path,
                         delete: bool = False) -> bool:
         """Item 11 fix: sync a folder, splitting it into per-subfolder rsync
@@ -249,12 +273,7 @@ class SyncEngine:
         """
         subdirs = []
         if self._chunk_subfolders and source.is_dir():
-            try:
-                subdirs = sorted(
-                    p.name for p in source.iterdir() if p.is_dir()
-                )
-            except OSError:
-                subdirs = []
+            subdirs = self._sync_subdirs(source)
 
         if len(subdirs) <= self._chunk_subfolders:
             return self._run_rsync(source, target, delete=delete)

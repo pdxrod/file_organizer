@@ -136,5 +136,48 @@ class LockAcquireTests(unittest.TestCase):
         self.assertIn(".file_organizer.sync.lock", DEFAULTS["exclude_patterns"])
 
 
+class SyncExcludeFolderNamesTests(unittest.TestCase):
+    """sync_exclude_folder_names: organizers must never mirror their own
+    checkouts between machines (regression: a stale cloud copy of the repo
+    inside a synced tree kept reverting the working tree)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="sync_excl_test_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(
+            self.tmp, ignore_errors=True))
+
+    def _engine(self, raw=None):
+        return sync_engine.SyncEngine(StubConfig(raw))
+
+    def test_rsync_args_exclude_the_folder_names(self):
+        engine = self._engine(
+            {"sync_exclude_folder_names": ["file_organizer", "file_organizer_v2"]}
+        )
+        args = engine._build_rsync_args(self.tmp, self.tmp)
+        self.assertIn("--exclude", args)
+        self.assertIn("/file_organizer/", args)
+        self.assertIn("/file_organizer_v2/", args)
+
+    def test_subdir_enumeration_skips_excluded_names(self):
+        src = self.tmp / "dev"
+        for name in ("file_organizer", "file_organizer_v2", "rails", "signal"):
+            (src / name).mkdir(parents=True)
+        engine = self._engine(
+            {"sync_exclude_folder_names": ["file_organizer", "file_organizer_v2"]}
+        )
+        self.assertEqual(
+            engine._sync_subdirs(src), ["rails", "signal"]
+        )
+
+    def test_default_excludes_nothing(self):
+        src = self.tmp / "dev"
+        (src / "file_organizer").mkdir(parents=True)
+        (src / "rails").mkdir(parents=True)
+        self.assertEqual(
+            self._engine()._sync_subdirs(src),
+            ["file_organizer", "rails"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -303,6 +303,14 @@ computer:
   sync_lock_enabled: true
   sync_lock_stale_minutes: 120
 
+  # Direct subfolder NAMES never synced, on top of exclude_patterns.
+  # The organizers must not mirror their own checkouts between machines:
+  # if your file_organizer folder lives inside a synced tree (e.g.
+  # MAIN_DRIVE/dev), list it here on EVERY machine that syncs that tree.
+  sync_exclude_folder_names:
+    - "file_organizer"
+    - "file_organizer_v2"
+
   # Large folders sync in chunks. Each chunk times out after 60 min to prevent
   # infinite hangs.
   max_soft_links_per_file: 6
