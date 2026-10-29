@@ -37,6 +37,7 @@ import logging
 import argparse
 import shutil
 import fnmatch
+import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Iterator
@@ -221,6 +222,40 @@ def usb_plugged_in(
     except OSError:
         return False
     return False
+
+
+def usb_debugging_state() -> "Optional[str]":
+    """Best-effort: is USB debugging enabled on this Android device?
+
+    Returns '1', '0', or None when the setting cannot be read (non-
+    Android platform, or `settings` not available/permitted). A plugged-in
+    phone with USB debugging OFF cannot be reached by the computer's
+    ./organize auto pull at all — the phone should say so loudly.
+    """
+    try:
+        result = subprocess.run(
+            ["settings", "get", "global", "adb_enabled"],
+            capture_output=True, text=True, timeout=5,
+        )
+        value = result.stdout.strip()
+        if value in ("0", "1"):
+            return value
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def usb_debugging_help_lines() -> list:
+    """The phone-side USB-debugging instructions, as log lines."""
+    return [
+        "To let the computer pull files over USB:",
+        "  1. Settings → About phone → tap 'Build number' 7 times to",
+        "     unlock Developer options.",
+        "  2. Settings → Developer options → turn ON 'USB debugging'.",
+        "  3. Reconnect the USB cable and accept the",
+        "     'Allow USB debugging?' prompt (tick 'Always allow from",
+        "     this computer').",
+    ]
 
 
 # Template placeholders that mean "this config has not been personalised yet".
@@ -1735,12 +1770,29 @@ class PhoneSync:
         # USB plug-in: the scan above IS the phone's half of the push —
         # files are staged now. ADB only lets the computer initiate
         # transfers, so when the phone is plugged in, the computer's auto
-        # cycle (or ./organize pull) collects them.
+        # cycle (or ./organize pull) collects them — but only if USB
+        # debugging is enabled on this phone.
         if usb_plugged_in():
-            logger.info(
-                "USB plugged in — staged files are ready for the computer "
-                "to pull (./organize pull, or the computer's auto cycle)."
-            )
+            state = usb_debugging_state()
+            if state == "0":
+                logger.warning(
+                    "USB plugged in, but USB debugging is OFF — the "
+                    "computer cannot pull files."
+                )
+                for line in usb_debugging_help_lines():
+                    logger.warning("%s", line)
+            elif state == "1":
+                logger.info(
+                    "USB plugged in and USB debugging is ON — staged files "
+                    "are ready for the computer to pull. Accept the 'Allow "
+                    "USB debugging?' prompt if it appears."
+                )
+            else:
+                logger.info(
+                    "USB plugged in — make sure USB debugging is ON "
+                    "(Settings → Developer options → USB debugging) so the "
+                    "computer can pull the staged files."
+                )
 
         return stats
 
@@ -1774,10 +1826,20 @@ class PhoneSync:
                 # auto pull; a fresh plug-in resets the backoff.
                 plugged = usb_plugged_in()
                 if plugged and not self._usb_was_plugged:
-                    logger.info(
-                        "USB plugged in — staging stays fresh for the "
-                        "computer's auto pull."
-                    )
+                    state = usb_debugging_state()
+                    if state == "0":
+                        logger.warning(
+                            "USB plugged in, but USB debugging is OFF — the "
+                            "computer cannot pull files."
+                        )
+                        for line in usb_debugging_help_lines():
+                            logger.warning("%s", line)
+                    else:
+                        logger.info(
+                            "USB plugged in — staging stays fresh for the "
+                            "computer's auto pull. (USB debugging ON: %s)",
+                            state or "cannot tell",
+                        )
                 self._usb_was_plugged = plugged
 
                 # Idle backoff (item 14): cycles that copy nothing sleep

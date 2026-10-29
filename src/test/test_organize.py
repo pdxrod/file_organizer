@@ -272,5 +272,29 @@ class ProjectRootTests(unittest.TestCase):
             )
 
 
+class MainEntryTests(unittest.TestCase):
+    def test_help_prints_same_instructions_as_no_args(self):
+        """`organize help` and `organize` print the same instructions."""
+        import io
+        from contextlib import redirect_stdout
+        buf1, buf2 = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf1):
+            organize.main([])
+        with redirect_stdout(buf2):
+            organize.main(["help"])
+        self.assertEqual(buf1.getvalue(), buf2.getvalue())
+        self.assertIn("START HERE", buf2.getvalue())
+        self.assertIn("./organize auto", buf2.getvalue())
+
+    def test_help_flag_variants_print_instructions(self):
+        import io
+        from contextlib import redirect_stdout
+        for spelling in ("HELP", "--help", "-H"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                organize.main([spelling])
+            self.assertIn("START HERE", buf.getvalue(), spelling)
+
+
 if __name__ == "__main__":
     unittest.main()

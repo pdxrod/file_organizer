@@ -282,6 +282,19 @@ dbg()  { [[ "${VERBOSE:-false}" == "true" ]] && log "DEBUG $*" || true; }
 
 # ── Device management ────────────────────────────────────────────────────────
 
+usb_debugging_help() {
+    echo ""
+    echo "Troubleshooting: USB debugging (Android)"
+    echo "  1. Settings → About phone → tap 'Build number' 7 times to"
+    echo "     unlock Developer options."
+    echo "  2. Settings → Developer options → turn ON 'USB debugging'."
+    echo "  3. Reconnect the USB cable and accept the"
+    echo "     'Allow USB debugging?' prompt on the phone (tick"
+    echo "     'Always allow from this computer')."
+    echo "  4. Run './organize list' — the phone must show 'device', not"
+    echo "     'unauthorized' or 'offline'."
+}
+
 list_devices() {
     local devices
     # `|| true`: with `set -euo pipefail`, grep exiting 1 on an empty
@@ -289,16 +302,23 @@ list_devices() {
     devices=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' | awk '{print $1}' || true)
     if [[ -z "$devices" ]]; then
         echo "No devices connected."
-        echo ""
-        echo "Troubleshooting:"
-        echo "  1. Connect phone via USB"
-        echo "  2. Enable USB debugging (Developer Options)"
-        echo "  3. Accept the RSA key fingerprint on the phone"
-        echo "  4. Run 'adb devices' to verify"
+        usb_debugging_help
         return 1
     fi
     echo "Connected devices:"
     "$ADB" devices -l 2>/dev/null | tail -n +2 | grep -v '^$'
+    # adb states other than 'device' mean the phone cannot be used yet.
+    local states
+    states=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' || true)
+    if echo "$states" | grep -q "unauthorized"; then
+        echo ""
+        warn "A phone shows 'unauthorized' — USB debugging is OFF, or the"
+        warn "'Allow USB debugging?' prompt on the phone was not accepted."
+        usb_debugging_help
+    fi
+    if echo "$states" | grep -q "offline"; then
+        warn "A phone shows 'offline' — try reconnecting the USB cable."
+    fi
 }
 
 # ── State tracking ───────────────────────────────────────────────────────────
@@ -676,21 +696,40 @@ main() {
         fi
     fi
 
-    # Get device list
-    local devices
+    # Get device list, splitting ready phones from problem states.
+    # adb states: 'device' (ready), 'unauthorized' (USB debugging off or
+    # the prompt not accepted), 'offline'/'no permissions' (cable/adb).
+    local devices="" raw_lines line serial state
     if [[ -n "$device_id" ]]; then
         devices="$device_id"
     else
         # `|| true` as in list_devices: an empty adb device list must
         # fall through to the friendly message, not die on errexit.
-        devices=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' | awk '{print $1}' || true)
+        raw_lines=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' || true)
+        while IFS= read -r line; do
+            serial=$(echo "$line" | awk '{print $1}')
+            state=$(echo "$line" | awk '{print $2}')
+            case "$state" in
+                device)
+                    devices="$devices $serial"
+                    ;;
+                unauthorized)
+                    warn "Skipping phone $serial — 'unauthorized' means USB debugging is OFF, or the 'Allow USB debugging?' prompt on the phone was not accepted."
+                    usb_debugging_help >&2
+                    ;;
+                *)
+                    warn "Skipping phone $serial — adb state '$state' (try reconnecting the USB cable)."
+                    ;;
+            esac
+        done <<< "$raw_lines"
     fi
 
-    if [[ -z "$devices" ]]; then
-        err "No devices connected. Connect a phone and enable USB debugging."
+    if [[ -z "${devices// /}" ]]; then
+        err "No usable devices connected. Connect a phone and enable USB debugging."
         if [[ "${QUIET:-false}" != "true" ]]; then
             echo ""
             echo "Tip: Run ./organize list to see connected devices."
+            usb_debugging_help
         fi
         exit 1
     fi

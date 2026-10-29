@@ -76,7 +76,7 @@ class PhonePullScriptTests(unittest.TestCase):
         proc = self._run()
         self.assertEqual(proc.returncode, 1)
         self.assertIn(
-            "No devices connected. Connect a phone and enable USB debugging.",
+            "No usable devices connected. Connect a phone and enable USB debugging.",
             proc.stdout + proc.stderr,
         )
         # The tip must point at the public `organize` CLI, not the
@@ -85,6 +85,8 @@ class PhonePullScriptTests(unittest.TestCase):
             "Tip: Run ./organize list to see connected devices.",
             proc.stdout + proc.stderr,
         )
+        # USB debugging instructions always accompany a missing phone.
+        self.assertIn("Build number", proc.stdout + proc.stderr)
         self.assertNotIn("phone_pull.sh", proc.stdout + proc.stderr)
 
     def test_quiet_mode_suppresses_info_but_keeps_errors(self):
@@ -95,11 +97,32 @@ class PhonePullScriptTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         combined = proc.stdout + proc.stderr
         self.assertIn(
-            "No devices connected. Connect a phone and enable USB debugging.",
+            "No usable devices connected. Connect a phone and enable USB debugging.",
             combined,
         )
         self.assertNotIn("Tip: Run ./organize list", combined)
         self.assertNotIn("[phone_pull] INFO", combined)
+
+    def test_unauthorized_phone_prints_usb_debugging_help(self):
+        """A phone with USB debugging OFF (adb state 'unauthorized') must
+        be skipped AND explained — the user needs the exact steps."""
+        fake = self.tmp / "fake-adb"
+        fake.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = \"devices\" ]; then\n"
+            "    echo 'List of devices attached'\n"
+            "    echo 'ABC123 unauthorized usb:0-1 transport_id:2'\n"
+            "fi\n"
+        )
+        proc = self._run()
+        self.assertEqual(proc.returncode, 1)
+        combined = proc.stdout + proc.stderr
+        self.assertIn("unauthorized", combined)
+        self.assertIn("USB debugging", combined)
+        self.assertIn("Build number", combined)
+        self.assertIn("Allow USB debugging", combined)
+        # No pull attempt was made for the unusable phone.
+        self.assertNotIn("Pull complete", combined)
 
     def test_flags_are_case_and_dash_insensitive(self):
         """--LIST, list and -LiSt all behave like --list."""

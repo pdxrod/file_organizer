@@ -73,10 +73,16 @@ def run_auto_phone_pull(config: Config) -> bool:
             for line in out.splitlines():
                 logger.info("Auto phone pull: %s", line)
         return True
-    # No phone attached (or adb missing) is a normal state, not an error.
+    # No phone attached (or adb missing) is a normal state, not an error —
+    # but a phone that CANNOT be used (USB debugging off / prompt not
+    # accepted) must stand out so the user knows what to do.
     if err:
         for line in err.splitlines():
-            logger.info("Auto phone pull: %s", line)
+            lowered = line.lower()
+            if "unauthorized" in lowered or "usb debugging" in lowered:
+                logger.warning("Auto phone pull: %s", line)
+            else:
+                logger.info("Auto phone pull: %s", line)
     return False
 
 

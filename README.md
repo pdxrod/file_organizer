@@ -296,6 +296,23 @@ All paths come from the `phone_pull:` section of `config.yaml`. On macOS,
 install ADB with `brew install android-platform-tools` and enable USB
 Debugging in the phone's Developer Options.
 
+### If the phone shows `unauthorized` (USB debugging)
+
+`unauthorized` means USB debugging is OFF on the phone, or the phone's
+"Allow USB debugging?" prompt was not accepted. `./organize auto` and
+`./organize pull` detect this and print these steps:
+
+1. Phone: **Settings → About phone → tap "Build number" 7 times**
+   (unlocks Developer options).
+2. Phone: **Settings → Developer options → turn ON "USB debugging"**.
+3. Reconnect the USB cable and accept the **"Allow USB debugging?"**
+   prompt on the phone (tick **"Always allow from this computer"**).
+4. Run `./organize list` — the phone must show `device`, not
+   `unauthorized` or `offline`.
+
+Phones with USB debugging off warn about it themselves: `organize auto`
+on the phone checks the setting and prints the same steps.
+
 ---
 
 ## Test mode
