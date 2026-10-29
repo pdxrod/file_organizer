@@ -61,9 +61,9 @@ except ImportError:  # pragma: no cover - standalone script execution
 # ── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_CONFIG = "phone_sync_config.yaml"
-DEFAULT_DB = "~/.phone_sync.db"
-DEFAULT_LOG = "~/.phone_sync.log"
-DEFAULT_PID = "~/.phone_sync.pid"
+DEFAULT_DB = ""    # empty = resolved inside the config folder by load_config
+DEFAULT_LOG = ""   # (the file_organizer folder) — never the home directory
+DEFAULT_PID = ""
 
 # Built-in safety defaults. The live, editable copies of these lists live in
 # the phone: section of config_template.yaml (cloud_drive_paths,
@@ -231,6 +231,21 @@ PLACEHOLDER_MARKERS = (
     "yourgoogledrive",
     "yourname",
 )
+
+
+def _canonical_flag(token: str, option_strings) -> str:
+    """One CLI flag token → its canonical spelling.
+
+    Case-insensitive and dash-optional: scan-once, -Scan-Once, --scan-once
+    and --SCAN-ONCE all resolve to --scan-once. Tokens that match no known
+    option pass through untouched (they are values, e.g. a file name after
+    config).
+    """
+    name = token.lstrip("-").lower()
+    for canon in option_strings:
+        if canon.lstrip("-").lower() == name:
+            return canon
+    return token
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -493,7 +508,7 @@ def _report_phone_first_run(config_path: Path, content: str) -> None:
     )
 
 
-def load_config(path: str) -> dict:
+def _load_config_raw(path: str) -> dict:
     """Load config from YAML (preferred) or JSON file. Returns dict.
 
     If the config file does not exist and a template is available next to
@@ -595,6 +610,24 @@ def load_config(path: str) -> dict:
                 "pip install pyyaml (Termux may also need: pkg install clang)"
             )
         sys.exit(1)
+
+
+def load_config(path: str) -> dict:
+    """Load phone config and resolve local files into the config folder.
+
+    db/log/pid files live inside the file_organizer folder (next to the
+    config), never in the user's home directory — empty or missing keys
+    resolve there.
+    """
+    cfg = _load_config_raw(path)
+    base = Path(path).expanduser().resolve().parent
+    for key, name in (("db_path", "phone_sync.db"),
+                      ("log_path", "phone_sync.log"),
+                      ("pid_path", "phone_sync.pid")):
+        val = str(cfg.get(key) or "").strip()
+        if not val:
+            cfg[key] = str(base / name)
+    return cfg
 
 
 def resolve_config_path(requested: str) -> str:
@@ -1851,6 +1884,15 @@ def main(argv=None):
         "-v", "--verbose", action="store_true",
         help="Verbose logging",
     )
+    # Flags are case-insensitive and dashes are optional (scan-once,
+    # -Scan-Once and --SCAN-ONCE all work); normalize before argparse.
+    option_strings = [
+        opt for action in parser._actions for opt in action.option_strings
+    ]
+    if argv is not None:
+        argv = [
+            _canonical_flag(a, option_strings) for a in list(argv)
+        ]
     args = parser.parse_args(argv)
     args.config = resolve_config_path(args.config)
 

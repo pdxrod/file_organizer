@@ -255,6 +255,26 @@ def _run_collapse(config: Config, dry_run: bool = True) -> dict:
         actions.extend(collapse_in_tree(root, keep_differing=True))
     return apply_collapse(actions, dry_run=dry_run)
 
+def normalize_flag_token(token, option_strings):
+    """One CLI flag token → its canonical spelling.
+
+    Case-insensitive and dash-optional: real, -real, Real, REAL, --real
+    and -REAL all resolve to --REAL. Tokens that match no known option
+    pass through untouched (they are values, e.g. a file name after
+    --config).
+    """
+    name = token.lstrip("-").lower()
+    for canon in option_strings:
+        if canon.lstrip("-").lower() == name:
+            return canon
+    return token
+
+
+def normalize_argv(argv, option_strings):
+    """Canonicalize every flag token in argv (values untouched)."""
+    return [normalize_flag_token(a, option_strings) for a in argv]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="File Organizer v2")
     parser.add_argument("-R", "--REAL", action="store_true", help="Production mode (default: test/dry-run)")
@@ -271,6 +291,13 @@ def main(argv=None):
     parser.add_argument("--create-test", action="store_true", help="Create test environment")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
+    # Flags are case-insensitive and dashes are optional (real/-real/
+    # -REAL/--REAL all work); normalize before argparse sees them.
+    option_strings = [
+        opt for action in parser._actions for opt in action.option_strings
+    ]
+    if argv is not None:
+        argv = normalize_argv(list(argv), option_strings)
     args = parser.parse_args(argv)
 
     # Running `python -m file_organizer` from src/ should still find the

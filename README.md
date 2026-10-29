@@ -129,10 +129,10 @@ Watch what it does:
 2. Open a terminal in the `file_organizer` folder and run:
 
    ```
-   py organize --scan-once
+   py organize scan-once
    ```
 
-   (or `py -m file_organizer --scan-once` from inside `src\`)
+   (or `py -m file_organizer scan-once` from inside `src\`)
 
 3. This creates `config.yaml` and prints the "Will it work?" report. Open
    `config.yaml` with **Notepad**, replace the placeholder paths, and run the
@@ -254,7 +254,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `clean` | Wipe the `organized` folder and the log, then a fresh scan |
 | `cleanup` | Remove broken/stale soft links from the `organized` folder |
 | `git-preview` / `git-init` | Preview or run auto-git |
-| `collapse-renames` | Plan the 'foo (1).png' family collapse (dry-run; add `--REAL` to apply) |
+| `collapse-renames` | Plan the 'foo (1).png' family collapse (dry-run; add `real` to apply) |
 | `gui` / `web` | Desktop GUI / web UI |
 | `pull` / `push` / `list` | Phone ↔ computer over USB (adb) |
 | `create-test` | Create a sample test environment |
@@ -283,8 +283,8 @@ copied. Deleting it later removes it from staging on the next cleanup.
 ./organize pull                    # phone → computer (all phones)
 ./organize push                    # cloud → phone
 ./organize list                    # connected devices and stats
-./organize pull --device ID        # one specific phone
-./organize pull --dry-run          # show what would transfer
+./organize pull device ID          # one specific phone
+./organize pull dry-run            # show what would transfer
 ```
 
 `./organize auto` already pulls automatically when a phone is connected

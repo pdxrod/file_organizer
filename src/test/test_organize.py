@@ -132,6 +132,40 @@ class SubcommandMappingTests(unittest.TestCase):
         self.assertEqual(mapped, ["--find-cloud-drives"])
         self.assertIsNone(handled)
         # The user's spec: no specific find-proton command.
+
+    def test_subcommands_are_case_and_dash_insensitive(self):
+        """auto, -auto, Auto, AUTO and --AUTO all mean the same thing."""
+        expected = ["--REAL", "--scan-once"]
+        for spelling in ("auto", "-auto", "--auto", "Auto", "AUTO",
+                         "-AUTO", "--AuTo"):
+            mapped, handled = organize.map_command("computer", [spelling])
+            self.assertEqual(mapped, expected, spelling)
+            self.assertIsNone(handled)
+
+    def test_lifecycle_commands_are_case_and_dash_insensitive(self):
+        mapped, handled = organize.map_command("computer", ["-StOp"])
+        self.assertEqual(handled, "stop")
+        mapped, handled = organize.map_command("phone", ["START"])
+        self.assertEqual(mapped, ["--background"])
+        self.assertIsNone(handled)
+
+    def test_passthrough_flags_are_normalized(self):
+        mapped, handled = organize.map_command(
+            "computer", ["-real", "Scan-Once", "-V"]
+        )
+        self.assertEqual(mapped, ["--REAL", "--scan-once", "-v"])
+        self.assertIsNone(handled)
+
+    def test_flag_values_pass_through_untouched(self):
+        mapped, _ = organize.map_command("computer", ["--config", "MyConfig.YAML"])
+        self.assertEqual(mapped, ["--config", "MyConfig.YAML"])
+
+    def test_platform_override_is_case_and_dash_insensitive(self):
+        for spelling in ("--phone", "-Phone", "PHONE", "--COMPUTER", "computer"):
+            platform, rest = organize.split_platform_args([spelling, "scan"])
+            expected = "phone" if spelling.lower().endswith("phone") else "computer"
+            self.assertEqual(platform, expected, spelling)
+            self.assertEqual(rest, ["scan"])
         self.assertNotIn("find-proton", organize.PHONE_COMMANDS)
         self.assertNotIn("--find-proton", organize.PHONE_PASSTHROUGH)
 
@@ -209,6 +243,33 @@ class ProjectRootTests(unittest.TestCase):
         found = phone_sync._find_template(Path("/tmp/nonexistent/xyz"))
         self.assertIsNotNone(found)
         self.assertEqual(found.name, "config_template.yaml")
+
+    def test_resolve_log_path_defaults_inside_config_folder(self):
+        """The log lives in the file_organizer folder, never in ~."""
+        import tempfile
+        from file_organizer.config import resolve_log_path
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = str(Path(td) / "config.yaml")
+            (Path(td) / "config.yaml").write_text(
+                "drives: {}\nlog_path: \"\"\n"
+            )
+            self.assertEqual(
+                resolve_log_path(cfg_path),
+                str(Path(td) / ".file_organizer.log"),
+            )
+
+    def test_resolve_log_path_respects_explicit_value(self):
+        import tempfile
+        from file_organizer.config import resolve_log_path
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = str(Path(td) / "config.yaml")
+            (Path(td) / "config.yaml").write_text(
+                f"log_path: \"{td}/custom.log\"\n"
+            )
+            self.assertEqual(
+                resolve_log_path(cfg_path),
+                str(Path(td) / "custom.log"),
+            )
 
 
 if __name__ == "__main__":

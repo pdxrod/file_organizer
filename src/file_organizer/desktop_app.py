@@ -131,7 +131,8 @@ class OrganizerGUI:
     def _refresh_log(self):
         """Auto-refresh the log viewer every 3 seconds."""
         try:
-            log_path = resolve_log_path() if resolve_log_path else os.path.expanduser("~/.file_organizer.log")
+            log_path = resolve_log_path() if resolve_log_path else str(
+                PROJECT_ROOT / ".file_organizer.log")
             if os.path.exists(log_path):
                 with open(log_path, 'r') as f:
                     # Read last 500 lines

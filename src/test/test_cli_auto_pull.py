@@ -18,6 +18,43 @@ from file_organizer import cli  # noqa: E402
 logging.getLogger("file_organizer").addHandler(logging.NullHandler())
 
 
+class FlagNormalizationTests(unittest.TestCase):
+    """Flags are case-insensitive and dash-optional in cli.main."""
+
+    OPTIONS = ("-R", "--REAL", "--scan-once", "--config", "-v", "--verbose")
+
+    def test_canonical_forms(self):
+        for token, expected in (
+            ("--REAL", "--REAL"),
+            ("real", "--REAL"),
+            ("-Real", "--REAL"),
+            ("-REAL", "--REAL"),
+            ("REAL", "--REAL"),
+            ("Scan-Once", "--scan-once"),
+            ("-scan-once", "--scan-once"),
+            ("V", "-v"),
+            ("verbose", "--verbose"),
+            ("config", "--config"),
+        ):
+            self.assertEqual(
+                cli.normalize_flag_token(token, self.OPTIONS), expected,
+                token,
+            )
+
+    def test_values_pass_through(self):
+        self.assertEqual(
+            cli.normalize_flag_token("my_config.yaml", self.OPTIONS),
+            "my_config.yaml",
+        )
+
+    def test_argv_normalization(self):
+        self.assertEqual(
+            cli.normalize_argv(["-real", "Scan-Once", "config", "x.yaml"],
+                               self.OPTIONS),
+            ["--REAL", "--scan-once", "--config", "x.yaml"],
+        )
+
+
 class StubConfig:
     """Minimal Config stand-in exposing only raw_config."""
 

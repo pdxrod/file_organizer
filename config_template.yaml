@@ -199,7 +199,8 @@ computer:
 
   # Log and PID files for the organizer daemon (used by manage_organizer.sh,
   # cli.py, web_app.py, desktop_app.py).
-  log_path: "~/.file_organizer.log"
+  # The log lives inside THIS file_organizer folder by default — leave empty.
+  log_path: ""
   pid_path: "/tmp/file_organizer.pid"
 
   # ── Legacy softlink-folder handling ──────────────────────────────────────
@@ -339,7 +340,7 @@ computer:
   # phone when the same file is downloaded twice). The NEWEST member becomes
   # foo.png and the other members are DELETED. Off by default because it
   # deletes files. Preview with './organize collapse-renames' (dry-run);
-  # when you are happy, either apply with './organize collapse-renames --REAL'
+  # when you are happy, either apply with './organize collapse-renames real'
   # or set this to true so production cycles do it automatically.
   collapse_rename_families: false
 
@@ -389,7 +390,8 @@ computer:
     #   "Music": "MAIN_DRIVE/Entertainment"
     #   "DCIM/Camera": "MAIN_DRIVE/Pictures/Camera"
     # Where phone_pull.sh remembers per-file mtimes (avoids re-copying).
-    state_file: "~/.phone_pull_state"
+    # Lives inside THIS file_organizer folder by default — leave empty.
+    state_file: ""
     # Item 13 — hold app-generated filenames (Screenshot_…,
     # YYYYMMDD_HHMMSS.jpg, IMG-YYYYMMDD-WA0001.jpg, …) until you rename
     # them; normalise leading dates like 2026-09-23-… to YYYYMMDD on the
@@ -678,7 +680,8 @@ phone:
   # ── Database path ──────────────────────────────────────────────────────────
   # SQLite database tracking which files have already been synced.
   # Uses content hashing so renames don't trigger re-copies.
-  db_path: "~/.phone_sync.db"
+  # Lives inside THIS file_organizer folder by default — leave empty.
+  db_path: ""
 
   # ── Prune stale entries after N days ──────────────────────────────────────
   # If a source file has been deleted for at least this many days, its DB entry
@@ -686,7 +689,9 @@ phone:
   prune_max_age_days: 30
 
   # ── Log path ───────────────────────────────────────────────────────────────
-  log_path: "~/.phone_sync.log"
+  # Lives inside THIS file_organizer folder by default — leave empty.
+  log_path: ""
 
   # ── PID file path ──────────────────────────────────────────────────────────
-  pid_path: "~/.phone_sync.pid"
+  # Lives inside THIS file_organizer folder by default — leave empty.
+  pid_path: ""

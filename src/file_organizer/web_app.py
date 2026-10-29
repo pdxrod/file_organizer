@@ -29,7 +29,8 @@ def _organized_folder() -> Path:
 
 
 ORGANIZED = _organized_folder()
-LOG_FILE = Path(resolve_log_path() if resolve_log_path else os.path.expanduser("~/.file_organizer.log"))
+LOG_FILE = Path(resolve_log_path() if resolve_log_path else str(
+    Path(__file__).resolve().parent.parent.parent / ".file_organizer.log"))
 SRC_DIR = Path(__file__).resolve().parent.parent
 
 @app.route("/")

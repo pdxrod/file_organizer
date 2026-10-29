@@ -101,6 +101,21 @@ class PhonePullScriptTests(unittest.TestCase):
         self.assertNotIn("Tip: Run ./organize list", combined)
         self.assertNotIn("[phone_pull] INFO", combined)
 
+    def test_flags_are_case_and_dash_insensitive(self):
+        """--LIST, list and -LiSt all behave like --list."""
+        for spelling in ("--LIST", "list", "-LiSt", "--QUIET", "quiet"):
+            proc = self._run(spelling)
+            if spelling.lower().endswith("list"):
+                self.assertEqual(proc.returncode, 1, spelling)
+                self.assertIn(
+                    "No devices connected.", proc.stdout + proc.stderr,
+                )
+            else:
+                # quiet variants: the error stays, the tip is suppressed
+                self.assertEqual(proc.returncode, 1, spelling)
+                self.assertNotIn("Tip: Run ./organize list",
+                                 proc.stdout + proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

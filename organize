@@ -34,13 +34,15 @@ def is_android() -> bool:
 def split_platform_args(argv):
     """Pull --phone/--computer overrides out of argv.
 
-    Returns (platform_or_None, remaining_argv).
+    Flags are case-insensitive and dashes are optional: --phone, -Phone,
+    PHONE and phone all work. Returns (platform_or_None, remaining_argv).
     """
     platform = None
     rest = []
     for arg in argv:
-        if platform is None and arg in ("--phone", "--computer"):
-            platform = arg[2:]
+        key = arg.lstrip("-").lower()
+        if platform is None and key in ("phone", "computer"):
+            platform = key
         else:
             rest.append(arg)
     return platform, rest
@@ -112,6 +114,21 @@ PHONE_PASSTHROUGH = (
 ADB_MODE_FLAGS = {"pull": [], "push": ["--push"], "list": ["--list"]}
 
 
+def normalize_flag(token, known):
+    """One flag/subcommand token → its canonical spelling.
+
+    Case-insensitive and dash-optional: auto, -auto, Auto, AUTO, --auto
+    and -AUTO all resolve to 'auto'. Tokens that match nothing in `known`
+    pass through untouched (they are values, e.g. a file name after
+    `config`).
+    """
+    name = token.lstrip("-").lower()
+    for canon in known:
+        if canon.lstrip("-").lower() == name:
+            return canon
+    return token
+
+
 def map_command(platform, argv):
     """Map a leading subcommand to CLI args for the platform CLI.
 
@@ -121,18 +138,24 @@ def map_command(platform, argv):
     """
     if not argv:
         return argv, None
-    head, rest = argv[0], argv[1:]
+    passthrough = (COMPUTER_PASSTHROUGH if platform == "computer"
+                   else PHONE_PASSTHROUGH)
     commands = COMPUTER_COMMANDS if platform == "computer" else PHONE_COMMANDS
-    if head in commands:
-        return commands[head] + rest, None
     lifecycle = {
         "computer": ("start", "stop", "restart", "status", "log", "clean",
                      "gui", "web", "pull", "push", "list", "setup"),
         "phone": ("start", "stop", "restart", "status", "log", "setup"),
     }
-    if head in lifecycle[platform]:
-        return argv, head
-    return argv, None  # plain passthrough
+    head, rest = argv[0], argv[1:]
+    key = normalize_flag(head, list(commands) + list(lifecycle[platform]))
+    if key in commands:
+        mapped_rest = [normalize_flag(a, passthrough) for a in rest]
+        return commands[key] + mapped_rest, None
+    if key in lifecycle[platform]:
+        mapped_rest = [normalize_flag(a, passthrough) for a in rest]
+        return [key] + mapped_rest, key
+    # Plain passthrough: normalize every known flag in argv.
+    return [normalize_flag(a, passthrough) for a in argv], None
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -172,30 +195,38 @@ def run_phone_cli(args):
 
 
 def computer_pid_log():
-    """(pid_file, log_file) from config.yaml, with safe defaults."""
+    """(pid_file, log_file) from config.yaml, with safe defaults.
+
+    Local artifacts live inside the file_organizer folder, never in the
+    user's home directory.
+    """
     _insert_src_path()
-    from file_organizer.config import Config
+    from file_organizer.config import Config, resolve_log_path
     pid_file = "/tmp/file_organizer.pid"
-    log_file = os.path.expanduser("~/.file_organizer.log")
+    log_file = str(HERE / ".file_organizer.log")
     try:
         cfg = Config(str(computer_config_path()))
         pid_file = cfg.data.get("pid_path") or pid_file
-        log_file = cfg.data.get("log_path") or log_file
+        log_file = resolve_log_path(str(computer_config_path()))
     except Exception:
         pass
     return os.path.expanduser(pid_file), os.path.expanduser(log_file)
 
 
 def phone_pid_log():
-    """(pid_file, log_file) from the phone config, with safe defaults."""
+    """(pid_file, log_file) from the phone config, with safe defaults.
+
+    Local artifacts live inside the file_organizer folder, never in the
+    user's home directory.
+    """
     _insert_src_path()
     from file_organizer import phone_sync
-    pid_file = os.path.expanduser("~/.phone_sync.pid")
-    log_file = os.path.expanduser("~/.phone_sync.log")
+    pid_file = str(HERE / ".phone_sync.pid")
+    log_file = str(HERE / ".phone_sync.log")
     try:
         cfg = phone_sync.load_config(phone_config_path())
-        pid_file = phone_sync._expand_path(cfg.get("pid_path", "~/.phone_sync.pid"))
-        log_file = phone_sync._expand_path(cfg.get("log_path", "~/.phone_sync.log"))
+        pid_file = phone_sync._expand_path(cfg.get("pid_path") or pid_file)
+        log_file = phone_sync._expand_path(cfg.get("log_path") or log_file)
     except Exception:
         pass
     return pid_file, log_file
@@ -440,11 +471,15 @@ def computer_output_base():
 
 def computer_clean(log):
     """Wipe the organized folder, log, and progress — then a fresh
-    production scan."""
+    production scan. Local artifacts live inside the file_organizer folder.
+    """
     import shutil
     for path in (
         computer_output_base(),
         computer_pid_log()[1],
+        HERE / ".file_organizer_progress.json",
+        HERE / ".file_organizer_discovered_categories.json",
+        # Legacy locations from before local files moved into this folder.
         Path.home() / ".file_organizer_progress.json",
         Path.home() / ".file_organizer_discovered_categories.json",
     ):
@@ -555,8 +590,8 @@ def usage(platform):
             "  ./organize gui           desktop app      ./organize web   web UI",
             "  ./organize pull|push|list   phone sync over USB (needs adb)",
             "",
-            "Flags (computer): --REAL --scan-once --sync-only --dedupe-only",
-            "  --git-preview --git-init --cleanup --collapse-renames --config FILE -v",
+            "Flags (computer): real, scan-once, sync-only, dedupe-only,",
+            "  git-preview, git-init, cleanup, collapse-renames, config FILE, verbose",
             "",
             "On a phone (run these instead):",
             "  ./organize auto    ★ production scan — just works",
@@ -581,8 +616,8 @@ def usage(platform):
             "  ./organize rename        rename held files, one by one",
             "  ./organize setup         first-time setup wizard",
             "",
-            "Flags (phone): --scan-once --dry-run --background --find-cloud-drives",
-            "  --stats --status --stop --make-config --rename-held --config FILE -v",
+            "Flags (phone): scan-once, dry-run, background, find-cloud-drives,",
+            "  stats, status, stop, make-config, rename-held, config FILE, verbose",
             "",
             "On a computer (run there instead):",
             "  ./organize auto    ★ production scan     ./organize test    dry-run scan",
@@ -615,7 +650,7 @@ def main(argv=None):
     platform = detect_platform(argv)
     _, argv = split_platform_args(argv)
 
-    if not argv or argv[0] in ("help", "-h", "--help"):
+    if not argv or argv[0].lstrip("-").lower() == "help":
         sys.stdout.write(usage(platform))
         return 0
 

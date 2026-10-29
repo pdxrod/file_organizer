@@ -31,6 +31,19 @@ test/organized/something/
 /config.yaml
 /config.yaml.bak
 /phone_sync_config.yaml
+# Local artifacts — log, state, and sync database live inside this
+# file_organizer folder (never in the user's home directory).
+/.file_organizer.log
+/.file_organizer_progress.json
+/.file_organizer_discovered_categories.json
+/.phone_pull_state
+/.phone_sync.log
+/.phone_sync.pid
+/phone_sync.log
+/phone_sync.db
+/phone_sync.db-shm
+/phone_sync.db-wal
+/.phone_daemon.log
 # The soft-link folder (item 15) lives inside this file_organizer folder
 /organized
 __pycache__/

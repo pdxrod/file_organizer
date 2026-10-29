@@ -128,7 +128,9 @@ DEFAULTS: Dict[str, Any] = {
     # Off by default — it deletes the losing siblings; preview with
     # `organize collapse-renames`.
     "collapse_rename_families": False,
-    "log_path": "~/.file_organizer.log",
+    # Local artifacts live inside the file_organizer folder — empty means
+    # <file_organizer folder>/.file_organizer.log (see resolve_log_path).
+    "log_path": "",
     "pid_path": "/tmp/file_organizer.pid",
     "phone_pull": {
         # auto_pull: production auto cycles run phone_pull.sh pull when a
@@ -140,7 +142,7 @@ DEFAULTS: Dict[str, Any] = {
         "temp_stage": "",  # empty = <local_stage>/.tmp_pull
         "android_base": "/storage/emulated/0",
         "min_age_minutes": 5,
-        "state_file": "~/.phone_pull_state",
+        "state_file": "",  # empty = <file_organizer folder>/.phone_pull_state
         "phone_source_dirs": ["file_organizer_staging"],
         "phone_push_dir": "file_organizer_staging",
         "include_extensions": [],
@@ -720,10 +722,12 @@ def resolve_log_path(config_path: Optional[str] = None) -> str:
     """Read log_path from a config.yaml, falling back to the default.
 
     Safe to call before a full Config is loaded (e.g. during logging setup
-    in cli.py, or from the GUI/web apps). Never raises.
+    in cli.py, or from the GUI/web apps). Never raises. The log lives
+    inside the file_organizer folder, never in the user's home directory.
     """
-    default = os.path.expanduser("~/.file_organizer.log")
     target = config_path or str(find_project_root() / "config.yaml")
+    default = os.path.join(os.path.dirname(os.path.abspath(target)),
+                           ".file_organizer.log")
     try:
         with open(target, "r") as f:
             cfg = yaml.safe_load(f) or {}

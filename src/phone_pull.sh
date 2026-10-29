@@ -71,7 +71,7 @@ defaults = {
     'phone_push_dir': 'ProtonDrive/misc',
     'android_base': '/storage/emulated/0',
     'min_age_minutes': 5,
-    'state_file': '~/.phone_pull_state',
+    'state_file': '',  # empty = <file_organizer folder>/.phone_pull_state
     'include_extensions': [],
     'exclude_extensions': ['.tmp', '.temp', '.partial', '.crdownload', '.part', '.download', '.crypt14', '.pyc', '.log'],
 }
@@ -112,7 +112,12 @@ try:
 except (TypeError, ValueError):
     min_age = defaults['min_age_minutes']
 print('MIN_AGE_MINUTES=' + shlex.quote(str(min_age)))
-print('STATE_FILE=' + shlex.quote(os.path.expanduser(pp.get('state_file') or defaults['state_file'])))
+# Local state lives inside the file_organizer folder (next to config.yaml),
+# never in the user's home directory.
+_state_default = os.path.join(os.path.dirname(os.path.abspath('$CONFIG_YAML')),
+                              '.phone_pull_state')
+print('STATE_FILE=' + shlex.quote(
+    os.path.expanduser(pp.get('state_file') or _state_default)))
 src_dirs = pp.get('phone_source_dirs') or defaults['phone_source_dirs']
 print('PHONE_SOURCE_DIRS=(' + ' '.join(shlex.quote(d) for d in src_dirs) + ')')
 print('PHONE_TARGET_DIR=' + shlex.quote(pp.get('phone_push_dir') or defaults['phone_push_dir']))
@@ -617,40 +622,42 @@ main() {
     VERBOSE="false"
     QUIET="false"
 
-    # Parse arguments
+    # Parse arguments. Flags are case-insensitive and dashes are optional:
+    # push, -Push, PUSH and --PUSH all mean the same thing.
     while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --help|-h)
+        arg="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+        case "$arg" in
+            --help|-help|help|-h|h)
                 show_help
                 exit 0
                 ;;
-            --list)
+            --list|-list|list)
                 list_devices
                 exit $?
                 ;;
-            --push)
+            --push|-push|push)
                 mode="push"
                 shift
                 ;;
-            --device)
+            --device|-device|device)
                 device_id="$2"
                 shift 2
                 ;;
-            --dry-run)
+            --dry-run|-dry-run|dry-run)
                 dry_run="true"
                 shift
                 ;;
-            --quiet|-q)
+            --quiet|-quiet|quiet|-q|q)
                 QUIET="true"
                 shift
                 ;;
-            --verbose|-v)
+            --verbose|-verbose|verbose|-v|v)
                 VERBOSE="true"
                 shift
                 ;;
             *)
                 err "Unknown option: $1"
-                echo "Use --help for usage."
+                echo "Use help for usage."
                 exit 1
                 ;;
         esac

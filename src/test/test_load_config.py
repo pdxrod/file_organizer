@@ -50,6 +50,51 @@ class LoadConfigTests(unittest.TestCase):
         cfg = phone_sync.load_config(str(self.config))
         self.assertEqual(cfg["min_age_minutes"], 5)
 
+    def test_empty_local_paths_resolve_inside_config_folder(self):
+        """db/log/pid files live inside the file_organizer folder, never in
+        the user's home directory."""
+        self.template.write_text(
+            TEMPLATE_YAML
+            + "db_path: \"\"\nlog_path: \"\"\npid_path: \"\"\n"
+        )
+        cfg = phone_sync.load_config(str(self.config))
+        base = Path(self.dir).resolve()
+        self.assertEqual(
+            Path(cfg["db_path"]).resolve(), base / "phone_sync.db"
+        )
+        self.assertEqual(
+            Path(cfg["log_path"]).resolve(), base / "phone_sync.log"
+        )
+        self.assertEqual(
+            Path(cfg["pid_path"]).resolve(), base / "phone_sync.pid"
+        )
+
+    def test_explicit_local_paths_are_kept(self):
+        self.template.write_text(
+            TEMPLATE_YAML + f"log_path: \"{self.dir}/custom.log\"\n"
+        )
+        cfg = phone_sync.load_config(str(self.config))
+        self.assertEqual(cfg["log_path"], f"{self.dir}/custom.log")
+
+    def test_canonical_flag_case_and_dash_insensitive(self):
+        options = ("--scan-once", "--dry-run", "-v", "--config")
+        for token, expected in (
+            ("scan-once", "--scan-once"),
+            ("-Scan-Once", "--scan-once"),
+            ("--SCAN-ONCE", "--scan-once"),
+            ("dry-run", "--dry-run"),
+            ("V", "-v"),
+            ("config", "--config"),
+        ):
+            self.assertEqual(
+                phone_sync._canonical_flag(token, options), expected, token
+            )
+        # Values pass through untouched.
+        self.assertEqual(
+            phone_sync._canonical_flag("my_config.yaml", options),
+            "my_config.yaml",
+        )
+
     def test_empty_config_without_template_falls_back_to_defaults(self):
         self.config.write_text("")
         original_find = phone_sync._find_template
