@@ -219,6 +219,10 @@ class PhoneCopyOverwriteTests(unittest.TestCase):
             f"db_path: \"{self.dir}/db.sqlite\"\n"
             f"target_directory: \"{self.target}\"\n"
             "min_age_minutes: 0\n"
+            # Never touch REAL cloud drives from tests (see the note in
+            # test_filename_rules.py).
+            "cloud_drive_paths:\n"
+            f"  - \"{self.dir}/no-cloud-drive-here\"\n"
             "source_directories:\n"
             f"  - \"{self.a}\"\n"
             f"  - \"{self.b}\"\n"
@@ -284,6 +288,9 @@ class PhoneCollapseTests(unittest.TestCase):
             f"target_directory: \"{self.target}\"\n"
             f"min_age_minutes: {min_age}\n"
             f"collapse_rename_families: {collapse}\n"
+            # Never touch REAL cloud drives from tests.
+            "cloud_drive_paths:\n"
+            f"  - \"{self.dir}/no-cloud-drive-here\"\n"
             "source_directories:\n"
             f"  - \"{self.src}\"\n"
         )

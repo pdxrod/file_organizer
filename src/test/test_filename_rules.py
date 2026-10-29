@@ -120,6 +120,11 @@ class PhoneHoldAndNormaliseTests(unittest.TestCase):
             f"db_path: \"{self.dir}/db.sqlite\"\n"
             f"target_directory: \"{self.target}\"\n"
             "min_age_minutes: 0\n"
+            # Never touch REAL cloud drives from tests: with the new
+            # default sync_cloud_drives: true, the finder would otherwise
+            # discover the developer's Proton Drive and write into it.
+            "cloud_drive_paths:\n"
+            f"  - \"{self.dir}/no-cloud-drive-here\"\n"
             "source_directories:\n"
             f"  - \"{self.src}\"\n"
             + extra

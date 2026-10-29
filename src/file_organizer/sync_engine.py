@@ -40,9 +40,116 @@ class SyncEngine:
         self._timeout: int = (config.raw_config.get("sync_timeout_minutes", 60) or 60) * 60
         self._chunk_subfolders: int = config.raw_config.get("sync_chunk_subfolders", 30)
         self._exclude_patterns: list[str] = config.raw_config.get("exclude_patterns", []) or []
+        # Cross-device sync coordination (see _shared_lock_dir).
+        self._lock_enabled: bool = bool(
+            config.raw_config.get("sync_lock_enabled", True)
+        )
+        self._lock_stale_seconds: int = int(
+            config.raw_config.get("sync_lock_stale_minutes", 120) or 0
+        ) * 60
         # Number of files/dirs rsync actually transferred in the most recent
         # run_all_sync_pairs() call. Used for idle backoff (item 14).
         self.last_change_count: int = 0
+
+    # ── cross-device sync lock ────────────────────────────────────────────
+
+    SYNC_LOCK_NAME = ".file_organizer.sync.lock"
+    # Path fragments that mark a folder as "shared with other devices":
+    # removable volumes and cloud-sync app folders. The lock goes there so
+    # every machine looking at the pair sees the same marker.
+    SHARED_MARKERS = (
+        "/Volumes/", "/media/", "/mnt/",
+        "CloudStorage", "GoogleDrive", "Google Drive",
+        "Dropbox", "OneDrive", "iCloud", "Mobile Documents",
+    )
+
+    def _shared_lock_dir(self, folder_a: Path, folder_b: Path) -> "Optional[Path]":
+        """The pair folder both machines can see, or None for local-only pairs.
+
+        The lock file must live where every device syncing the pair will
+        find it: a removable volume or a cloud-sync folder. Local-only
+        pairs (both folders on private disks) can't clash across devices,
+        so they get no lock. Only EXISTING folders are returned — a lock
+        must never create directory trees (an unmounted /Volumes/X path
+        must not materialise on the root disk).
+        """
+        for folder in (folder_a, folder_b):
+            if not folder.is_dir():
+                continue
+            text = str(folder)
+            if any(m in text for m in self.SHARED_MARKERS):
+                return folder
+        home = str(Path.home())
+        for folder in (folder_a, folder_b):
+            if folder.is_dir() and not str(folder).startswith(home):
+                return folder
+        return None
+
+    def _lock_payload(self) -> str:
+        import json
+        import socket
+        return json.dumps({
+            "host": socket.gethostname(),
+            "pid": os.getpid(),
+            "started": int(time.time()),
+        })
+
+    def _acquire_lock(self, lock_dir: Path) -> bool:
+        """Try to take the pair's lock. Returns True when we hold it.
+
+        Atomic O_CREAT|O_EXCL: the first machine to create the marker wins;
+        everyone else skips the pair this cycle and tries again later
+        ("whoever started first finishes first"). A lock older than
+        sync_lock_stale_minutes — a crashed run — is removed and taken
+        over.
+        """
+        lock_path = lock_dir / self.SYNC_LOCK_NAME
+        for _ in range(2):
+            try:
+                fd = os.open(str(lock_path),
+                             os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(fd, "w") as f:
+                    f.write(self._lock_payload())
+                logger.info("Sync lock taken: %s", lock_path)
+                return True
+            except FileExistsError:
+                holder = ""
+                try:
+                    holder = lock_path.read_text(errors="replace").strip() or ""
+                except OSError:
+                    pass
+                try:
+                    age = time.time() - lock_path.stat().st_mtime
+                except OSError:
+                    age = 0
+                if self._lock_stale_seconds > 0 and \
+                        age > self._lock_stale_seconds:
+                    logger.warning(
+                        "Removing stale sync lock (%s, %.0f min old, holder: %s)",
+                        lock_path, age / 60, holder or "unknown",
+                    )
+                    try:
+                        lock_path.unlink()
+                    except OSError:
+                        return False
+                    continue  # retry the atomic create once
+                logger.warning(
+                    "Another device is syncing this pair (lock %s, holder: %s) "
+                    "— skipping it this cycle; a later cycle will pick it up.",
+                    lock_path, holder or "unknown",
+                )
+                return False
+            except OSError as e:
+                logger.warning("Could not take sync lock %s: %s", lock_path, e)
+                return False
+        return False
+
+    def _release_lock(self, lock_dir: Path) -> None:
+        """Drop the lock when the pair is done (best effort)."""
+        try:
+            (lock_dir / self.SYNC_LOCK_NAME).unlink()
+        except OSError:
+            pass
 
     def _build_rsync_args(self, source: Path, target: Path, delete: bool = False,
                           exclude_subdirs=None) -> list[str]:
@@ -222,13 +329,28 @@ class SyncEngine:
                 logger.warning("Skipping sync pair — missing: %s", missing)
                 continue
 
-            logger.info("Bidirectional sync: %s ↔ %s", folder_a, folder_b)
-            res = self.sync_bidirectional(folder_a, folder_b)
-            summary["bidirectional"].append({
-                "a": str(folder_a),
-                "b": str(folder_b),
-                "result": res,
-            })
+            lock_dir = self._shared_lock_dir(folder_a, folder_b) \
+                if self._lock_enabled else None
+            lock_held = False
+            if lock_dir is not None:
+                lock_held = self._acquire_lock(lock_dir)
+                if not lock_held:
+                    summary["errors"].append(
+                        "Sync pair skipped — lock held by another device: "
+                        f"{folder_a} ↔ {folder_b}"
+                    )
+                    continue
+            try:
+                logger.info("Bidirectional sync: %s ↔ %s", folder_a, folder_b)
+                res = self.sync_bidirectional(folder_a, folder_b)
+                summary["bidirectional"].append({
+                    "a": str(folder_a),
+                    "b": str(folder_b),
+                    "result": res,
+                })
+            finally:
+                if lock_held:
+                    self._release_lock(lock_dir)
 
         # One-way sync pairs
         one_way_pairs = self.config.raw_config.get("one_way_pairs", []) or []
@@ -251,14 +373,31 @@ class SyncEngine:
                 logger.warning("Skipping - cannot create target %s: %s", target, e)
                 continue
 
-            logger.info("One-way sync: %s → %s", source, target)
-            ok = self.sync_one_way(source, target)
-            summary["one_way"].append({
-                "source": str(source),
-                "target": str(target),
-                "ok": ok,
-            })
-            if not ok:
-                summary["errors"].append(f"One-way sync failed: {source} → {target}")
+            lock_dir = self._shared_lock_dir(source, target) \
+                if self._lock_enabled else None
+            lock_held = False
+            if lock_dir is not None:
+                lock_held = self._acquire_lock(lock_dir)
+                if not lock_held:
+                    summary["errors"].append(
+                        "One-way sync skipped — lock held by another device: "
+                        f"{source} → {target}"
+                    )
+                    continue
+            try:
+                logger.info("One-way sync: %s → %s", source, target)
+                ok = self.sync_one_way(source, target)
+                summary["one_way"].append({
+                    "source": str(source),
+                    "target": str(target),
+                    "ok": ok,
+                })
+                if not ok:
+                    summary["errors"].append(
+                        f"One-way sync failed: {source} → {target}"
+                    )
+            finally:
+                if lock_held:
+                    self._release_lock(lock_dir)
 
         return summary

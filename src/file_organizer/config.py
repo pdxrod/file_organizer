@@ -49,6 +49,9 @@ DEFAULTS: Dict[str, Any] = {
         "elm-stuff", ".elixir_ls", ".stack-work", "_build",
         "deps", "ebin", "dist", "build", "target",
         ".gradle", ".m2", "tmp/cache", ".tmp*",
+        # Cross-device sync lock — coordination marker between machines,
+        # never file content (see sync_engine.py).
+        ".file_organizer.sync.lock",
     ],
     # Legacy softlink-handling classification (see softlink_handler.py).
     # The modern behaviour is exclusion via exclude_patterns above; these
@@ -99,6 +102,13 @@ DEFAULTS: Dict[str, Any] = {
     "sync_chunk_subfolders": 30,
     "sync_chunk_concurrency": 1,
     "sync_timeout_minutes": 60,
+    # Cross-device sync coordination: a small .file_organizer.sync.lock
+    # marker in the shared side of each pair stops two machines from
+    # rsyncing the same cloud/external folder at the same time. The second
+    # machine skips the pair and picks it up on a later cycle. Locks older
+    # than sync_lock_stale_minutes (crashed runs) are taken over.
+    "sync_lock_enabled": True,
+    "sync_lock_stale_minutes": 120,
     "rsync_disable_mmap": True,
     "max_soft_links_per_file": 10,
     "enable_semantic_categories": True,

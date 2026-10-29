@@ -496,6 +496,20 @@ def computer_web(log):
 # ── usage ──────────────────────────────────────────────────────────────────
 
 def usage(platform):
+    if platform == "phone":
+        auto_does = (
+            "copies new files from DCIM/Pictures/Documents/Download into the "
+            "staging folder your computer pulls from, and uploads them to any "
+            "cloud drive folders found on this phone (Proton Drive, Google "
+            "Drive, ...)."
+        )
+    else:
+        auto_does = (
+            "one production scan: builds the 'organized' soft-link folder, "
+            "pulls phone files over USB when a phone is plugged in, syncs "
+            "folders with Proton Drive/Google Drive/external drives, and runs "
+            "auto-git. One command — it just works."
+        )
     lines = [
         "",
         "organize — one program for your phone and your computer",
@@ -503,20 +517,27 @@ def usage(platform):
         f"This device looks like a {'phone' if platform == 'phone' else 'computer'}",
         f"({'Android/Termux' if platform == 'phone' else 'macOS/Linux/Windows'}).",
         "",
-        "On a computer it organizes your files into an 'organized' folder of",
-        "soft links (inside this file_organizer folder by default),",
-        "syncs folders between drives (Proton Drive, Google Drive, external",
-        "drives), deduplicates files, and runs auto-git. On a phone it watches",
-        "your DCIM/Pictures/Documents/Download folders and copies new files to",
-        "the staging folder so your computer can pull them to the cloud.",
+        "╔══════════════════════════════════════════════════════╗",
+        "║  START HERE — run this one command:                  ║",
+        "║                                                      ║",
+        "║      ./organize auto                                 ║",
+        "║                                                      ║",
+        "║  auto does everything (see below). Running it again   ║",
+        "║  is safe — already-done work is skipped instantly.    ║",
+        "╚══════════════════════════════════════════════════════╝",
+        "",
+        f"auto on this {'phone' if platform == 'phone' else 'computer'} — {auto_does}",
+        "",
+        "New here? Run './organize test' once first (dry-run, changes",
+        "nothing), or './organize setup' for a guided first run.",
         "",
     ]
     if platform == "computer":
         lines += [
-            "Commands for THIS device (computer):",
+            "All commands for THIS device (computer):",
+            "  ./organize auto          ★ production scan — just works",
             "  ./organize test          dry-run scan — safe, changes nothing",
             "  ./organize test-real     one production scan (alias: scan)",
-            "  ./organize auto          production scan — just works",
             "  ./organize start         run in the background, repeatedly",
             "  ./organize stop          stop the background program",
             "  ./organize restart       stop, wait, start again",
@@ -538,17 +559,17 @@ def usage(platform):
             "  --git-preview --git-init --cleanup --collapse-renames --config FILE -v",
             "",
             "On a phone (run these instead):",
+            "  ./organize auto    ★ production scan — just works",
             "  ./organize test    dry-run scan     ./organize scan    production scan",
-            "  ./organize auto    production scan — just works",
             "  ./organize start   run in the background    ./organize stop",
             "  ./organize rename  rename held files, one by one",
         ]
     else:
         lines += [
-            "Commands for THIS device (phone):",
+            "All commands for THIS device (phone):",
+            "  ./organize auto          ★ production scan — just works",
             "  ./organize test          dry-run scan — safe, copies nothing",
             "  ./organize scan          one production scan (alias: scan-once)",
-            "  ./organize auto          production scan — just works",
             "  ./organize start         run in the background",
             "  ./organize stop          stop the background program",
             "  ./organize restart       stop, wait, start again",
@@ -564,7 +585,7 @@ def usage(platform):
             "  --stats --status --stop --make-config --rename-held --config FILE -v",
             "",
             "On a computer (run there instead):",
-            "  ./organize test    dry-run scan     ./organize auto    production scan",
+            "  ./organize auto    ★ production scan     ./organize test    dry-run scan",
         ]
     if platform == "computer":
         lines += [

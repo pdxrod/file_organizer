@@ -187,6 +187,9 @@ computer:
     - ".gradle"
     - ".m2"
     - "tmp/cache"
+    # Cross-device sync lock — coordination marker between machines,
+    # never file content (see the sync_lock_* keys above).
+    - ".file_organizer.sync.lock"
 
   # Where the 'organized' soft-link folder lives (item 15).
   # Default: the organized/ folder inside THIS file_organizer folder.
@@ -289,6 +292,15 @@ computer:
   sync_chunk_subfolders: 30
   sync_chunk_concurrency: 1
   sync_timeout_minutes: 60
+
+  # Cross-device sync coordination: before syncing a pair, a small
+  # .file_organizer.sync.lock marker is written to the SHARED side of the
+  # pair (the cloud drive or external disk). Two machines syncing the same
+  # pair at once: the second one sees the lock, skips the pair, and picks
+  # it up on a later cycle — whoever started first finishes first. Locks
+  # older than sync_lock_stale_minutes (a crashed run) are taken over.
+  sync_lock_enabled: true
+  sync_lock_stale_minutes: 120
 
   # Large folders sync in chunks. Each chunk times out after 60 min to prevent
   # infinite hangs.
@@ -494,9 +506,12 @@ phone:
   # When true, the daemon looks for cloud drive folders on the device
   # (see cloud_drive_paths above) and copies new files from
   # source_directories into each one — under a file_organizer subfolder —
-  # so your files are backed up to the cloud even without the computer.
-  # The free-space guard below applies to every copy.
-  sync_cloud_drives: false
+  # so your files are uploaded to Proton Drive / Google Drive / Dropbox /
+  # ... straight from the phone, even without the computer. Phones with no
+  # cloud app installed just find no folders and carry on. The free-space
+  # guard below applies to every copy. Set false to only stage files for
+  # the computer's USB pull.
+  sync_cloud_drives: true
   cloud_sync_subfolder: "file_organizer"
 
   # ── Free-space guard ──────────────────────────────────────────────────────

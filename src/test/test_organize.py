@@ -165,6 +165,17 @@ class UsageTests(unittest.TestCase):
         for platform in ("computer", "phone"):
             self.assertIn("./organize auto", organize.usage(platform))
 
+    def test_usage_leads_with_auto_before_test(self):
+        """./organize auto is the one command most people will run — the
+        usage banner must put it first, ahead of the dry-run test command."""
+        for platform in ("computer", "phone"):
+            text = organize.usage(platform)
+            self.assertIn("START HERE", text)
+            self.assertLess(
+                text.index("./organize auto"),
+                text.index("./organize test"),
+            )
+
     def test_usage_mentions_config_files(self):
         for platform in ("computer", "phone"):
             self.assertIn("config_template.yaml", organize.usage(platform))

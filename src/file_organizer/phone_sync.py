@@ -637,9 +637,10 @@ def _default_config() -> dict:
         "cloud_drive_paths": list(DEFAULT_CLOUD_DRIVE_CANDIDATES),
         # Phone-side cloud sync: the daemon looks for cloud drive folders on
         # the device and copies new files from source_directories into each
-        # one (under cloud_sync_subfolder), so files are backed up to the
-        # cloud even without the computer. Off by default.
-        "sync_cloud_drives": False,
+        # one (under cloud_sync_subfolder), so files are uploaded to Proton
+        # Drive / Google Drive / ... straight from the phone. On by default;
+        # devices with no cloud app simply find no folders and carry on.
+        "sync_cloud_drives": True,
         "cloud_sync_subfolder": "file_organizer",
         # Free-space guard: stop copying when the target has less than this
         # much free space (MB) — never fill the phone up.
@@ -1252,10 +1253,11 @@ class PhoneSync:
             self.config.get("normalise_leading_dates", True)
         )
         # Phone-side cloud sync: find cloud drives on the device and copy
-        # new files into each one (under cloud_sync_subfolder). The
-        # free-space guard applies to every copy target.
+        # new files into each one (under cloud_sync_subfolder). On by
+        # default — phones without a cloud app just find no folders.
+        # The free-space guard applies to every copy target.
         self.sync_cloud_drives = bool(
-            self.config.get("sync_cloud_drives", False)
+            self.config.get("sync_cloud_drives", True)
         )
         self.cloud_sync_subfolder = str(
             self.config.get("cloud_sync_subfolder", "file_organizer")

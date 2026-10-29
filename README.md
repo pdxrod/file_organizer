@@ -352,6 +352,7 @@ highlights:
 | `idle_backoff_factor` / `idle_backoff_max_multiplier` | Sleep longer when cycles change nothing |
 | `enable_folder_sync`, `enable_duplicate_detection`, `auto_git` | Feature switches (safe defaults off where dangerous) |
 | `rsync_whole_file` / `rsync_io_timeout_seconds` | Whole-file transfers + stall guard for cloud drives (item 11) |
+| `sync_lock_enabled` / `sync_lock_stale_minutes` | One-machine-at-a-time sync: the second machine skips a pair another device is syncing (stale locks are taken over) |
 | `sync_chunk_subfolders` | Pairs with more subfolders than this are synced one subfolder at a time |
 | `phone_pull` | Where phone files land and where push mode reads from |
 
@@ -366,7 +367,7 @@ highlights:
 | `include_extensions` / `exclude_extensions` | Extension filters |
 | `exclude_patterns` / `exclude_folder_names` | Never-copy lists (merged with defaults) |
 | `cloud_drive_paths` | Where `find-cloud-drives` looks (any cloud app — Proton, Google, Dropbox, …) |
-| `sync_cloud_drives` | Copy new files into every cloud drive found on the phone (into a `file_organizer` subfolder) |
+| `sync_cloud_drives` | Copy new files into every cloud drive found on the phone (into a `file_organizer` subfolder) — on by default |
 | `min_free_space_mb` | Free-space guard — the daemon stops copying when the target has less than this |
 | `hold_app_generated_names` | Hold `Screenshot_…`, `YYYYMMDD_HHMMSS.jpg` etc. until renamed — rename them with `./organize rename` (item 13) |
 | `normalise_leading_dates` | `2026-09-23-party.jpg` → `20260923-party.jpg` on the copy (item 13) |
