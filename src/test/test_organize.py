@@ -295,6 +295,24 @@ class MainEntryTests(unittest.TestCase):
                 organize.main([spelling])
             self.assertIn("START HERE", buf.getvalue(), spelling)
 
+    def test_version_prints_version_number(self):
+        import io
+        from contextlib import redirect_stdout
+        from file_organizer import __version__
+        for spelling in ("version", "VERSION", "--version"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                organize.main([spelling])
+            self.assertEqual(
+                buf.getvalue().strip(), f"organize {__version__}", spelling
+            )
+
+    def test_usage_mentions_version_command(self):
+        for platform in ("computer", "phone"):
+            self.assertIn(
+                "./organize version", organize.usage(platform)
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
