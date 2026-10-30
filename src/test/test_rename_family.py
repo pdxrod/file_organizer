@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from file_organizer import phone_sync  # noqa: E402
 from file_organizer.rename_family import (  # noqa: E402
     parse_family, plan_collapse, apply_collapse,
-    plan_underscore_duplicates,
+    plan_underscore_duplicates, plan_download_copies, download_copies_in_tree,
 )
 
 import logging  # noqa: E402
@@ -197,6 +197,88 @@ class UnderscoreDuplicateTests(unittest.TestCase):
         self.assertTrue(base.exists())
         self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
                          ["report.txt"])
+
+
+class DownloadCopyTests(unittest.TestCase):
+    """plan_download_copies: foo_1 / foo (1) / foo-1 / foo (1) (1) copies
+    are deleted when a plain-named file with IDENTICAL content exists."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+
+    def _write(self, name, content):
+        p = self.dir / name
+        p.write_text(content)
+        return p
+
+    def test_all_counter_shapes_deleted_when_base_identical(self):
+        base = self._write("foo.pdf", "same")
+        copies = [
+            self._write("foo_1.pdf", "same"),
+            self._write("foo_2.pdf", "same"),
+            self._write("foo-1.pdf", "same"),
+            self._write("foo (1).pdf", "same"),
+            self._write("foo (2).pdf", "same"),
+            self._write("foo (1) (1).pdf", "same"),
+        ]
+        actions = plan_download_copies(self.dir)
+        deleted = {a.path.name for a in actions}
+        self.assertEqual(len(actions), len(copies), deleted)
+        apply_collapse(actions, dry_run=False)
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
+                         ["foo.pdf"])
+        self.assertTrue(base.exists())
+
+    def test_chained_counters_resolve_to_deep_base(self):
+        # welch_labs_guide_to_ai_rev_12-1_1.pdf → rev_12-1 → rev_12
+        base = self._write("welch_labs_guide_to_ai_rev_12.pdf", "x")
+        mid = self._write("welch_labs_guide_to_ai_rev_12-1.pdf", "x")
+        chain = self._write("welch_labs_guide_to_ai_rev_12-1_1.pdf", "x")
+        actions = plan_download_copies(self.dir)
+        deleted = {a.path for a in actions}
+        self.assertIn(mid, deleted)
+        self.assertIn(chain, deleted)
+        self.assertEqual(len(actions), 2)
+        apply_collapse(actions, dry_run=False)
+        self.assertTrue(base.exists())
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
+                         ["welch_labs_guide_to_ai_rev_12.pdf"])
+
+    def test_missing_base_keeps_copies(self):
+        self._write("foo_1.pdf", "x")
+        self._write("foo (1).pdf", "x")
+        actions = plan_download_copies(self.dir)
+        self.assertEqual(actions, [])
+
+    def test_different_content_is_never_deleted(self):
+        self._write("foo.pdf", "original")
+        copy = self._write("foo_1.pdf", "different")
+        actions = plan_download_copies(self.dir)
+        self.assertEqual(actions, [])
+        self.assertTrue(copy.exists())
+
+    def test_year_groups_are_not_counters(self):
+        # (2026) is a year, not a download counter — never deleted.
+        self._write("report.txt", "x")
+        year = self._write("report (2026).txt", "x")
+        actions = plan_download_copies(self.dir)
+        self.assertEqual(actions, [])
+        self.assertTrue(year.exists())
+
+    def test_recursive_tree_walk(self):
+        sub = self.dir / "2026"
+        sub.mkdir()
+        (sub / "20260426_caitoz_blocks_me.jpg").write_text("pic")
+        (sub / "20260426_caitoz_blocks_me (1).jpg").write_text("pic")
+        actions = download_copies_in_tree(self.dir)
+        self.assertEqual(len(actions), 1)
+        apply_collapse(actions, dry_run=False)
+        self.assertEqual(
+            sorted(p.name for p in sub.iterdir()),
+            ["20260426_caitoz_blocks_me.jpg"],
+        )
 
 
 class PhoneCopyOverwriteTests(unittest.TestCase):

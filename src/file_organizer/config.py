@@ -132,6 +132,10 @@ DEFAULTS: Dict[str, Any] = {
     # Off by default — it deletes the losing siblings; preview with
     # `organize collapse-renames`.
     "collapse_rename_families": False,
+    # Download-copy dedupe (always on in auto): delete foo_1 / foo (1) /
+    # foo-1 / foo (1) (1) copies when a plain-named file with IDENTICAL
+    # content exists. Only identical bytes are ever deleted.
+    "dedupe_download_copies": True,
     # Local artifacts live inside the file_organizer folder — empty means
     # <file_organizer folder>/.file_organizer.log (see resolve_log_path).
     "log_path": "",

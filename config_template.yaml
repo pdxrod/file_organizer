@@ -352,6 +352,13 @@ computer:
   # or set this to true so production cycles do it automatically.
   collapse_rename_families: false
 
+  # Download-copy dedupe — ALWAYS ON in ./organize auto: files ending in
+  # _1, -1, (1), (2) or even (1) (1) are deleted when a plain-named file
+  # with IDENTICAL content exists in the same folder (e.g. when
+  # foo_1.pdf, foo (1).pdf and foo.pdf are the same file, only foo.pdf
+  # stays). Different content is never deleted. Set false to disable.
+  dedupe_download_copies: true
+
   # ── Phone pull (ADB-based sync) ────────────────────────────────────────────
   # Used by phone_pull.sh.  local_stage is where phone files land on this
   # machine.  remote_stage is what gets synced back to the phone in push

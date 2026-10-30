@@ -368,6 +368,7 @@ highlights:
 | `scan_interval` | How often the background process runs (seconds) |
 | `idle_backoff_factor` / `idle_backoff_max_multiplier` | Sleep longer when cycles change nothing |
 | `enable_folder_sync`, `enable_duplicate_detection`, `auto_git` | Feature switches (safe defaults off where dangerous) |
+| `dedupe_download_copies` | Auto-on: delete `foo_1`, `foo (1)`, `foo-1`, `foo (1) (1)` copies when an identical plain-named file exists |
 | `rsync_whole_file` / `rsync_io_timeout_seconds` | Whole-file transfers + stall guard for cloud drives (item 11) |
 | `sync_lock_enabled` / `sync_lock_stale_minutes` | One-machine-at-a-time sync: the second machine skips a pair another device is syncing (stale locks are taken over) |
 | `sync_chunk_subfolders` | Pairs with more subfolders than this are synced one subfolder at a time |

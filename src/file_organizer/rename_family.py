@@ -11,6 +11,11 @@ Two rules live here:
    `foo (1) (1)_1.png` are collapsed to the base name: the NEWEST member
    becomes `foo.png` and every other member is deleted.
 
+3. **Download-copy dedupe** — `foo_1.png`, `foo (1).png`, `foo-1.pdf` and
+   chained counters like `foo-1_1.pdf` are deleted when a plain-named
+   file with IDENTICAL content exists (`plan_download_copies`). The base
+   is never touched, and any content doubt keeps the copy.
+
 This module is pure planning + applying — callers decide when it runs and
 always show a dry-run plan before deleting anything.
 """
@@ -42,6 +47,17 @@ _FAMILY_RE = re.compile(
 # because numbered names are often DIFFERENT files (web archives:
 # combo_019.js vs combo.js) and must not be deleted blindly.
 _UNDERSCORE_N_RE = re.compile(r"^(?P<base>.+?)_(?P<n>\d+)(?P<ext>\.[^.]+)?$")
+
+# Download-counter suffixes, stripped repeatedly to find the plain base:
+#   foo (1) (1).jpg → foo (1) → foo
+#   welch_..._rev_12-1_1.pdf → welch_..._rev_12-1 → welch_..._rev_12
+# The (N) group is limited to 1-3 digits so year-style names like
+# "report (2026).txt" are never treated as download counters.
+_DOWNLOAD_SUFFIX_RES = (
+    re.compile(r"^(?P<base>.+?) \((?P<n>\d{1,3})\)$"),  # foo (1)
+    re.compile(r"^(?P<base>.+?)_(?P<n>\d+)$"),            # foo_1
+    re.compile(r"^(?P<base>.+?)-(?P<n>\d+)$"),            # foo-1
+)
 
 # Hashing is skipped above this size (treated as "content differs").
 _MAX_HASH_BYTES = 256 * 1024 * 1024
@@ -247,6 +263,93 @@ def plan_underscore_duplicates(directory, min_age_seconds: int = 0,
             continue
         actions.append(CollapseAction("delete", path))
 
+    return actions
+
+
+def _strip_download_suffixes(stem: str) -> list:
+    """Base stems reachable by repeatedly stripping download-counter
+    suffixes, e.g. 'foo (1) (1)' → ['foo (1)', 'foo']."""
+    bases = []
+    seen = {stem}
+    while True:
+        matched = False
+        for rx in _DOWNLOAD_SUFFIX_RES:
+            m = rx.match(stem)
+            if m and m.group("base"):
+                stem = m.group("base").rstrip()
+                if stem in seen:
+                    continue
+                seen.add(stem)
+                bases.append(stem)
+                matched = True
+                break
+        if not matched:
+            break
+    return bases
+
+
+def plan_download_copies(directory, min_age_seconds: int = 0) -> List[CollapseAction]:
+    """Plan the deletion of download-counter copies: foo_1.png, foo (1).png,
+    foo-1.pdf, foo (1) (1).jpg — including chained counters like
+    foo-1_1.pdf — when a plain-named file with IDENTICAL content exists
+    in the same directory.
+
+    The copy is only ever deleted when the base file exists AND has the
+    same bytes (any doubt counts as different). The base itself is never
+    touched, and copies with no base file are left alone — numbered names
+    are often real, different files.
+
+    Returns a list of "delete" actions; nothing is touched on disk.
+    """
+    directory = Path(directory)
+    actions: List[CollapseAction] = []
+    if not directory.is_dir():
+        return actions
+    try:
+        entries = {p.name: p for p in directory.iterdir() if p.is_file()}
+    except OSError:
+        return actions
+
+    now = time.time()
+    for name, path in entries.items():
+        stem, ext = os.path.splitext(name)
+        bases = _strip_download_suffixes(stem)
+        if not bases:
+            continue
+        for base_stem in bases:
+            base = entries.get(base_stem + ext)
+            if base is None:
+                continue  # no plain base at this level — try deeper
+            if min_age_seconds > 0:
+                try:
+                    age = now - path.stat().st_mtime
+                except OSError:
+                    age = float("inf")
+                if age < min_age_seconds:
+                    break
+            if files_differ(path, base):
+                logger.info(
+                    "Kept %s — different content from %s",
+                    name, base.name,
+                )
+                break  # a same-named base exists but is a different file
+            logger.info(
+                "Redundant download copy: %s (identical to %s)",
+                name, base.name,
+            )
+            actions.append(CollapseAction("delete", path))
+            break
+    return actions
+
+
+def download_copies_in_tree(root) -> List[CollapseAction]:
+    """Plan download-copy deletions for every directory under root."""
+    root = Path(root)
+    actions: List[CollapseAction] = []
+    if not root.is_dir():
+        return actions
+    for dirpath, _dirnames, _filenames in os.walk(root):
+        actions.extend(plan_download_copies(dirpath))
     return actions
 
 
