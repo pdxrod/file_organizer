@@ -179,6 +179,16 @@ class ContentKeywordTests(unittest.TestCase):
         r.run()
         self.assertEqual(category_of(r, "diary.txt"), "documents")
 
+    def test_indigenous_politics_content(self):
+        # Boat people / stolen generations / native title: political even
+        # when the filename says nothing.
+        write(self.tmp, "in/history.txt",
+              "Boat people and the stolen generations: native title for "
+              "aboriginal Australians.")
+        r = make_router(self.tmp)
+        r.run()
+        self.assertEqual(category_of(r, "history.txt"), "political")
+
 
 class MediaAndFallbackTests(unittest.TestCase):
     def setUp(self):
@@ -324,6 +334,47 @@ class InboxSweepTests(unittest.TestCase):
         self.assertTrue((self.tmp / "out" / "Music" / "song.mp3").exists())
         self.assertFalse((self.tmp / "misc" / "song.mp3").exists())
         self.assertTrue((self.tmp / "misc" / "weird.xyz").exists())
+
+
+class DownloadCopyTests(unittest.TestCase):
+    """foo_1 / foo (1) download copies are never routed; identical ones
+    are removed on apply (same planner as ./organize auto)."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_identical_copies_removed_not_routed(self):
+        write(self.tmp, "in/photo.jpg", "same bytes")
+        write(self.tmp, "in/photo_1.jpg", "same bytes")
+        write(self.tmp, "in/photo (1).jpg", "same bytes")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        stats = r.run()
+        self.assertEqual(stats["copies_found"], 2)
+        self.assertNotIn(str(self.tmp / "in" / "photo_1.jpg"),
+                         r.state["entries"])
+        self.assertNotIn(str(self.tmp / "in" / "photo (1).jpg"),
+                         r.state["entries"])
+        self.assertIn(str(self.tmp / "in" / "photo.jpg"), r.state["entries"])
+        stats2 = r.run(apply=True)
+        self.assertEqual(stats2["copies_deleted"], 2)
+        self.assertFalse((self.tmp / "in" / "photo_1.jpg").exists())
+        self.assertFalse((self.tmp / "in" / "photo (1).jpg").exists())
+        # The base file was routed normally.
+        self.assertTrue((self.tmp / "out" / "Pictures" / "photo.jpg").exists())
+        self.assertEqual(stats2["moved"], 1)
+
+    def test_differing_copy_routed_normally(self):
+        write(self.tmp, "in/photo.jpg", "AAAA")
+        write(self.tmp, "in/photo_1.jpg", "BBBB")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        stats = r.run()
+        self.assertEqual(stats["copies_found"], 0)
+        self.assertIn(str(self.tmp / "in" / "photo_1.jpg"),
+                      r.state["entries"])
 
 
 class ApplyUndoCollisionTests(unittest.TestCase):

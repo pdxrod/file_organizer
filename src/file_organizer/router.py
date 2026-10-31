@@ -41,6 +41,7 @@ from file_organizer.config import find_project_root
 from file_organizer.extractor import (
     Extractor, TEXT_EXTS, IMAGE_EXTS, VIDEO_EXTS, HTML_EXTS, OFFICE_EXTS,
 )
+from file_organizer.rename_family import plan_download_copies
 from file_organizer.deepseek_client import DeepSeekClient, CATEGORIES
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,9 @@ _POLITICAL_STRONG_WORDS = [
     "referendum", "congress", "senate", "parliament", "presidency",
     "presidential", "protest", "protests", "uprising", "coup",
     "revolution", "whistleblower", "espionage", "spying",
+    # Indigenous rights / asylum politics (e.g. Australian history).
+    "aborigine", "aboriginal", "aborigines", "indigenous",
+    "manus", "nauru",
 ]
 _POLITICAL_STRONG_PHRASES = [
     "prime minister", "secretary of state", "foreign affairs",
@@ -110,6 +114,9 @@ _POLITICAL_STRONG_PHRASES = [
     "climate crisis", "net zero", "extinction rebellion", "supreme court",
     "un security council", "election interference", "border wall",
     "gun control", "vaccine mandate",
+    "boat people", "asylum seeker", "asylum seekers",
+    "stolen generation", "stolen generations", "native title",
+    "detention centre", "detention center",
 ]
 _POLITICAL_WEAK_WORDS = [
     "war", "wars", "politics", "political", "politician", "government",
@@ -460,6 +467,7 @@ class Router:
             "scanned": 0, "decided": 0, "moved": 0, "copied": 0,
             "duplicates": 0, "collisions": 0, "errors": 0, "skipped": 0,
             "ocr_used": 0, "deepseek_calls": 0,
+            "copies_found": 0, "copies_deleted": 0,
             "by_category": {c: 0 for c in CATEGORIES},
             "by_source": {"extension": 0, "filename": 0, "content": 0,
                           "deepseek": 0, "fallback": 0},
@@ -816,6 +824,21 @@ class Router:
 
     # ── public API ───────────────────────────────────────────────────
 
+    def _plan_copies(self, files: list) -> set:
+        """Paths that are redundant download copies (foo_1, foo (1), …)
+        of a plain-named file with IDENTICAL content in the same folder.
+        Uses the same planner as ./organize auto so behaviour matches."""
+        copies = set()
+        for directory in {p.parent for p in files}:
+            try:
+                for action in plan_download_copies(directory):
+                    copies.add(str(action.path))
+            except Exception as e:  # the planner must never break routing
+                logger.warning(
+                    "router: download-copy check failed for %s: %s",
+                    directory, e)
+        return copies
+
     def run(self, roots: Optional[list] = None, apply: bool = False,
             limit: Optional[int] = None, watch_only: bool = False) -> dict:
         """One routing pass. Returns stats. Safe: nothing moves unless
@@ -828,8 +851,25 @@ class Router:
         self._ocr_used = 0
         self._ds_calls = 0
 
+        collected = self._collect(roots)
+        copies = self._plan_copies(collected)
+        self.stats["copies_found"] = len(copies)
+
         undecided = []
-        for p in self._collect(roots):
+        for p in collected:
+            if str(p) in copies:
+                # Never route a redundant download copy; on apply it is
+                # deleted like ./organize auto does (identical content
+                # was already verified by the planner).
+                if apply:
+                    try:
+                        p.unlink(missing_ok=True)
+                        self.stats["copies_deleted"] += 1
+                        logger.info("router: deleted download copy %s", p)
+                    except OSError as e:
+                        logger.error(
+                            "router: could not delete copy %s: %s", p, e)
+                continue
             if self._already_applied(p) or self._already_decided(p):
                 continue
             decision = self._phase1(p)

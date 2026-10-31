@@ -530,6 +530,9 @@ def main(argv=None):
                   "(see './organize route-status').")
         print(f"AI help: OCR read {stats['ocr_used']} file(s); "
               f"DeepSeek made {stats['deepseek_calls']} call(s)")
+        if stats["copies_found"] and not real_mode:
+            print(f"Would remove {stats['copies_found']} duplicate "
+                  f"download copies (foo_1 / foo (1) style).")
         if not real_mode:
             entries = [
                 e for e in router.state["entries"].values()
@@ -553,6 +556,9 @@ def main(argv=None):
             print("'./organize route-real' to move the files for real.")
         else:
             print(f"\nDone — moved {stats['moved']} file(s).")
+            if stats["copies_deleted"]:
+                print(f"Removed {stats['copies_deleted']} duplicate "
+                      f"download copies (foo_1 / foo (1) style).")
             if stats["duplicates"]:
                 print(f"{stats['duplicates']} were already at their "
                       f"destination (kept).")
