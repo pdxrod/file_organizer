@@ -759,7 +759,9 @@ class Router:
             return False
 
     def _apply_entry(self, entry: dict) -> None:
-        if entry.get("applied") or entry.get("status") != "pending":
+        # run() only sends pending/undone/error entries here; applied
+        # ones (moved, copied, already_there, duplicate_kept) never are.
+        if entry.get("applied"):
             return
         p = Path(entry["origin"])
         if not p.exists() or p.is_symlink():
@@ -849,13 +851,13 @@ class Router:
         self.stats["ocr_used"] = self._ocr_used
         self.stats["deepseek_calls"] = self._ds_calls
 
-        # Apply moves for every pending entry (this run's and previous
-        # dry-runs') when apply=True.
+        # Apply moves when apply=True: pending decisions from this and
+        # earlier dry-runs, moves that route-undo put back (undone), and
+        # earlier failures (error) so a retry can succeed.
         if apply:
             for key, entry in list(self.state["entries"].items()):
-                if entry.get("status") == "pending" and not entry.get(
-                    "applied"
-                ):
+                if entry.get("status") in ("pending", "undone", "error") \
+                        and not entry.get("applied"):
                     self._apply_entry(entry)
 
         self.stats["decided"] = sum(

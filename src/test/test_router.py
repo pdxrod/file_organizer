@@ -350,6 +350,18 @@ class ApplyUndoCollisionTests(unittest.TestCase):
         self.assertTrue((self.tmp / "in" / "song.mp3").exists())
         self.assertTrue((self.tmp / "in" / "ukraine_war_news.txt").exists())
 
+    def test_route_real_reapplies_after_undo(self):
+        write(self.tmp, "in/song.mp3")
+        r = make_router(self.tmp)
+        r.run(apply=True)
+        self.assertTrue((self.tmp / "out" / "Music" / "song.mp3").exists())
+        r.undo()
+        self.assertFalse((self.tmp / "out" / "Music" / "song.mp3").exists())
+        # A fresh route-real re-applies the undone decision.
+        stats = r.run(apply=True)
+        self.assertEqual(stats["moved"], 1)
+        self.assertTrue((self.tmp / "out" / "Music" / "song.mp3").exists())
+
     def test_collision_never_overwrites(self):
         write(self.tmp, "in/report.pdf", "new content")
         dest = write(self.tmp, "out/Documents/report.pdf", "old content")
