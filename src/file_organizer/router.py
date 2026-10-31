@@ -864,7 +864,7 @@ class Router:
                 "gone", "already_there")
         )
         self._save_state()
-        logger.info("router: %s", self.stats)
+        logger.debug("router stats: %s", self.stats)
         return self.stats
 
     def watch_pass(self, apply: bool = False) -> dict:

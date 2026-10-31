@@ -466,62 +466,104 @@ def main(argv=None):
         print("=== Router status ===")
         print(_json.dumps(router.status(), indent=2))
         if not router.enabled:
-            print("\nThe router is disabled in config.yaml "
-                  "(router.enabled: false).")
+            print("\nFile routing is turned off (router.enabled: false in "
+                  "config.yaml).\n"
+                  "Run './organize setup' or set 'enabled: true' to turn "
+                  "it on —\nuntil then the plan above is empty.")
         return
 
     if args.route_undo is not None:
         from file_organizer.router import Router
         router = Router(config)
         if not real_mode:
-            print("route-undo moves files back only with --REAL.")
+            print("route-undo puts files back where they came from — run "
+                  "'./organize route-undo' (it always applies).")
             return
         undone = router.undo(count=args.route_undo or None)
         if undone:
-            print(f"Undid {len(undone)} router move(s):")
+            print(f"Put {len(undone)} file(s) back where they came from:")
             for line in undone:
                 print("  " + line)
         else:
-            print("Nothing to undo — no applied router moves in the "
-                  "state file.")
+            print("Nothing to put back — there are no applied router "
+                  "moves to undo.")
         return
 
     if args.route:
         from file_organizer.router import Router
         router = Router(config)
         if not router.enabled:
-            print("The router is disabled. Add a router: section to "
-                  "config.yaml with enabled: true, route_roots and "
-                  "watch_folders first.")
+            print(
+                "\nFile routing is turned off.\n"
+                "\n"
+                "Routing moves files out of your unsorted folder into "
+                "their homes\n"
+                "(politics, code, pictures, music, documents, misc), so "
+                "it stays off\n"
+                "until you turn it on.\n"
+                "\n"
+                "To turn it on:\n"
+                "  • run './organize setup', or\n"
+                "  • edit config.yaml — under 'router:' set 'enabled: "
+                "true'\n"
+                "    (and check route_roots, watch_folders and "
+                "target_folders).\n"
+                "\n"
+                "'route' only ever plans — it never moves files. "
+                "'route-real'\n"
+                "moves them; 'route-undo' puts them back.\n"
+            )
             return
-        print(f"=== Router {'APPLIED' if real_mode else 'PLAN (dry run)'} ===")
+        roots_desc = ", ".join(str(r) for r in router.route_roots) or "?"
+        print("=== Routing plan — nothing moves yet ===" if not real_mode
+              else "=== Routing — moving files ===")
+        print(f"Sweeping: {roots_desc}")
         stats = router.run(apply=real_mode)
-        print(f"Scanned {stats['scanned']} files, "
-              f"decided {stats['decided']}.")
-        print("By category: " + ", ".join(
-            f"{k}={v}" for k, v in stats["by_category"].items() if v))
-        print(f"OCR used: {stats['ocr_used']}, "
-              f"DeepSeek calls: {stats['deepseek_calls']}")
+        new_decisions = sum(v for v in stats["by_category"].values())
+        if new_decisions:
+            cats = ", ".join(
+                f"{v} {k.replace('_', ' ')}" for k, v
+                in stats["by_category"].items() if v)
+            print(f"Decided {new_decisions}: {cats}")
+        else:
+            print("No new decisions — every file already has one "
+                  "(see './organize route-status').")
+        print(f"AI help: OCR read {stats['ocr_used']} file(s); "
+              f"DeepSeek made {stats['deepseek_calls']} call(s)")
         if not real_mode:
             entries = [
                 e for e in router.state["entries"].values()
                 if e.get("status") == "pending" and not e.get("applied")
             ]
-            print(f"\nWould move {len(entries)} files:")
-            for e in sorted(entries, key=lambda e: (
-                    e.get("category", ""), e.get("name", "")))[:200]:
-                cat = e.get("category", "misc")
-                dest = router.targets.get(cat, Path("?")) / e.get("name", "?")
-                print(f"  {Path(e['origin']).name} -> {dest} "
-                      f"({e.get('source', '?')}: {e.get('reason', '')})")
-            if len(entries) > 200:
-                print(f"  ... and {len(entries) - 200} more")
-            print("\nNo files were moved. Run with --REAL to apply.")
+            if entries:
+                print(f"\nWould move {len(entries)} file(s):")
+                for e in sorted(entries, key=lambda e: (
+                        e.get("category", ""), e.get("name", "")))[:200]:
+                    cat = e.get("category", "misc")
+                    dest = (router.targets.get(cat, Path("?"))
+                            / e.get("name", "?"))
+                    print(f"  {Path(e['origin']).name} -> {dest}")
+                if len(entries) > 200:
+                    print(f"  … and {len(entries) - 200} more")
+            else:
+                print("\nNothing left to plan — every scanned file is "
+                      "already decided.")
+            print("\nNothing was moved — this is just a plan.")
+            print("Review it with './organize route-status', then run")
+            print("'./organize route-real' to move the files for real.")
         else:
-            print(f"Moved: {stats['moved']}, copied: {stats['copied']}, "
-                  f"duplicates: {stats['duplicates']}, "
-                  f"collisions: {stats['collisions']}, "
-                  f"errors: {stats['errors']}")
+            print(f"\nDone — moved {stats['moved']} file(s).")
+            if stats["duplicates"]:
+                print(f"{stats['duplicates']} were already at their "
+                      f"destination (kept).")
+            if stats["collisions"]:
+                print(f"{stats['collisions']} left alone — a different "
+                      f"file with the same name is already there.")
+            if stats["errors"]:
+                print(f"{stats['errors']} could not be moved — see the log "
+                      f"lines above (e.g. disk full or permissions).")
+            print("Changed your mind? './organize route-undo' puts the "
+                  "last moves back.")
         return
 
     if args.sync_only and real_mode:

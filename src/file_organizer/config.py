@@ -388,9 +388,9 @@ class Config:
             if not path or os.path.exists(os.path.expanduser(path)):
                 continue
             print(
-                f"⚠️  Drive {key} ('{path}') does not exist — will skip "
-                f"anything on it. Plug the drive in, or edit config.yaml "
-                f"and set your real paths.",
+                f"⚠️  Drive {key} ('{path}') does not exist — anything on "
+                f"it will be skipped. Plug the drive in, or set the real "
+                f"path in config.yaml.",
                 file=sys.stderr,
             )
 
@@ -415,32 +415,22 @@ class Config:
 
         Drives and folders which don't exist are simply skipped — removable
         drives genuinely come and go, and the user may not use every drive
-        in the template. Missing drives get their own warning in
-        _validate(); a missing folder here that still contains a template
-        placeholder (e.g. /Users/janedoe or YourExternalDrive) gets a
-        LOUDER warning so the user knows the config looks unedited — but
-        the program keeps running and skips it.
+        in the template. Template placeholders get one friendly,
+        consolidated warning instead of a wall of per-path jargon.
         """
         def _is_placeholder(path: str) -> bool:
             return any(m in path.lower() for m in TEMPLATE_PLACEHOLDER_MARKERS)
+
+        placeholder_hits = []
+        missing_hits = []
 
         def _check(path: str, what: str) -> None:
             if not path or os.path.exists(os.path.expanduser(path)):
                 return
             if _is_placeholder(path):
-                print(
-                    f"⚠️  {what} '{path}' does not exist and still contains "
-                    f"a template placeholder (e.g. /Users/janedoe) — skipped. "
-                    f"If this is an unedited copy of config_template.yaml, "
-                    f"edit config.yaml and set your real paths.",
-                    file=sys.stderr,
-                )
+                placeholder_hits.append(f"{what}: {path}")
             else:
-                print(
-                    f"⚠️  {what} '{path}' does not exist — will skip when "
-                    f"needed",
-                    file=sys.stderr,
-                )
+                missing_hits.append(f"{what}: {path}")
 
         d = self.data
         all_pairs = d.get("sync_pairs", []) + d.get("one_way_pairs", [])
@@ -453,6 +443,29 @@ class Config:
         pp = d.get("phone_pull") or {}
         _check(pp.get("local_stage") or "", "phone_pull.local_stage")
         _check(pp.get("remote_stage") or "", "phone_pull.remote_stage")
+
+        if placeholder_hits:
+            print(
+                "⚠️  Some folders in your config are still the starter "
+                "examples (template placeholders). They will be skipped:",
+                file=sys.stderr,
+            )
+            for hit in placeholder_hits[:8]:
+                print(f"      {hit}", file=sys.stderr)
+            if len(placeholder_hits) > 8:
+                print(f"      … and {len(placeholder_hits) - 8} more",
+                      file=sys.stderr)
+            print(
+                "    Set your real folders with './organize setup', or "
+                "edit config.yaml and replace 'janedoe' / "
+                "'YourExternalDrive' with your own paths.",
+                file=sys.stderr,
+            )
+        for hit in missing_hits:
+            print(
+                f"⚠️  {hit} does not exist — will be skipped when needed",
+                file=sys.stderr,
+            )
 
     # ── accessors ────────────────────────────────────────────────
 
@@ -625,25 +638,29 @@ def report_first_run(config_path: str) -> None:
         return
 
     drives = cfg.get("drives", {}) or {}
-    print("\nWill it work? Checking the drive paths in your new config:", file=sys.stderr)
+    print("\nWill it work? A quick check of the drive paths in your new "
+          "config:", file=sys.stderr)
     for key, raw in drives.items():
         path = os.path.expanduser(str(raw))
         if os.path.exists(path):
-            print(f"  ✓ {key}: {path} exists", file=sys.stderr)
+            print(f"  ✓ {key}: {path} — exists", file=sys.stderr)
         elif any(m in str(raw).lower() for m in TEMPLATE_PLACEHOLDER_MARKERS):
-            print(f"  ✗ {key}: {path} — template placeholder, "
-                  f"replace it with your real path", file=sys.stderr)
+            print(f"  ✗ {key}: {path} — starter example, replace it with "
+                  f"your real path", file=sys.stderr)
         else:
             print(f"  ? {key}: {path} — not available right now "
-                  f"(drive not plugged in?); it will be skipped", file=sys.stderr)
+                  f"(drive not plugged in?); it will be skipped",
+                  file=sys.stderr)
     print(
         "\nTo finish setup:\n"
         f"  1. Open {config_path} with TextEdit (Mac), Notepad (Windows) "
         f"or nano (Termux).\n"
-        "  2. Replace the placeholder paths (anything with 'janedoe' or\n"
+        "  2. Replace the starter paths (anything with 'janedoe' or\n"
         "     'YourExternalDrive') with YOUR real paths.\n"
         "  3. Use SPACES for indentation — YAML does not allow TABs.\n"
-        "  4. Run again: ./organize test\n",
+        "  4. Run again: ./organize test\n"
+        "\nEverything is OFF until you enable it — nothing moves or "
+        "syncs yet.\n",
         file=sys.stderr,
     )
 
