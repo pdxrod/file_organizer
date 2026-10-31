@@ -43,6 +43,9 @@ test/organized/something/
 /phone_sync.db
 /phone_sync.db-shm
 /phone_sync.db-wal
+/router_state.json
+# Compiled Swift extraction helper — rebuilt from extract.swift on first use.
+/src/tools/extract
 /.phone_daemon.log
 # The soft-link folder (item 15) lives inside this file_organizer folder
 /organized

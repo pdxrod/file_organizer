@@ -359,6 +359,64 @@ computer:
   # stays). Different content is never deleted. Set false to disable.
   dedupe_download_copies: true
 
+  # ── Router (smart classification by name AND content) ────────────────────
+  # The router works out where a file should go from its name and contents:
+  #   political      -> ~/pol       (politics, geopolitics, culture war…)
+  #   ml_development -> ~/dev/ml    (AI/ML projects, papers, notes, code)
+  #   development    -> ~/dev       (software projects and dev notes)
+  #   pictures       -> ~/Pictures  (non-political images AND videos)
+  #   music          -> ~/Music
+  #   documents      -> ~/Documents
+  #   misc           -> ~/misc      (anything it can't work out)
+  # Plan first with './organize route' (dry-run, moves nothing), then apply
+  # with './organize route-real'. route-status shows decisions so far and
+  # route-undo puts the most recent moves back. OFF by default for safety.
+  router:
+    enabled: false
+    # 'move' or 'copy'. move is the normal choice.
+    action: "move"
+    # Folders to sweep when you run './organize route'. Existing files
+    # get classified once; new files in watch_folders are routed on every
+    # production cycle (./organize auto / start).
+    route_roots:
+      - "MAIN_DRIVE/misc"
+    watch_folders:
+      - "MAIN_DRIVE/Downloads"
+      - "MAIN_DRIVE/Desktop"
+    # Classify new watch-folder files on every production cycle.
+    watch_on_cycles: true
+    # Where each category goes (defaults shown; change as you like).
+    target_folders:
+      political: "~/pol"
+      ml_development: "~/dev/ml"
+      development: "~/dev"
+      pictures: "~/Pictures"
+      music: "~/Music"
+      documents: "~/Documents"
+      misc: "~/misc"
+    # DeepSeek decides the files local rules can't. Text files only; media
+    # reach it as OCR text + Vision scene labels when media_enabled.
+    deepseek:
+      enabled: true
+      media_enabled: true
+      # Path to a text file holding your API key (or set DEEPSEEK_API_KEY
+      # in the environment). Never put the key itself in this file.
+      api_key_path: ""
+      model: "deepseek-chat"
+      min_confidence: 0.6
+      batch_size: 20
+      max_calls_per_run: 50
+      max_chars_per_file: 1500
+      timeout_seconds: 90
+    # OCR + scene classification of images/videos/PDFs (macOS Vision;
+    # skipped on other platforms). budget_per_run caps how many media
+    # files are analysed per route run so big sweeps can't run away.
+    ocr:
+      enabled: true
+      budget_per_run: 300
+    # Files larger than this are classified by name only.
+    max_file_size: 262144000
+
   # ── Phone pull (ADB-based sync) ────────────────────────────────────────────
   # Used by phone_pull.sh.  local_stage is where phone files land on this
   # machine.  remote_stage is what gets synced back to the phone in push

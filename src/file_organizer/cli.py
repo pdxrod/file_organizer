@@ -244,6 +244,36 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     return actions, sync_thread
 
 
+def _router_watch_pass(config: Config, apply: bool = False) -> dict:
+    """Route new files that appear in the router's watch folders
+    (router.watch_folders in config.yaml). Runs each cycle when the
+    router is enabled with watch_on_cycles. Returns the router stats,
+    or {} when nothing ran.
+    """
+    raw = config.raw_config.get("router") or {}
+    if not raw.get("enabled") or not raw.get("watch_on_cycles", True):
+        return {}
+    try:
+        from file_organizer.router import Router
+        router = Router(config)
+    except Exception as e:  # never break the main cycle over routing
+        logger.warning("Router watch pass skipped: %s", e)
+        return {}
+    if not router.enabled or not router.watch_folders:
+        return {}
+    try:
+        stats = router.watch_pass(apply=apply)
+    except Exception as e:
+        logger.warning("Router watch pass failed: %s", e)
+        return {}
+    if stats.get("moved") or stats.get("copied"):
+        logger.info("Router watch pass: moved %s, copied %s new files.",
+                    stats["moved"], stats["copied"])
+    elif apply:
+        logger.info("Router watch pass: nothing new to route.")
+    return stats
+
+
 def _collapse_folders(config: Config):
     """Folders to scan for (N)-rename families: organize_folders, falling
     back to source_folders."""
@@ -338,6 +368,16 @@ def main(argv=None):
                              "identical '_N' duplicates — shows a plan, "
                              "applies only with --REAL")
     parser.add_argument("--create-test", action="store_true", help="Create test environment")
+    parser.add_argument("--route", action="store_true",
+                        help="Route files into pol/dev/dev-ml/Pictures/Music/"
+                             "Documents/misc by name AND content (dry-run "
+                             "unless --REAL)")
+    parser.add_argument("--route-status", action="store_true",
+                        help="Show what the router has decided so far")
+    parser.add_argument("--route-undo", nargs="?", const=0, type=int,
+                        default=None, metavar="N",
+                        help="Undo the last N router moves (all if no N); "
+                             "moves files back only with --REAL")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     # Flags are case-insensitive and dashes are optional (real/-real/
@@ -417,6 +457,71 @@ def main(argv=None):
             print(f"Applied: {stats}")
         else:
             print("No changes made. Run with --REAL to apply.")
+        return
+
+    if args.route_status:
+        import json as _json
+        from file_organizer.router import Router
+        router = Router(config)
+        print("=== Router status ===")
+        print(_json.dumps(router.status(), indent=2))
+        if not router.enabled:
+            print("\nThe router is disabled in config.yaml "
+                  "(router.enabled: false).")
+        return
+
+    if args.route_undo is not None:
+        from file_organizer.router import Router
+        router = Router(config)
+        if not real_mode:
+            print("route-undo moves files back only with --REAL.")
+            return
+        undone = router.undo(count=args.route_undo or None)
+        if undone:
+            print(f"Undid {len(undone)} router move(s):")
+            for line in undone:
+                print("  " + line)
+        else:
+            print("Nothing to undo — no applied router moves in the "
+                  "state file.")
+        return
+
+    if args.route:
+        from file_organizer.router import Router
+        router = Router(config)
+        if not router.enabled:
+            print("The router is disabled. Add a router: section to "
+                  "config.yaml with enabled: true, route_roots and "
+                  "watch_folders first.")
+            return
+        print(f"=== Router {'APPLIED' if real_mode else 'PLAN (dry run)'} ===")
+        stats = router.run(apply=real_mode)
+        print(f"Scanned {stats['scanned']} files, "
+              f"decided {stats['decided']}.")
+        print("By category: " + ", ".join(
+            f"{k}={v}" for k, v in stats["by_category"].items() if v))
+        print(f"OCR used: {stats['ocr_used']}, "
+              f"DeepSeek calls: {stats['deepseek_calls']}")
+        if not real_mode:
+            entries = [
+                e for e in router.state["entries"].values()
+                if e.get("status") == "pending" and not e.get("applied")
+            ]
+            print(f"\nWould move {len(entries)} files:")
+            for e in sorted(entries, key=lambda e: (
+                    e.get("category", ""), e.get("name", "")))[:200]:
+                cat = e.get("category", "misc")
+                dest = router.targets.get(cat, Path("?")) / e.get("name", "?")
+                print(f"  {Path(e['origin']).name} -> {dest} "
+                      f"({e.get('source', '?')}: {e.get('reason', '')})")
+            if len(entries) > 200:
+                print(f"  ... and {len(entries) - 200} more")
+            print("\nNo files were moved. Run with --REAL to apply.")
+        else:
+            print(f"Moved: {stats['moved']}, copied: {stats['copied']}, "
+                  f"duplicates: {stats['duplicates']}, "
+                  f"collisions: {stats['collisions']}, "
+                  f"errors: {stats['errors']}")
         return
 
     if args.sync_only and real_mode:
@@ -506,6 +611,8 @@ def main(argv=None):
                 actions, sync_thread = run_full_cycle(config, dry_run=False)
                 if sync_thread is not None:
                     sync_thread.join(timeout=max(interval, 60))
+                # Classify anything new in the router watch folders.
+                _router_watch_pass(config, apply=True)
                 total = sum(actions.values())
                 if total == 0:
                     idle_streak += 1
@@ -532,6 +639,9 @@ def main(argv=None):
         # silently never finish).
         if sync_thread is not None:
             sync_thread.join()
+        # Classify anything new in the router watch folders (production
+        # one-shots move files; test mode only plans).
+        _router_watch_pass(config, apply=real_mode)
     except KeyboardInterrupt:
         logger.info("Interrupted by user. Exiting.")
         return

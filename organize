@@ -78,12 +78,17 @@ COMPUTER_COMMANDS = {
     "git-init": ["--git-init"],
     "collapse-renames": ["--collapse-renames"],
     "create-test": ["--create-test"],
+    "route": ["--route"],                     # plan files by name+content
+    "route-real": ["--REAL", "--route"],      # …and actually move them
+    "route-status": ["--route-status"],
+    "route-undo": ["--REAL", "--route-undo"], # put the last moves back
 }
 
 # Computer flags that pass straight through to the file_organizer CLI.
 COMPUTER_PASSTHROUGH = (
     "--REAL", "--scan-once", "--sync-only", "--dedupe-only",
     "--git-preview", "--git-init", "--cleanup", "--create-test",
+    "--route", "--route-status", "--route-undo",
     "-v", "--verbose", "--config", "-h", "--help",
 )
 
@@ -542,8 +547,10 @@ def usage(platform):
         auto_does = (
             "one production scan: builds the 'organized' soft-link folder, "
             "pulls phone files over USB when a phone is plugged in, syncs "
-            "folders with Proton Drive/Google Drive/external drives, and runs "
-            "auto-git. One command — it just works."
+            "folders with Proton Drive/Google Drive/external drives, runs "
+            "auto-git, and routes new ~/Downloads and ~/Desktop files into "
+            "pol/dev/dev-ml/Pictures/Music/Documents/misc. One command — "
+            "it just works."
         )
     lines = [
         "",
@@ -587,12 +594,18 @@ def usage(platform):
             "  ./organize git-init      run auto-git for real",
             "  ./organize collapse-renames  plan 'foo (1).png' family collapse",
             "  ./organize create-test   build a small test environment",
+            "  ./organize route         PLAN routing files to pol/dev/ml/Pictures/",
+            "                           Music/Documents/misc by name + content",
+            "  ./organize route-real    route files — move them for real",
+            "  ./organize route-status  see routing decisions so far",
+            "  ./organize route-undo    put the last routed files back",
             "  ./organize setup         first-time setup (config + report)",
             "  ./organize gui           desktop app      ./organize web   web UI",
             "  ./organize pull|push|list   phone sync over USB (needs adb)",
             "",
             "Flags (computer): real, scan-once, sync-only, dedupe-only,",
-            "  git-preview, git-init, cleanup, collapse-renames, config FILE, verbose",
+            "  git-preview, git-init, cleanup, collapse-renames, route,",
+            "  route-status, route-undo, config FILE, verbose",
             "",
             "USB debugging (phone → computer over USB):",
             "  1. Phone: Settings → About phone → tap 'Build number' 7 times",

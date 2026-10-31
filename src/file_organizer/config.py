@@ -539,6 +539,13 @@ class Config:
         starter["auto_git"] = False
         if "ml_content_analysis" in starter:
             starter["ml_content_analysis"]["enabled"] = False
+        # The router MOVES files, so starter configs always start with it
+        # off. The user turns it on (router.enabled: true) after reading
+        # the router: section comments.
+        if isinstance(starter.get("router"), dict):
+            starter["router"]["enabled"] = False
+        else:
+            starter["router"] = {"enabled": False}
 
         with open(target_path, "w") as f:
             yaml.safe_dump(starter, f, default_flow_style=False, sort_keys=False)
