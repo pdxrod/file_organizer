@@ -413,14 +413,32 @@ class ApplyUndoCollisionTests(unittest.TestCase):
         self.assertEqual(stats["moved"], 1)
         self.assertTrue((self.tmp / "out" / "Music" / "song.mp3").exists())
 
-    def test_collision_never_overwrites(self):
+    def test_collision_keeps_original_and_saves_incoming_as_counter(self):
+        # A DIFFERENT same-named file already sits at the destination:
+        # the original is kept and the incoming file is moved as
+        # report_1.pdf (counter just before the extension).
         write(self.tmp, "in/report.pdf", "new content")
         dest = write(self.tmp, "out/Documents/report.pdf", "old content")
         r = make_router(self.tmp, extractor=StubExtractor())
         stats = r.run(apply=True)
         self.assertEqual(stats["collisions"], 1)
+        self.assertEqual(stats["moved"], 1)
         self.assertEqual(dest.read_text(), "old content")
-        self.assertTrue((self.tmp / "in" / "report.pdf").exists())
+        self.assertFalse((self.tmp / "in" / "report.pdf").exists())
+        saved = self.tmp / "out" / "Documents" / "report_1.pdf"
+        self.assertTrue(saved.exists())
+        self.assertEqual(saved.read_text(), "new content")
+
+    def test_collision_counter_increments(self):
+        write(self.tmp, "in/report.pdf", "third content")
+        write(self.tmp, "out/Documents/report.pdf", "original")
+        write(self.tmp, "out/Documents/report_1.pdf", "other variant")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        stats = r.run(apply=True)
+        self.assertEqual(stats["collisions"], 1)
+        saved = self.tmp / "out" / "Documents" / "report_2.pdf"
+        self.assertTrue(saved.exists())
+        self.assertEqual(saved.read_text(), "third content")
 
     def test_identical_destination_kept_once(self):
         write(self.tmp, "in/report.pdf", "same bytes")
@@ -429,6 +447,44 @@ class ApplyUndoCollisionTests(unittest.TestCase):
         stats = r.run(apply=True)
         self.assertEqual(stats["duplicates"], 1)
         self.assertTrue((self.tmp / "in" / "report.pdf").exists())
+
+    def test_trailing_counter_music_is_routed_and_normalised(self):
+        # '01 Unnamed Track 1.m4a (1)' is an m4a (suffix after the
+        # extension must not hide that) and moves to Music as
+        # '01 Unnamed Track 1_1.m4a' — never keeping the ' (1)'.
+        src = write(self.tmp, "in/01 Unnamed Track 1.m4a (1)", "audio-a")
+        r = make_router(self.tmp)
+        stats = r.run(apply=True)
+        self.assertEqual(stats["moved"], 1)
+        self.assertFalse(src.exists())
+        dest = self.tmp / "out" / "Music" / "01 Unnamed Track 1_1.m4a"
+        self.assertTrue(dest.exists())
+        self.assertEqual(dest.read_text(), "audio-a")
+
+    def test_trailing_counter_collides_with_different_plain_name(self):
+        # The plain-named track already exists in Music as a DIFFERENT
+        # file: the original is kept, the (1) copy becomes _1.
+        src = write(self.tmp, "in/01 Unnamed Track 1.m4a (1)", "audio-a")
+        dest = write(self.tmp, "out/Music/01 Unnamed Track 1.m4a",
+                     "different recording")
+        r = make_router(self.tmp)
+        stats = r.run(apply=True)
+        self.assertEqual(stats["moved"], 1)
+        self.assertFalse(src.exists())
+        self.assertEqual(dest.read_text(), "different recording")
+        saved = self.tmp / "out" / "Music" / "01 Unnamed Track 1_1.m4a"
+        self.assertTrue(saved.exists())
+        self.assertEqual(saved.read_text(), "audio-a")
+
+    def test_trailing_counter_misc_stays_put_renamed_in_place(self):
+        # An unknown-type file with a ' (1)' suffix already inside its
+        # target folder (misc) is renamed in place to the _N form.
+        src = write(self.tmp, "out/misc/weird.xyz (1)", "data")
+        r = make_router(self.tmp, route_roots=[str(self.tmp / "out" / "misc")])
+        stats = r.run(apply=True)
+        self.assertEqual(stats["moved"], 1)
+        self.assertFalse(src.exists())
+        self.assertTrue((self.tmp / "out" / "misc" / "weird_1.xyz").exists())
 
 
 class ExclusionTests(unittest.TestCase):
@@ -446,6 +502,16 @@ class ExclusionTests(unittest.TestCase):
         r = make_router(self.tmp)
         stats = r.run()
         self.assertEqual(stats["scanned"], 0)
+
+    def test_files_inside_hidden_folders_never_routed(self):
+        # Transient program state like the phone-pull temp staging
+        # '.tmp_pull' under a sweep root must never be routed.
+        write(self.tmp, "in/.tmp_pull/song.mp3")
+        write(self.tmp, "in/.tmp_pull/sub/notes.txt", "code words")
+        r = make_router(self.tmp)
+        stats = r.run(apply=True)
+        self.assertEqual(stats["scanned"], 0)
+        self.assertTrue((self.tmp / "in" / ".tmp_pull" / "song.mp3").exists())
 
     def test_project_root_never_touched(self):
         fake_root = self.tmp / "checkout"

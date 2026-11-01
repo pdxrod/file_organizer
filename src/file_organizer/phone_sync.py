@@ -47,10 +47,10 @@ from typing import Optional, Iterator
 # (python3 phone_sync.py on the phone).
 try:
     from .rename_family import parse_family, plan_collapse, apply_collapse, \
-        plan_underscore_duplicates, strip_trailing_counter, next_free_name
+        plan_underscore_duplicates, next_free_name, normalize_copy_counter
 except ImportError:  # pragma: no cover - standalone script execution
     from rename_family import parse_family, plan_collapse, apply_collapse, \
-        plan_underscore_duplicates, strip_trailing_counter, next_free_name
+        plan_underscore_duplicates, next_free_name, normalize_copy_counter
 
 # App-generated name gate + leading-date normalisation (item 13).
 try:
@@ -1443,10 +1443,11 @@ class PhoneSync:
             rel_path = rel_path.parent / dest_name
 
         # The user's rule: never create or keep a trailing ' (N)' after the
-        # extension (Android's copy naming). The staged copy gets the plain
-        # name when it is free, or the next free '_N' name before the
-        # extension when a different same-named file exists.
-        plain = strip_trailing_counter(rel_path.name)
+        # extension (Android's copy naming). The staged copy becomes
+        # base_N.ext with the counter preserved ('foo.m4a (1)' →
+        # 'foo_1.m4a'); a taken name (a DIFFERENT file) falls forward to
+        # the next free number below.
+        plain = normalize_copy_counter(rel_path.name)
         if plain != rel_path.name:
             logger.info(
                 "Normalising trailing copy counter: %s → %s",

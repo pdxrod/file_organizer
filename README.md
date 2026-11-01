@@ -39,14 +39,44 @@ which commands to use.
 
 ```bash
 ./organize              # prints what it does + the commands for THIS device
-./organize test         # dry-run scan (safe) — both platforms
-./organize test-real    # computer: one production scan
-./organize scan         # phone: one production scan
-./organize auto         # production scan — just works (both platforms)
-./organize start        # run in the background   ./organize stop
-./organize log          # follow the log   ./organize status
+
+# Every platform
+./organize auto         # production scan — just works
+./organize test         # dry-run scan (safe) — changes nothing
+./organize start        # run in the background
+./organize stop         # stop the background program
+./organize restart      # stop, wait, start again
+./organize status       # is it running?
+./organize version      # print the version number
+./organize log          # follow the log file (Ctrl+C to stop)
 ./organize setup        # first-time setup (config + will-it-work report)
-./organize pull         # computer: pull phone staging over USB (adb)
+
+# Computer
+./organize test-real    # one production scan (alias: scan)
+./organize sync         # sync folders only
+./organize dedupe       # remove duplicate files only
+./organize cleanup      # remove broken/stale symlinks
+./organize clean        # wipe the organized folder + log, fresh scan
+./organize git-preview  # which folders would get 'git init'
+./organize git-init     # run auto-git for real
+./organize collapse-renames  # plan 'foo (1).png' family collapse
+./organize route        # PLAN where files go (by name + content)
+./organize route-real   # actually move files into place
+./organize route-status # show the plan / decisions so far
+./organize route-undo   # put the last moved files back
+./organize create-test  # build a small test environment
+./organize gui          # desktop app
+./organize web          # web UI
+./organize pull         # pull phone staging over USB (adb)
+./organize push         # push to the phone's staging over USB
+./organize list         # list connected phones
+
+# Phone
+./organize scan         # one production scan (alias: scan-once)
+./organize stats        # sync database statistics
+./organize find-cloud-drives  # locate your cloud drive folders
+./organize make-config  # create phone_sync_config.yaml
+./organize rename       # rename held files, one by one (d to delete)
 ```
 
 The old names `src/manage_organizer.sh` and `src/manage_phone.sh` still work
@@ -117,7 +147,7 @@ cd /path/to/file_organizer
 Watch what it does:
 
 ```bash
-./organize log        # tail the log (~/.file_organizer.log)
+./organize log        # tail the log (in the file_organizer folder: .file_organizer.log)
 ./organize status     # is it running?
 ./organize stop       # stop the background process
 ```
@@ -246,7 +276,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 |---------|--------------|
 | `start` | Start in the background (production mode, continuous) |
 | `stop` / `restart` / `status` | Control the background process |
-| `log` | Tail `~/.file_organizer.log` |
+| `log` | Tail `.file_organizer.log` (in the file_organizer folder) |
 | `test` | Single **dry-run** cycle — nothing real is changed |
 | `test-real` (aliases `scan`, `auto`) | Single production cycle |
 | `sync` | Folder synchronization only |
@@ -255,9 +285,13 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `cleanup` | Remove broken/stale soft links from the `organized` folder |
 | `git-preview` / `git-init` | Preview or run auto-git |
 | `collapse-renames` | Plan the 'foo (1).png' family collapse (dry-run; add `real` to apply) |
+| `route` / `route-real` | Plan / apply smart routing into buckets by name + content |
+| `route-status` / `route-undo` | Show routing decisions / put the last moves back |
 | `gui` / `web` | Desktop GUI / web UI |
 | `pull` / `push` / `list` | Phone ↔ computer over USB (adb) |
 | `create-test` | Create a sample test environment |
+| `setup` | First-time setup (config + will-it-work report) |
+| `version` | Print the version number |
 
 ## Everyday commands — phone
 
@@ -276,6 +310,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `make-config` | Create phone_sync_config.yaml from the template |
 | `rename` | Rename held app-generated files one by one (`name: X new name (d for delete): ` — Enter keeps, `d` deletes; a date in the name is prefilled as `YYYYMMDD-`) |
 | `setup` | First-time setup wizard |
+| `version` | Print the version number |
 
 ## Phone ↔ computer over USB (`organize pull`)
 
@@ -368,7 +403,7 @@ highlights:
 | `scan_interval` | How often the background process runs (seconds) |
 | `idle_backoff_factor` / `idle_backoff_max_multiplier` | Sleep longer when cycles change nothing |
 | `enable_folder_sync`, `enable_duplicate_detection`, `auto_git` | Feature switches (safe defaults off where dangerous) |
-| `dedupe_download_copies` | Auto-on: delete `foo_1`, `foo (1)`, `foo-1`, `foo (1) (1)` copies when an identical plain-named file exists |
+| `dedupe_download_copies` | Auto-on: delete `foo_1`, `foo (1)`, `foo-1`, `foo (1) (1)` copies when an identical plain-named file exists, and rename trailing ` (N)` counters to `_N` before the extension (`foo.m4a (1)` → `foo_1.m4a`, different files kept) |
 | `rsync_whole_file` / `rsync_io_timeout_seconds` | Whole-file transfers + stall guard for cloud drives (item 11) |
 | `sync_lock_enabled` / `sync_lock_stale_minutes` | One-machine-at-a-time sync: the second machine skips a pair another device is syncing (stale locks are taken over) |
 | `sync_chunk_subfolders` | Pairs with more subfolders than this are synced one subfolder at a time |

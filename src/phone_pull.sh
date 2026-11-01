@@ -254,9 +254,12 @@ DESCRIPTION:
 
   Both modes track file modification times to avoid re-copying unchanged
   files. Files younger than MIN_AGE_MINUTES are skipped to give you time
-  to delete unwanted files before they are synced. Existing files are
-  overwritten only when the incoming file is newer AND a different size —
-  no _1/_N renames (item 10).
+  to delete unwanted files before they are synced. A file that already
+  exists is NEVER overwritten: identical content is skipped, and a
+  DIFFERENT file keeps the existing one and lands as name_1.ext,
+  name_2.ext, … (counter just before the extension). Names ending in
+  ' (1)' after the extension are normalised the same way:
+  'foo.m4a (1)' becomes 'foo_1.m4a'.
 
 CONFIGURATION:
   All settings come from config.yaml — see the phone_pull: section.
@@ -280,6 +283,63 @@ warn() { log "WARN  $*" >&2; }
 err()  { log "ERROR $*" >&2; }
 dbg()  { [[ "${VERBOSE:-false}" == "true" ]] && log "DEBUG $*" || true; }
 
+# ── ADB with hard timeouts ───────────────────────────────────────────────────
+# `adb devices` and `adb shell` can block FOREVER on a wedged adb server or
+# on a phone waiting for the 'Allow USB debugging?' prompt. Every adb call
+# goes through adb_t so one stuck command can never hang `organize auto`.
+ADB_TIMEOUT="${ADB_TIMEOUT:-20}"               # quick commands
+ADB_STREAM_TIMEOUT="${ADB_STREAM_TIMEOUT:-600}"  # tar stream / file pushes
+
+adb_t() {
+    # Runs "$@" with a hard timeout; output passes through unchanged.
+    # Exit status 124 means the command was killed after ADB_TIMEOUT s.
+    local t="$ADB_TIMEOUT"
+    "$@" &
+    local cpid=$!
+    (
+        sleep "$t"
+        kill -9 "$cpid" 2>/dev/null
+    ) &
+    local wpid=$!
+    wait "$cpid" 2>/dev/null
+    local rc=$?
+    kill -9 "$wpid" 2>/dev/null
+    wait "$wpid" 2>/dev/null
+    if [[ $rc -ge 128 ]]; then
+        rc=124
+    fi
+    return "$rc"
+}
+
+adb_devices_raw() {
+    # Raw `adb devices` output. When adb produces nothing (hung or broken
+    # server), restart the server once and retry — the usual macOS fix.
+    local out
+    out=$(adb_t "$ADB" devices 2>/dev/null) || true
+    if [[ -z "$out" ]]; then
+        warn "adb did not respond — restarting the adb server and retrying"
+        adb_t "$ADB" kill-server >/dev/null 2>&1 || true
+        out=$(adb_t "$ADB" devices 2>/dev/null) || true
+        if [[ -z "$out" ]]; then
+            err "adb still not responding — skipping the phone"
+        fi
+    fi
+    printf '%s\n' "$out"
+}
+
+# The user's rule: 'foo.m4a (1)' → 'foo_1.m4a' — the counter moves just
+# before the extension; the extension is never damaged.
+fix_copy_name() {
+    PYTHONPATH="$PY_SRC" python3 - "$1" <<'PYEOF'
+import sys
+try:
+    from file_organizer.rename_family import normalize_copy_counter
+    print(normalize_copy_counter(sys.argv[1]))
+except Exception:
+    print(sys.argv[1])
+PYEOF
+}
+
 # ── Device management ────────────────────────────────────────────────────────
 
 usb_debugging_help() {
@@ -296,20 +356,21 @@ usb_debugging_help() {
 }
 
 list_devices() {
-    local devices
+    local devices raw
     # `|| true`: with `set -euo pipefail`, grep exiting 1 on an empty
     # device list would otherwise kill the script silently (no message).
-    devices=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' | awk '{print $1}' || true)
+    raw=$(adb_devices_raw || true)
+    devices=$(printf '%s\n' "$raw" | tail -n +2 | grep -v '^$' | awk '{print $1}' || true)
     if [[ -z "$devices" ]]; then
         echo "No devices connected."
         usb_debugging_help
         return 1
     fi
     echo "Connected devices:"
-    "$ADB" devices -l 2>/dev/null | tail -n +2 | grep -v '^$'
+    adb_t "$ADB" devices -l 2>/dev/null | tail -n +2 | grep -v '^$' || true
     # adb states other than 'device' mean the phone cannot be used yet.
     local states
-    states=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' || true)
+    states=$(printf '%s\n' "$raw" | tail -n +2 | grep -v '^$' || true)
     if echo "$states" | grep -q "unauthorized"; then
         echo ""
         warn "A phone shows 'unauthorized' — USB debugging is OFF, or the"
@@ -344,9 +405,9 @@ is_old_enough() {
     local min_age_sec=$((MIN_AGE_MINUTES * 60))
 
     local mtime
-    mtime=$("$ADB" -s "$device_id" shell "stat -c %Y '$phone_path' 2>/dev/null" 2>/dev/null | tr -d '\r\n' || echo "0")
+    mtime=$(adb_t "$ADB" -s "$device_id" shell "stat -c %Y '$phone_path' 2>/dev/null" 2>/dev/null | tr -d '\r\n' || echo "0")
     local now
-    now=$("$ADB" -s "$device_id" shell "date +%s 2>/dev/null" 2>/dev/null | tr -d '\r\n' || echo "0")
+    now=$(adb_t "$ADB" -s "$device_id" shell "date +%s 2>/dev/null" 2>/dev/null | tr -d '\r\n' || echo "0")
 
     if [[ "$mtime" == "0" || "$now" == "0" ]]; then
         return 0  # can't determine age — allow it
@@ -376,7 +437,7 @@ do_pull() {
 
     # Get device name for display
     local device_name
-    device_name=$("$ADB" -s "$device_id" shell "getprop ro.product.model" 2>/dev/null | tr -d '\r\n' || echo "$device_id")
+    device_name=$(adb_t "$ADB" -s "$device_id" shell "getprop ro.product.model" 2>/dev/null | tr -d '\r\n' || echo "$device_id")
     info "Device model: $device_name"
 
     # Ensure target dir exists
@@ -387,7 +448,7 @@ do_pull() {
     for src_dir in "${PHONE_SOURCE_DIRS[@]}"; do
         local phone_dir="${ANDROID_BASE}/${src_dir}"
         local dir_exists
-        dir_exists=$("$ADB" -s "$device_id" shell "[ -d '$phone_dir' ] && echo yes || echo no" 2>/dev/null | tr -d '\r\n')
+        dir_exists=$(adb_t "$ADB" -s "$device_id" shell "[ -d '$phone_dir' ] && echo yes || echo no" 2>/dev/null | tr -d '\r\n' || true)
         if [[ "$dir_exists" == "yes" ]]; then
             valid_dirs+=("$phone_dir")
         else
@@ -397,6 +458,7 @@ do_pull() {
 
     if [[ ${#valid_dirs[@]} -eq 0 ]]; then
         warn "No source directories found on device $device_id"
+        warn "(The phone may be waiting for the 'Allow USB debugging?' prompt — check its screen.)"
         return 0
     fi
 
@@ -404,7 +466,7 @@ do_pull() {
     if [[ "$dry_run" == "true" ]]; then
         info "[DRY-RUN] Would pull from: ${valid_dirs[*]}"
         for phone_dir in "${valid_dirs[@]}"; do
-            "$ADB" -s "$device_id" shell "find '$phone_dir' -type f 2>/dev/null" 2>/dev/null | while IFS= read -r f; do
+            adb_t "$ADB" -s "$device_id" shell "find '$phone_dir' -type f 2>/dev/null" 2>/dev/null | while IFS= read -r f; do
                 [[ -z "$f" ]] && continue
                 local fname rel rel_dir mapped held dest_fname
                 fname=$(basename "$f")
@@ -422,6 +484,8 @@ do_pull() {
                 if [[ "$NORMALISE_DATES" == "true" ]]; then
                     dest_fname=$(normalise_name "$fname")
                 fi
+                # 'foo.m4a (1)' → 'foo_1.m4a' on the computer copy.
+                dest_fname=$(fix_copy_name "$dest_fname")
                 mapped=$(map_dest_root "$rel_dir")
                 info "[DRY-RUN]   $f → ${mapped%%$'\t'*}/$dest_fname"
             done
@@ -441,8 +505,11 @@ do_pull() {
         tar_args="$tar_args '$rel'"
     done
 
-    # Use tar pipe for speed: adb exec-out streams tar, local tar extracts
-    eval "\"$ADB\" -s \"$device_id\" exec-out \"cd $ANDROID_BASE && tar cf - $tar_args 2>/dev/null\" 2>/dev/null | tar xf - -C \"$TEMP_STAGE\" 2>/dev/null" || true
+    # Use tar pipe for speed: adb exec-out streams tar, local tar extracts.
+    # The adb side runs with a hard timeout so a wedged device can't hang
+    # the pull forever; killing adb closes the pipe and tar exits.
+    local tar_cmd="cd $ANDROID_BASE && tar cf - $tar_args 2>/dev/null"
+    ADB_TIMEOUT="$ADB_STREAM_TIMEOUT" adb_t "$ADB" -s "$device_id" exec-out "$tar_cmd" 2>/dev/null | tar xf - -C "$TEMP_STAGE" 2>/dev/null || true
 
     local pulled_count
     pulled_count=$(find "$TEMP_STAGE" -type f 2>/dev/null | wc -l | tr -d ' ')
@@ -474,6 +541,9 @@ do_pull() {
     while IFS= read -r -d '' temp_file; do
         local fname rel_path phone_path
         fname=$(basename "$temp_file")
+        # The user's rule: 'foo.m4a (1)' → 'foo_1.m4a' — the counter moves
+        # just before the extension; the extension is never damaged.
+        fname=$(fix_copy_name "$fname")
         rel_path="${temp_file#$TEMP_STAGE/}"
         phone_path="${ANDROID_BASE}/${rel_path}"
 
@@ -536,18 +606,32 @@ do_pull() {
             dest="$dest_root/$fname"
         fi
 
-        # Item 10: never invent _1/_N names. If a file is already there,
-        # overwrite only when the incoming one is newer AND a different
-        # size; otherwise keep what is there.
+        # The user's rule: a file that already exists is NEVER overwritten.
+        # Identical content is skipped (marked as pulled); a DIFFERENT file
+        # keeps the existing one and lands as name_1.ext, name_2.ext, …
         if [[ -f "$dest" ]]; then
-            local dest_mtime dest_size
-            dest_mtime=$(stat $stat_mtime_flag "$dest" 2>/dev/null || echo "0")
-            dest_size=$(stat $stat_size_flag "$dest" 2>/dev/null || echo "0")
-            if [[ "$file_mtime" -le "$dest_mtime" || "$file_size" == "$dest_size" ]]; then
-                dbg "Keeping existing (not newer+different): $dest"
+            if cmp -s "$temp_file" "$dest"; then
+                ((total_skipped++)) || true
+                dbg "Already there (identical): $dest"
+                state=$(echo "$state" | python3 -c "import sys,json; d=json.load(sys.stdin); d['$state_key']='$file_mtime'; print(json.dumps(d))" 2>/dev/null || echo "$state")
                 continue
             fi
-            dbg "Overwriting (newer, different size): $dest"
+            local stem ext n cand
+            stem="${dest%.*}"
+            ext="${dest##*.}"
+            if [[ "$ext" == "$dest" ]]; then
+                ext=""
+            else
+                ext=".$ext"
+            fi
+            n=1
+            while true; do
+                cand="${stem}_${n}${ext}"
+                [[ -f "$cand" ]] || break
+                n=$((n + 1))
+            done
+            dbg "Different content — keeping existing, saving as: $cand"
+            dest="$cand"
         fi
 
         mkdir -p "$(dirname "$dest")"
@@ -592,18 +676,30 @@ do_push() {
     local phone_target="${ANDROID_BASE}/${PHONE_TARGET_DIR}"
 
     # Ensure target directory exists on phone
-    "$ADB" -s "$device_id" shell "mkdir -p '$phone_target'" 2>/dev/null || true
+    adb_t "$ADB" -s "$device_id" shell "mkdir -p '$phone_target'" 2>/dev/null || true
 
     local total_pushed=0
 
     # Walk files in remote stage and push newer ones
     while IFS= read -r -d '' local_file; do
         local rel_path="${local_file#$REMOTE_STAGE/}"
-        local phone_path="${phone_target}/${rel_path}"
+        # The user's rule: 'foo.m4a (1)' → 'foo_1.m4a' (extension intact),
+        # and a file already on the phone is NEVER overwritten — a
+        # different same-named file gets the next free _N name.
+        local fname rel_dir phone_path
+        fname=$(basename "$local_file")
+        fname=$(fix_copy_name "$fname")
+        rel_dir="${rel_path%/*}"
+        [[ "$rel_dir" == "$rel_path" ]] && rel_dir=""
+        if [[ -n "$rel_dir" ]]; then
+            phone_path="${phone_target}/${rel_dir}/${fname}"
+        else
+            phone_path="${phone_target}/${fname}"
+        fi
 
         # Extension filter for push (case-insensitive; Bash 3.2 compatible)
-        local ext=".${local_file##*.}"
-        [[ "$ext" == ".$local_file" ]] && ext=""
+        local ext=".${fname##*.}"
+        [[ "$ext" == ".$fname" ]] && ext=""
         ext=$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')
         if [[ ${#EXCLUDE_EXTS[@]} -gt 0 ]]; then
             for ex in "${EXCLUDE_EXTS[@]}"; do
@@ -616,12 +712,36 @@ do_push() {
             continue
         fi
 
+        # Never overwrite on the phone: if the target exists, use the
+        # next free name_N.ext.
+        local exists
+        exists=$(adb_t "$ADB" -s "$device_id" shell "[ -e '$phone_path' ] && echo yes || echo no" 2>/dev/null | tr -d '\r\n' || true)
+        if [[ "$exists" == "yes" ]]; then
+            local stem pext n cand exists2
+            stem="${phone_path%.*}"
+            pext="${phone_path##*.}"
+            if [[ "$pext" == "$phone_path" ]]; then
+                pext=""
+            else
+                pext=".$pext"
+            fi
+            n=1
+            while true; do
+                cand="${stem}_${n}${pext}"
+                exists2=$(adb_t "$ADB" -s "$device_id" shell "[ -e '$cand' ] && echo yes || echo no" 2>/dev/null | tr -d '\r\n' || true)
+                [[ "$exists2" == "yes" ]] || break
+                n=$((n + 1))
+            done
+            dbg "Phone already has $phone_path — pushing as: $cand"
+            phone_path="$cand"
+        fi
+
         # Push the file
         local phone_dir
         phone_dir=$(dirname "$phone_path")
-        "$ADB" -s "$device_id" shell "mkdir -p '$phone_dir'" 2>/dev/null || true
+        adb_t "$ADB" -s "$device_id" shell "mkdir -p '$phone_dir'" 2>/dev/null || true
 
-        if "$ADB" -s "$device_id" push "$local_file" "$phone_path" 2>/dev/null; then
+        if ADB_TIMEOUT="$ADB_STREAM_TIMEOUT" adb_t "$ADB" -s "$device_id" push "$local_file" "$phone_path" 2>/dev/null; then
             ((total_pushed++)) || true
             info "Pushed: $local_file → $phone_path"
         else
@@ -705,7 +825,7 @@ main() {
     else
         # `|| true` as in list_devices: an empty adb device list must
         # fall through to the friendly message, not die on errexit.
-        raw_lines=$("$ADB" devices 2>/dev/null | tail -n +2 | grep -v '^$' || true)
+        raw_lines=$(adb_devices_raw | tail -n +2 | grep -v '^$' || true)
         while IFS= read -r line; do
             serial=$(echo "$line" | awk '{print $1}')
             state=$(echo "$line" | awk '{print $2}')

@@ -352,11 +352,17 @@ computer:
   # or set this to true so production cycles do it automatically.
   collapse_rename_families: false
 
-  # Download-copy dedupe — ALWAYS ON in ./organize auto: files ending in
-  # _1, -1, (1), (2) or even (1) (1) are deleted when a plain-named file
-  # with IDENTICAL content exists in the same folder (e.g. when
-  # foo_1.pdf, foo (1).pdf and foo.pdf are the same file, only foo.pdf
-  # stays). Different content is never deleted. Set false to disable.
+  # Download-copy tidy-up — ALWAYS ON in ./organize auto:
+  #   • files ending in _1, -1, (1), (2) or even (1) (1) are deleted when
+  #     a plain-named file with IDENTICAL content exists in the same
+  #     folder (e.g. when foo_1.pdf, foo (1).pdf and foo.pdf are the same
+  #     file, only foo.pdf stays). Different content is never deleted.
+  #   • names that END in ' (N)' AFTER the extension (made by Android
+  #     copies, e.g. 'foo.m4a (1)') are renamed to the _N form with the
+  #     counter preserved: 'foo.m4a (1)' → 'foo_1.m4a', 'foo.m4a (2)' →
+  #     'foo_2.m4a'. A taken _N name (a DIFFERENT file) falls forward to
+  #     the next free number; nothing is ever overwritten.
+  #   Set false to disable.
   dedupe_download_copies: true
 
   # ── Router (smart classification by name AND content) ────────────────────

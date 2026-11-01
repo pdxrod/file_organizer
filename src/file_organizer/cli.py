@@ -230,15 +230,18 @@ def run_full_cycle(config: Config, dry_run: bool = False):
             collapse_stats.get("renamed", 0) + collapse_stats.get("deleted", 0)
         )
 
-    # 9. Download-copy dedupe: delete foo_1 / foo (1) / foo-1 / foo (1) (1)
-    # copies when a plain-named file with IDENTICAL content exists. Runs
-    # in every auto cycle (previews in dry-run); only identical bytes are
-    # ever deleted, so nothing real is lost.
+    # 9. Copy-name tidy-up: repair trailing ' (N)' counters
+    # ('foo.m4a (1)' → 'foo_1.m4a', counter preserved, different files
+    # kept) and delete foo_1 / foo (1) / foo-1 / foo (1) (1) copies when
+    # a plain-named file with IDENTICAL content exists. Runs in every
+    # auto cycle (previews in dry-run); identical bytes are the only
+    # thing ever deleted, so nothing real is lost.
     if config.raw_config.get("dedupe_download_copies", True):
         logger.info("Deduping download copies...")
         dedupe_stats = _run_download_copy_dedupe(config, dry_run=dry_run)
         logger.info("Download-copy dedupe: %s", dedupe_stats)
         actions["dedup_removed"] += dedupe_stats.get("deleted", 0)
+        actions["dedup_removed"] += dedupe_stats.get("renamed", 0)
 
     logger.info("=== Cycle complete ===")
     return actions, sync_thread
@@ -305,9 +308,12 @@ def _run_collapse(config: Config, dry_run: bool = True) -> dict:
 def _run_download_copy_dedupe(config: Config, dry_run: bool = True) -> dict:
     """Delete redundant download copies (foo_1, foo (1), foo-1,
     foo (1) (1)) across the configured folders when a plain-named file
-    with identical content exists. Returns stats {"renamed", "deleted"}."""
+    with identical content exists, and repair trailing ' (N)' counters
+    ('foo.m4a (1)' → 'foo_1.m4a', different files kept). Returns stats
+    {"renamed", "deleted"}."""
     from file_organizer.rename_family import (
-        download_copies_in_tree, apply_collapse,
+        download_copies_in_tree, trailing_counter_fixes_in_tree,
+        apply_collapse,
     )
     actions = []
     for folder in _dedupe_folders(config):
@@ -317,6 +323,7 @@ def _run_download_copy_dedupe(config: Config, dry_run: bool = True) -> dict:
                 "Download-copy dedupe: skipping missing folder %s", root
             )
             continue
+        actions.extend(trailing_counter_fixes_in_tree(root))
         actions.extend(download_copies_in_tree(root))
     return apply_collapse(actions, dry_run=dry_run)
 

@@ -46,7 +46,7 @@ from file_organizer.extractor import (
 )
 from file_organizer.rename_family import (
     plan_download_copies, plan_trailing_counter_fixes,
-    strip_trailing_counter, next_free_name,
+    strip_trailing_counter, next_free_name, normalize_copy_counter,
 )
 from file_organizer.deepseek_client import DeepSeekClient, CATEGORIES
 
@@ -427,6 +427,15 @@ class Router:
             resolved = p.resolve()
         except OSError:
             return "unresolvable"
+        # Transient program state under the sweep roots (e.g. the
+        # phone-pull temp staging '.tmp_pull') is never routed.
+        for r in self._sweep_roots:
+            try:
+                rel = resolved.parent.relative_to(r)
+            except ValueError:
+                continue
+            if any(part.startswith(".") for part in rel.parts):
+                return "hidden"
         in_sweep = resolved in self._sweep_roots or any(
             r in resolved.parents for r in self._sweep_roots)
         for cat, target in self.targets.items():
@@ -802,9 +811,10 @@ class Router:
             return
 
         # The user's rule: a trailing ' (N)' after the extension is never
-        # kept — the file gets the plain name when it is free, or the
-        # next free '_N' name just before the extension otherwise.
-        dest_name = strip_trailing_counter(entry.get("name", p.name))
+        # kept — the file becomes base_N.ext ('foo.m4a (1)' →
+        # 'foo_1.m4a'), and a taken name (a DIFFERENT file) falls forward
+        # to the next free number just before the extension.
+        dest_name = normalize_copy_counter(entry.get("name", p.name))
         dest = target / dest_name
         if dest == p:
             entry["status"] = "already_there"

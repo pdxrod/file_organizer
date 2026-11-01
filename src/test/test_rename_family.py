@@ -1,10 +1,13 @@
-"""Tests for item 10: no _1/(N) renames.
+"""Tests for item 10 (revised): no (1)-style names, no overwrites.
 
 Covers:
 - rename_family.parse_family on all the family shapes in the spec.
 - plan_collapse / apply_collapse (newest wins, siblings deleted, min-age).
-- phone copy_file never creates _N suffixes: overwrite when newer+different
-  size, keep when not newer.
+- the copy-collision rule: a same-named DIFFERENT file is never
+  overwritten — the original is kept and the incoming file becomes
+  name_1.ext / name_2.ext.
+- trailing ' (N)' counters: 'foo.m4a (1)' → 'foo_1.m4a' (counter
+  preserved), identical copies deleted, different files kept.
 - phone-side family collapse behind collapse_rename_families, with
   dry-run planning and min-age protection.
 """
@@ -19,8 +22,11 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from file_organizer import phone_sync  # noqa: E402
 from file_organizer.rename_family import (  # noqa: E402
-    parse_family, plan_collapse, apply_collapse,
+    parse_family, plan_collapse, apply_collapse, collapse_in_tree,
     plan_underscore_duplicates, plan_download_copies, download_copies_in_tree,
+    parse_trailing_counter, strip_trailing_counter, normalize_copy_counter,
+    next_free_name, plan_trailing_counter_fixes,
+    trailing_counter_fixes_in_tree,
 )
 
 import logging  # noqa: E402
@@ -281,8 +287,150 @@ class DownloadCopyTests(unittest.TestCase):
         )
 
 
-class PhoneCopyOverwriteTests(unittest.TestCase):
-    """copy_file must never invent _1/_N names (item 10)."""
+class TrailingCounterTests(unittest.TestCase):
+    """The user's rule: 'foo.m4a (1)' → 'foo_1.m4a' — counter moves just
+    before the extension, the extension is never damaged, and a different
+    same-named file is never overwritten."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def test_parse_and_strip(self):
+        self.assertEqual(
+            parse_trailing_counter("01 Unnamed Track 1.m4a (1)"),
+            ("01 Unnamed Track 1", ".m4a", 1),
+        )
+        self.assertEqual(
+            parse_trailing_counter("02 Unnamed Track 2 1.m4a (3)"),
+            ("02 Unnamed Track 2 1", ".m4a", 3),
+        )
+        self.assertIsNone(parse_trailing_counter("foo.m4a"))
+        self.assertIsNone(parse_trailing_counter("foo (1).m4a"))
+        self.assertIsNone(parse_trailing_counter("report (2026).txt"))
+        self.assertEqual(
+            strip_trailing_counter("01 Unnamed Track 1.m4a (1)"),
+            "01 Unnamed Track 1.m4a",
+        )
+        self.assertEqual(
+            strip_trailing_counter("foo.m4a (1) (2)"), "foo.m4a"
+        )
+
+    def test_normalise_preserves_counter(self):
+        self.assertEqual(
+            normalize_copy_counter("01 Unnamed Track 1.m4a (1)"),
+            "01 Unnamed Track 1_1.m4a",
+        )
+        self.assertEqual(
+            normalize_copy_counter("01 Unnamed Track 1.m4a (3)"),
+            "01 Unnamed Track 1_3.m4a",
+        )
+        self.assertEqual(
+            normalize_copy_counter("02 Unnamed Track 2 1.m4a (1)"),
+            "02 Unnamed Track 2 1_1.m4a",
+        )
+        self.assertEqual(
+            normalize_copy_counter("plain.m4a"), "plain.m4a"
+        )
+
+    def test_next_free_name(self):
+        (self.dir / "foo.png").write_text("x")
+        self.assertEqual(next_free_name(self.dir, "foo.png"), "foo_1.png")
+        self.assertEqual(next_free_name(self.dir, "bar.png"), "bar.png")
+        (self.dir / "foo_1.png").write_text("y")
+        self.assertEqual(next_free_name(self.dir, "foo.png"), "foo_2.png")
+        # A taken _N name continues from N+1, not foo_1_1.
+        self.assertEqual(next_free_name(self.dir, "foo_1.png"), "foo_2.png")
+
+    def test_fixes_rename_copies_with_counter_preserved(self):
+        for n in (1, 2, 3):
+            (self.dir / f"01 Unnamed Track 1.m4a ({n})").write_text(
+                f"variant{n}"
+            )
+        actions = plan_trailing_counter_fixes(self.dir)
+        plan = {(a.kind, a.path.name, a.target.name) for a in actions}
+        self.assertEqual(
+            plan,
+            {
+                ("rename", "01 Unnamed Track 1.m4a (1)",
+                 "01 Unnamed Track 1_1.m4a"),
+                ("rename", "01 Unnamed Track 1.m4a (2)",
+                 "01 Unnamed Track 1_2.m4a"),
+                ("rename", "01 Unnamed Track 1.m4a (3)",
+                 "01 Unnamed Track 1_3.m4a"),
+            },
+        )
+        apply_collapse(actions, dry_run=False)
+        self.assertEqual(
+            sorted(p.name for p in self.dir.iterdir()),
+            ["01 Unnamed Track 1_1.m4a", "01 Unnamed Track 1_2.m4a",
+             "01 Unnamed Track 1_3.m4a"],
+        )
+
+    def test_fixes_delete_identical_and_keep_different(self):
+        # Identical base → the copy is redundant → deleted.
+        (self.dir / "foo.m4a").write_text("same")
+        (self.dir / "foo.m4a (1)").write_text("same")
+        actions = plan_trailing_counter_fixes(self.dir)
+        self.assertEqual([(a.kind, a.path.name) for a in actions],
+                         [("delete", "foo.m4a (1)")])
+
+        # Different base → original kept, copy renamed to foo_1.m4a.
+        (self.dir / "foo.m4a (1)").write_text("different")
+        actions = plan_trailing_counter_fixes(self.dir)
+        self.assertEqual(
+            [(a.kind, a.path.name, a.target.name) for a in actions],
+            [("rename", "foo.m4a (1)", "foo_1.m4a")],
+        )
+        apply_collapse(actions, dry_run=False)
+        self.assertEqual((self.dir / "foo.m4a").read_text(), "same")
+        self.assertEqual((self.dir / "foo_1.m4a").read_text(), "different")
+
+    def test_taken_counter_falls_forward(self):
+        # foo_1.m4a already exists as a DIFFERENT file: the (1) copy
+        # must fall forward to foo_2.m4a and never overwrite anything.
+        (self.dir / "foo_1.m4a").write_text("existing-different")
+        (self.dir / "foo.m4a (1)").write_text("variant-a")
+        (self.dir / "foo.m4a (2)").write_text("variant-b")
+        actions = plan_trailing_counter_fixes(self.dir)
+        self.assertEqual(
+            sorted((a.kind, a.target.name) for a in actions),
+            [("rename", "foo_2.m4a"), ("rename", "foo_3.m4a")],
+        )
+
+    def test_plain_names_untouched(self):
+        (self.dir / "plain.m4a").write_text("x")
+        (self.dir / "plain_1.m4a").write_text("y")
+        self.assertEqual(plan_trailing_counter_fixes(self.dir), [])
+
+    def test_tree_helper(self):
+        sub = self.dir / "sub"
+        sub.mkdir()
+        (sub / "01 Unnamed Track 1.m4a (1)").write_text("a")
+        actions = trailing_counter_fixes_in_tree(self.dir)
+        self.assertEqual(
+            [(a.kind, a.target.name) for a in actions],
+            [("rename", "01 Unnamed Track 1_1.m4a")],
+        )
+
+    def test_hidden_folders_are_pruned(self):
+        # The phone-pull temp staging ('.tmp_pull') is transient program
+        # state — no tidy-up may ever touch files inside hidden folders.
+        hidden = self.dir / ".tmp_pull"
+        hidden.mkdir()
+        (hidden / "foo.m4a").write_text("same")
+        (hidden / "foo.m4a (1)").write_text("same")
+        (hidden / "bar (1).png").write_text("x")
+        (hidden / "bar (2).png").write_text("x")
+        self.assertEqual(trailing_counter_fixes_in_tree(self.dir), [])
+        self.assertEqual(download_copies_in_tree(self.dir), [])
+        self.assertEqual(collapse_in_tree(self.dir), [])
+
+
+class PhoneCopyCollisionTests(unittest.TestCase):
+    """copy_file: a same-named DIFFERENT file is never overwritten — the
+    original is kept and the incoming file becomes name_1.ext etc."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -319,7 +467,10 @@ class PhoneCopyOverwriteTests(unittest.TestCase):
         os.utime(p, (age, age))
         return p
 
-    def test_no_underscore_suffix_and_newer_wins(self):
+    def test_different_files_all_preserved_with_counter_names(self):
+        # Three DIFFERENT files all named foo.png — every one must be
+        # kept: the first gets the plain name, the others _1/_2 before
+        # the extension. Nothing is overwritten, whatever the mtimes.
         old = time.time() - 7200
         self._write(self.a, "foo.png", "AAA", old)
         self._write(self.b, "foo.png", "BBBB", old + 600)
@@ -327,24 +478,52 @@ class PhoneCopyOverwriteTests(unittest.TestCase):
         sync = self._sync()
         try:
             sync.run_once(dry_run=False)
-            staged = self.target / "docs" / "foo.png"
-            self.assertTrue(staged.exists())
-            # No foo_1.png ever.
-            self.assertFalse((self.target / "docs" / "foo_1.png").exists())
-            self.assertEqual(staged.read_text(), "BBBB")
+            docs = self.target / "docs"
+            self.assertEqual(
+                sorted(p.name for p in docs.iterdir()),
+                ["foo.png", "foo_1.png", "foo_2.png"],
+            )
+            self.assertEqual((docs / "foo.png").read_text(), "AAA")
+            self.assertEqual((docs / "foo_1.png").read_text(), "BBBB")
+            self.assertEqual((docs / "foo_2.png").read_text(), "CC")
         finally:
             sync.db.close()
 
-    def test_older_incoming_keeps_staged_copy(self):
+    def test_older_variant_is_preserved_not_discarded(self):
         old = time.time() - 7200
         self._write(self.a, "foo.png", "AAA", old)
-        self._write(self.c, "foo.png", "CCC", old - 3600)  # older, not known
+        self._write(self.c, "foo.png", "CCC", old - 3600)  # older variant
         sync = self._sync()
         try:
             sync.run_once(dry_run=False)
-            staged = self.target / "docs" / "foo.png"
-            self.assertEqual(staged.read_text(), "AAA")
-            # The older variant must not be backed up under a new name.
+            docs = self.target / "docs"
+            self.assertEqual((docs / "foo.png").read_text(), "AAA")
+            self.assertEqual((docs / "foo_1.png").read_text(), "CCC")
+        finally:
+            sync.db.close()
+
+    def test_trailing_counter_names_normalised_at_copy_time(self):
+        # 'foo.m4a (1)' on the phone must land as 'foo_1.m4a' in staging.
+        old = time.time() - 7200
+        self._write(self.a, "foo.m4a (1)", "AAA", old)
+        sync = self._sync()
+        try:
+            sync.run_once(dry_run=False)
+            self.assertTrue((self.target / "docs" / "foo_1.m4a").exists())
+            self.assertEqual(
+                sorted(p.name for p in (self.target / "docs").iterdir()),
+                ["foo_1.m4a"],
+            )
+        finally:
+            sync.db.close()
+
+    def test_identical_content_is_skipped(self):
+        old = time.time() - 7200
+        self._write(self.a, "foo.png", "same-bytes", old)
+        self._write(self.b, "foo.png", "same-bytes", old + 100)
+        sync = self._sync()
+        try:
+            sync.run_once(dry_run=False)
             self.assertEqual(
                 sorted(p.name for p in (self.target / "docs").iterdir()),
                 ["foo.png"],
