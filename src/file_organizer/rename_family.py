@@ -1,20 +1,26 @@
-"""Item 10: no `_1`/`(N)` renames.
+"""Item 10, revised: no (1)-style names, no overwrites, files preserved.
 
-Two rules live here:
+Three rules live here:
 
-1. **Copy-overwrite rule** — copying `foo.png` over an existing `foo.png`
-   overwrites it in place when the incoming file is NEWER and a DIFFERENT
-   SIZE. No `foo_1.png` renames are ever created by our copy paths.
+1. **Copy-collision rule (the user's rule)** — when a copy/move lands on
+   a same-named file with DIFFERENT content, the original is kept and the
+   incoming file gets the next free name with `_N` inserted just before
+   the extension (`foo.m4a` → `foo_1.m4a`, then `foo_2.m4a`, …). Nothing
+   is ever overwritten because the names match.
 
-2. **(N)-family collapse** — Mac/phone rename families like `foo (1).png`,
-   `foo (2).png`, `foo (1) (1).png`, `foo (1) (2).png` or even
-   `foo (1) (1)_1.png` are collapsed to the base name: the NEWEST member
-   becomes `foo.png` and every other member is deleted.
+2. **Trailing-counter fix** — names that END in ` (N)` after the
+   extension (`foo.m4a (1)`, made by Android/phone copies) are renamed
+   to the plain name when it is free, or to `foo_1.m4a` / `foo_2.m4a`
+   when a different same-named file exists. Identical copies are deleted
+   instead. No `(1)` suffix is ever created or kept.
 
 3. **Download-copy dedupe** — `foo_1.png`, `foo (1).png`, `foo-1.pdf` and
    chained counters like `foo-1_1.pdf` are deleted when a plain-named
    file with IDENTICAL content exists (`plan_download_copies`). The base
    is never touched, and any content doubt keeps the copy.
+
+(N)-rename families (`foo (1).png`, `foo (2).png` before the extension)
+keep their original item-10 collapse behaviour in `plan_collapse`.
 
 This module is pure planning + applying — callers decide when it runs and
 always show a dry-run plan before deleting anything.
@@ -57,6 +63,15 @@ _DOWNLOAD_SUFFIX_RES = (
     re.compile(r"^(?P<base>.+?) \((?P<n>\d{1,3})\)$"),  # foo (1)
     re.compile(r"^(?P<base>.+?)_(?P<n>\d+)$"),            # foo_1
     re.compile(r"^(?P<base>.+?)-(?P<n>\d+)$"),            # foo-1
+)
+
+# A trailing copy counter AFTER the extension: "foo.m4a (1)", "foo.pdf (2)",
+# or "foo (1)" with no extension at all. The (N) group is limited to 1-3
+# digits so year-style names like "report (2026).txt" are never touched.
+# "foo (1).m4a" (counter BEFORE the extension) does NOT match this — that
+# shape is an (N)-rename family, handled by _FAMILY_RE.
+_TRAILING_COUNTER_RE = re.compile(
+    r"^(?P<base>.+?)(?P<ext>\.[^.]+)?\s+\((?P<n>\d{1,3})\)$"
 )
 
 # Hashing is skipped above this size (treated as "content differs").
@@ -263,6 +278,147 @@ def plan_underscore_duplicates(directory, min_age_seconds: int = 0,
             continue
         actions.append(CollapseAction("delete", path))
 
+    return actions
+
+
+def parse_trailing_counter(name: str):
+    """Split a trailing ' (N)' copy counter off a name.
+
+    Returns (base, ext, n) or None: '01 Unnamed Track 1.m4a (1)' →
+    ('01 Unnamed Track 1', '.m4a', 1); 'foo (2)' → ('foo', '', 2).
+    Names without a trailing counter ('foo.m4a', 'foo (1).m4a') → None.
+    """
+    if not isinstance(name, str) or not name:
+        return None
+    m = _TRAILING_COUNTER_RE.match(name)
+    if not m:
+        return None
+    base = m.group("base").rstrip()
+    if not base:
+        return None
+    return base, (m.group("ext") or ""), int(m.group("n"))
+
+
+def strip_trailing_counter(name: str) -> str:
+    """Drop trailing ' (N)' counters from a name, repeatedly for chains.
+
+    '01 Unnamed Track 1.m4a (1)' → '01 Unnamed Track 1.m4a'
+    'foo.m4a (1) (2)' → 'foo.m4a'
+    Names without a trailing counter come back unchanged.
+    """
+    result = name
+    while True:
+        parsed = parse_trailing_counter(result)
+        if parsed is None:
+            return result
+        base, ext, _n = parsed
+        result = base + ext
+
+
+def next_free_name(directory, name: str) -> str:
+    """First free name for `name` in `directory` (never overwrites).
+
+    'foo.png' is returned when free; otherwise 'foo_1.png', 'foo_2.png',
+    … — the counter is inserted just BEFORE the extension. A trailing
+    ' (N)' suffix is never produced (strip it first when needed).
+    """
+    directory = Path(directory)
+    if not (directory / name).exists():
+        return name
+    stem, ext = os.path.splitext(name)
+    n = 1
+    while True:
+        candidate = f"{stem}_{n}{ext}"
+        if not (directory / candidate).exists():
+            return candidate
+        n += 1
+
+
+def _avoid_claimed(directory, name: str, claimed: set) -> str:
+    """First free name for `name`, skipping names already taken by other
+    planned renames in the same directory (plan-time collisions)."""
+    stem, ext = os.path.splitext(name)
+    candidate = name
+    n = 1
+    while candidate in claimed or (directory / candidate).exists():
+        candidate = f"{stem}_{n}{ext}"
+        n += 1
+    return candidate
+
+
+def plan_trailing_counter_fixes(directory,
+                                min_age_seconds: int = 0) -> List[CollapseAction]:
+    """Plan the repair of trailing ' (N)' copy counters in one directory.
+
+    For every file whose name ends in ' (N)' AFTER the extension
+    ('foo.m4a (1)'):
+
+    - the plain base exists with IDENTICAL content → delete the copy
+      (same safety as download-copy dedupe);
+    - the plain base exists with DIFFERENT content → rename the copy to
+      the next free '_N' name before the extension ('foo_1.m4a', …) —
+      the original is kept;
+    - no plain base → rename the copy to the plain name.
+
+    Files with no trailing counter are never touched, and no action ever
+    overwrites another file. Returns rename/delete actions; nothing is
+    touched on disk.
+    """
+    directory = Path(directory)
+    actions: List[CollapseAction] = []
+    if not directory.is_dir():
+        return actions
+    try:
+        entries = {p.name: p for p in directory.iterdir() if p.is_file()}
+    except OSError:
+        return actions
+
+    now = time.time()
+    claimed: set = set()  # names a rename action already takes
+    for name, path in sorted(entries.items()):
+        parsed = parse_trailing_counter(name)
+        if parsed is None:
+            continue
+        if min_age_seconds > 0:
+            try:
+                age = now - path.stat().st_mtime
+            except OSError:
+                age = float("inf")
+            if age < min_age_seconds:
+                continue
+        base_name = parsed[0] + parsed[1]
+        base = entries.get(base_name)
+        if base is not None and not files_differ(path, base):
+            logger.info(
+                "Redundant copy: %s (identical to %s)",
+                name, base.name,
+            )
+            actions.append(CollapseAction("delete", path))
+            continue
+        # No base, or the base is a DIFFERENT file: keep the copy and
+        # give it the plain name when free, else the next free '_N' name
+        # before the extension. Either way the original is preserved.
+        candidate = _avoid_claimed(directory, base_name, claimed)
+        claimed.add(candidate)
+        if base is not None:
+            logger.info(
+                "Kept %s — different content from %s",
+                name, base.name,
+            )
+        actions.append(
+            CollapseAction("rename", path, directory / candidate)
+        )
+    return actions
+
+
+def trailing_counter_fixes_in_tree(root) -> List[CollapseAction]:
+    """Plan trailing-counter fixes for every directory under root."""
+    root = Path(root)
+    actions: List[CollapseAction] = []
+    if not root.is_dir():
+        return actions
+    for dirpath, _dirnames, _filenames in os.walk(root):
+        actions.extend(plan_trailing_counter_fixes(dirpath))
     return actions
 
 

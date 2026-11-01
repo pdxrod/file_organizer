@@ -42,14 +42,15 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Iterator
 
-# (N)-family collapse (item 10). Relative import for package execution with a
-# fallback for standalone execution (python3 phone_sync.py on the phone).
+# (N)-family collapse + trailing-counter fixes (item 10). Relative import
+# for package execution with a fallback for standalone execution
+# (python3 phone_sync.py on the phone).
 try:
     from .rename_family import parse_family, plan_collapse, apply_collapse, \
-        plan_underscore_duplicates
+        plan_underscore_duplicates, strip_trailing_counter, next_free_name
 except ImportError:  # pragma: no cover - standalone script execution
     from rename_family import parse_family, plan_collapse, apply_collapse, \
-        plan_underscore_duplicates
+        plan_underscore_duplicates, strip_trailing_counter, next_free_name
 
 # App-generated name gate + leading-date normalisation (item 13).
 try:
@@ -1441,6 +1442,18 @@ class PhoneSync:
         if dest_name:
             rel_path = rel_path.parent / dest_name
 
+        # The user's rule: never create or keep a trailing ' (N)' after the
+        # extension (Android's copy naming). The staged copy gets the plain
+        # name when it is free, or the next free '_N' name before the
+        # extension when a different same-named file exists.
+        plain = strip_trailing_counter(rel_path.name)
+        if plain != rel_path.name:
+            logger.info(
+                "Normalising trailing copy counter: %s → %s",
+                rel_path.name, plain,
+            )
+            rel_path = rel_path.parent / plain
+
         target = (target_root or self.target_dir) / rel_path
 
         if dry_run:
@@ -1463,7 +1476,8 @@ class PhoneSync:
                 # staged before, this is an UPDATE: overwrite the previously
                 # staged copy in place so the name stays stable across
                 # versions. Otherwise it's a name collision from a DIFFERENT
-                # source — keep the old suffix behaviour.
+                # source — keep the original and save the incoming file
+                # under the next free '_N' name before the extension.
                 known = self.db.latest_target_for_source(str(source))
                 update_path = None
                 if known is not None:
@@ -1478,36 +1492,17 @@ class PhoneSync:
                     target = update_path
                     logger.info("Updating staged copy in place: %s", target)
                 else:
-                    # Item 10 — never create _1/_N renames. When a staged
-                    # copy already exists, overwrite it only if the incoming
-                    # file is NEWER and a DIFFERENT SIZE; otherwise keep the
-                    # staged copy.
-                    try:
-                        tgt_stat = target.stat()
-                        src_stat = source.stat()
-                        newer = src_stat.st_mtime > tgt_stat.st_mtime
-                        diff_size = src_stat.st_size != tgt_stat.st_size
-                    except OSError:
-                        newer = False
-                        diff_size = False
-                    if newer and diff_size:
-                        logger.info(
-                            "Overwriting staged copy (newer, different size): %s",
-                            target,
-                        )
-                    elif newer:
-                        # Same size but different content (identical content
-                        # returned above): overwrite so the newer bytes get
-                        # backed up. Still no _1 rename.
-                        logger.info(
-                            "Overwriting staged copy (newer content): %s", target
-                        )
-                    else:
-                        logger.warning(
-                            "Keeping existing staged copy (incoming is not "
-                            "newer): %s — this variant is not backed up", source
-                        )
-                        return target
+                    # The user's rule — a different file with the same name
+                    # is never overwritten: keep the staged copy and store
+                    # this variant as name_1.ext, name_2.ext, …
+                    target = target.parent / next_free_name(
+                        target.parent, target.name
+                    )
+                    logger.info(
+                        "Keeping existing %s (different content); saving "
+                        "%s as %s",
+                        target.parent / rel_path.name, source, target.name,
+                    )
 
             # Atomic copy: write to a temp name, then rename into place.
             partial = target.parent / (target.name + ".partial")

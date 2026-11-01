@@ -21,7 +21,10 @@ Decision cascade, cheapest first:
 Every decision is persisted in router_state.json so re-runs skip what is
 already decided and `route --undo` can put files back. Moves are
 collision-safe: a same-named file with different content is never
-overwritten — it stays put and is reported.
+overwritten — the original is kept and the incoming file is moved as
+`name_1.ext` / `name_2.ext` (counter just before the extension). Names
+that end in a trailing ` (N)` after the extension (`foo.m4a (1)`, made
+by Android copies) are normalised to the plain or `_N` form on the way.
 
 Safety: dotfiles, symlinks, excluded patterns, files already inside a
 target folder, and the file_organizer checkout itself are never touched.
@@ -41,7 +44,10 @@ from file_organizer.config import find_project_root
 from file_organizer.extractor import (
     Extractor, TEXT_EXTS, IMAGE_EXTS, VIDEO_EXTS, HTML_EXTS, OFFICE_EXTS,
 )
-from file_organizer.rename_family import plan_download_copies
+from file_organizer.rename_family import (
+    plan_download_copies, plan_trailing_counter_fixes,
+    strip_trailing_counter, next_free_name,
+)
 from file_organizer.deepseek_client import DeepSeekClient, CATEGORIES
 
 logger = logging.getLogger(__name__)
@@ -204,6 +210,12 @@ def _lower_stem(name: str) -> str:
     stem = re.sub(r"[-_.,;:!?()\[\]{}]+", " ", name).lower()
     stem = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", stem)  # camelCase
     return stem
+
+
+def _suffix(name: str) -> str:
+    """Extension of a filename, ignoring a trailing ' (N)' copy counter:
+    '01 Unnamed Track 1.m4a (1)' → '.m4a' (pathlib would say '.m4a (1)')."""
+    return Path(strip_trailing_counter(name)).suffix.lower()
 
 
 class Router:
@@ -514,9 +526,16 @@ class Router:
 
     def _already_decided(self, p: Path) -> bool:
         """True when state holds a decision for p and the file hasn't
-        changed since — re-runs then skip it without re-extracting."""
+        changed since — re-runs then skip it without re-extracting.
+
+        Files whose name still ends in a trailing ' (N)' copy counter are
+        always re-decided: decisions made before the counter fix left them
+        as misc/already_there, and the stripped extension changes that.
+        """
         entry = self.state["entries"].get(str(p))
         if not isinstance(entry, dict) or not entry.get("category"):
+            return False
+        if strip_trailing_counter(p.name) != p.name:
             return False
         try:
             st = p.stat()
@@ -530,7 +549,7 @@ class Router:
     def _phase1(self, p: Path) -> Optional[dict]:
         """Cheap decisions. Returns the decision entry, or None when the
         file needs content extraction / DeepSeek."""
-        ext = p.suffix.lower()
+        ext = _suffix(p.name)
         stem_text = _lower_stem(p.stem)
         self.stats["scanned"] += 1
 
@@ -588,7 +607,7 @@ class Router:
 
     def _phase2(self, p: Path, entry: dict) -> Optional[dict]:
         """Extract text where cheap/needed; queue OCR + DeepSeek."""
-        ext = p.suffix.lower()
+        ext = _suffix(p.name)
 
         if ext in IMAGE_EXTS or ext in VIDEO_EXTS:
             # Media is never read as bytes: Vision scene labels can decide
@@ -670,13 +689,13 @@ class Router:
             scene, labels = self._scene_signal(
                 str(data.get("meta", {}).get("classifications", ""))
             )
-            if scene and p.suffix.lower() in IMAGE_EXTS | VIDEO_EXTS:
+            if scene and _suffix(p.name) in IMAGE_EXTS | VIDEO_EXTS:
                 self._decide(p, "political", 0.7, "content",
                              "political scene: " + ", ".join(labels[:4]),
                              labels)
                 continue
             ml, hits = self._signal(text, "ml")
-            if ml and p.suffix.lower() == ".pdf":
+            if ml and _suffix(p.name) == ".pdf":
                 self._decide(p, "ml_development", 0.85, "content",
                              "OCR ML text: " + ", ".join(hits[:4]), hits)
                 continue
@@ -705,7 +724,7 @@ class Router:
             self._ds_calls += 1
             items = []
             for p, _, text, meta in batch:
-                kind = ("media" if p.suffix.lower()
+                kind = ("media" if _suffix(p.name)
                         in IMAGE_EXTS | VIDEO_EXTS else "file")
                 scene = str(meta.get("classifications", "")) if meta else ""
                 combined = text
@@ -735,7 +754,7 @@ class Router:
     # ── phase 5: fallback ────────────────────────────────────────────
 
     def _fallback(self, p: Path, reason: str) -> tuple[str, float, str, str]:
-        ext = p.suffix.lower()
+        ext = _suffix(p.name)
         note = f" ({reason})" if reason else ""
         if ext in MUSIC_EXTS:
             return "music", 0.6, "fallback", "audio extension" + note
@@ -781,7 +800,12 @@ class Router:
             entry["status"] = "error"
             entry["reason"] = "no target folder configured"
             return
-        dest = target / entry.get("name", p.name)
+
+        # The user's rule: a trailing ' (N)' after the extension is never
+        # kept — the file gets the plain name when it is free, or the
+        # next free '_N' name just before the extension otherwise.
+        dest_name = strip_trailing_counter(entry.get("name", p.name))
+        dest = target / dest_name
         if dest == p:
             entry["status"] = "already_there"
             entry["applied"] = True
@@ -796,12 +820,18 @@ class Router:
                 entry["dest"] = str(dest)
                 self.stats["duplicates"] += 1
                 return
-            logger.warning("router: NOT overwriting %s with %s — different "
-                           "content; source left in place", dest, p)
-            entry["status"] = "collision"
-            entry["dest"] = str(dest)
+            # A DIFFERENT file already has this name: keep the original
+            # and give the incoming file the next free '_N' name before
+            # the extension (foo.m4a → foo_1.m4a, foo_2.m4a, …).
+            dest = target / next_free_name(target, dest_name)
+            logger.info(
+                "router: kept %s — different content; saving %s as %s",
+                target / dest_name, p.name, dest.name,
+            )
             self.stats["collisions"] += 1
-            return
+        elif dest_name != p.name:
+            logger.info("router: normalising trailing copy counter: %s → %s",
+                        p.name, dest_name)
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
             if self.action == "copy":
@@ -816,6 +846,7 @@ class Router:
             return
         entry["applied"] = True
         entry["dest"] = str(dest)
+        entry["name"] = dest.name
         entry["status"] = "moved" if self.action == "move" else "copied"
         self.stats["moved" if self.action == "move" else "copied"] += 1
         self.stats["by_category"][category] += 1
@@ -825,14 +856,18 @@ class Router:
     # ── public API ───────────────────────────────────────────────────
 
     def _plan_copies(self, files: list) -> set:
-        """Paths that are redundant download copies (foo_1, foo (1), …)
-        of a plain-named file with IDENTICAL content in the same folder.
-        Uses the same planner as ./organize auto so behaviour matches."""
+        """Paths that are redundant download copies (foo_1, foo (1), …,
+        and trailing ' (N)' names like foo.m4a (1)) of a plain-named file
+        with IDENTICAL content in the same folder. Uses the same planners
+        as ./organize auto so behaviour matches."""
         copies = set()
         for directory in {p.parent for p in files}:
             try:
                 for action in plan_download_copies(directory):
                     copies.add(str(action.path))
+                for action in plan_trailing_counter_fixes(directory):
+                    if action.kind == "delete":
+                        copies.add(str(action.path))
             except Exception as e:  # the planner must never break routing
                 logger.warning(
                     "router: download-copy check failed for %s: %s",
@@ -892,11 +927,14 @@ class Router:
         self.stats["deepseek_calls"] = self._ds_calls
 
         # Apply moves when apply=True: pending decisions from this and
-        # earlier dry-runs, moves that route-undo put back (undone), and
-        # earlier failures (error) so a retry can succeed.
+        # earlier dry-runs, moves that route-undo put back (undone),
+        # earlier failures (error) so a retry can succeed, and old
+        # "collision" entries — under the new rule those are moved as
+        # '_N' names instead of being left behind.
         if apply:
             for key, entry in list(self.state["entries"].items()):
-                if entry.get("status") in ("pending", "undone", "error") \
+                if entry.get("status") in (
+                        "pending", "undone", "error", "collision") \
                         and not entry.get("applied"):
                     self._apply_entry(entry)
 
