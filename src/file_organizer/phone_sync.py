@@ -1125,11 +1125,12 @@ def _input_with_prefill(prompt: str, prefill: str, input_fn=input) -> str:
     On an interactive terminal (input_fn is the builtin input and stdin is
     a tty) the readline module pre-inserts the prefill as editable text, so
     the user sees e.g.
-        name: Screenshot-2026-09-05-999.txt new name (d for delete): 20260905-▏
+        name: Screenshot-2026-09-05-999.txt new name (d for delete, x for stop): 20260905-▏
     and can append to it, edit it, or clear it. Where readline is
     unavailable (or input_fn is a test double), the prefill is printed
     after the prompt and prepended to the typed text instead:
-    'd' still means delete and Enter alone still means keep.
+    'd' still means delete, 'x' still stops renaming, and Enter alone
+    still means keep.
     """
     if not prefill:
         return input_fn(prompt)
@@ -1149,8 +1150,8 @@ def _input_with_prefill(prompt: str, prefill: str, input_fn=input) -> str:
         except Exception:
             pass  # no readline / no hook support — use the printed prefill
     answer = input_fn(prompt + prefill)
-    if answer.strip().lower() == "d":
-        return "d"  # delete wins over the printed prefill
+    if answer.strip().lower() in ("d", "x"):
+        return answer.strip().lower()  # 'd'/'x' win over the printed prefill
     if not answer.strip():
         return ""
     return prefill + answer
@@ -1163,15 +1164,18 @@ def rename_held_interactive(
     keeping, or deleting them.
 
     For each held file the user is prompted:
-        name: BBl-Screenshot-1788321667280.jpeg new name (d for delete):
+        name: BBl-Screenshot-1788321667280.jpeg new name (d for delete, x for stop):
     - Type a new name and press Enter to rename (no extension keeps the
       old one).
     - Press Enter alone to keep the old name.
     - Type 'd' and press Enter to delete the file.
+    - Type 'x' and press Enter to stop renaming; the remaining files are
+      left exactly as they are.
     When the file name contains a YYYYMMDD or YYYY-MM-DD date, the prompt
     is prefilled with the normalised date, e.g.:
-        name: Screenshot-2026-09-05-999.txt new name (d for delete): 20260905-
-    and the user fills in the rest of the name.
+        name: Screenshot-2026-09-05-999.txt new name (d for delete, x for stop): 20260905-
+    and the user fills in the rest of the name ('x' typed right after the
+    prefill also stops).
     input_fn/print_fn are injectable for tests.
 
     Returns {"renamed": n, "kept": m, "deleted": k}.
@@ -1183,18 +1187,30 @@ def rename_held_interactive(
         return stats
     print_fn(
         f"{len(files)} held file(s). Type a new name for each and press "
-        f"Enter; press Enter alone to keep the old name; 'd' deletes it."
+        f"Enter; press Enter alone to keep the old name; 'd' deletes it; "
+        f"'x' stops renaming."
     )
     try:
-        for filepath in files:
+        for i, filepath in enumerate(files):
             prefill = date_prefix_in(filepath.name)
             while True:
                 answer = _input_with_prefill(
-                    f"name: {filepath.name} new name (d for delete): ",
+                    f"name: {filepath.name} "
+                    f"new name (d for delete, x for stop): ",
                     prefill,
                     input_fn,
                 )
-                if answer.strip().lower() == "d":
+                stripped = answer.strip()
+                if stripped.lower() == "x" or (
+                    prefill and stripped.lower() == (prefill + "x").lower()
+                ):
+                    # 'x' stops the whole walk — also when typed right
+                    # after the readline prefill.
+                    print_fn(
+                        f"Stopped — {len(files) - i} held file(s) left."
+                    )
+                    return stats
+                if stripped.lower() == "d":
                     try:
                         filepath.unlink()
                     except OSError as e:
@@ -1203,7 +1219,7 @@ def rename_held_interactive(
                     print_fn(f"  deleted {filepath.name}")
                     stats["deleted"] += 1
                     break
-                if not answer.strip() or answer.strip() == prefill.strip():
+                if not stripped or stripped == prefill.strip():
                     print_fn(f"  kept {filepath.name}")
                     stats["kept"] += 1
                     break
@@ -1936,7 +1952,8 @@ def main(argv=None):
     )
     parser.add_argument(
         "--rename-held", dest="rename_held", action="store_true",
-        help="Interactively rename held app-generated files, one by one",
+        help="Interactively rename held app-generated files, one by one "
+             "(Enter keeps, d deletes, x stops)",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true",

@@ -76,7 +76,7 @@ which commands to use.
 ./organize stats        # sync database statistics
 ./organize find-cloud-drives  # locate your cloud drive folders
 ./organize make-config  # create phone_sync_config.yaml
-./organize rename       # rename held files, one by one (d to delete)
+./organize rename       # rename held files, one by one (d deletes, x stops)
 ```
 
 The old names `src/manage_organizer.sh` and `src/manage_phone.sh` still work
@@ -308,7 +308,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `scan` (alias `auto`) | Single production scan |
 | `find-cloud-drives` | Locate your cloud drive folders (Proton Drive, Google Drive, Dropbox, …) |
 | `make-config` | Create phone_sync_config.yaml from the template |
-| `rename` | Rename held app-generated files one by one (`name: X new name (d for delete): ` — Enter keeps, `d` deletes; a date in the name is prefilled as `YYYYMMDD-`) |
+| `rename` | Rename held app-generated files one by one (`name: X new name (d for delete, x for stop): ` — Enter keeps, `d` deletes, `x` stops the walk; a date in the name is prefilled as `YYYYMMDD-`) |
 | `setup` | First-time setup wizard |
 | `version` | Print the version number |
 

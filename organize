@@ -108,7 +108,7 @@ PHONE_COMMANDS = {
     "stats": ["--stats"],
     "find-cloud-drives": ["--find-cloud-drives"],
     "make-config": ["--make-config"],
-    "rename": ["--rename-held"],             # rename held files, one by one
+    "rename": ["--rename-held"],             # rename held files (d deletes, x stops)
 }
 
 # Subcommands that exist only on the phone. On a computer, `organize
@@ -635,7 +635,7 @@ def usage(platform):
             "  ./organize auto    ★ production scan — just works",
             "  ./organize test    dry-run scan     ./organize scan    production scan",
             "  ./organize start   run in the background    ./organize stop",
-            "  ./organize rename  rename held files, one by one",
+            "  ./organize rename  rename held files, one by one (d deletes, x stops)",
         ]
     else:
         lines += [
@@ -652,7 +652,7 @@ def usage(platform):
             "  ./organize stats         sync database statistics",
             "  ./organize find-cloud-drives  locate your cloud drive folders",
             "  ./organize make-config   create phone_sync_config.yaml",
-            "  ./organize rename        rename held files, one by one",
+            "  ./organize rename        rename held files, one by one (d deletes, x stops)",
             "  ./organize setup         first-time setup wizard",
             "",
             "Flags (phone): scan-once, dry-run, background, find-cloud-drives,",

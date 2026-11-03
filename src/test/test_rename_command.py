@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from file_organizer import phone_sync  # noqa: E402
@@ -153,7 +154,7 @@ class RenameInteractiveTests(unittest.TestCase):
         self.assertEqual(
             prompts[0],
             "name: BBl-Screenshot-1700019577590.jpeg "
-            "new name (d for delete): ",
+            "new name (d for delete, x for stop): ",
         )
         self.assertEqual(len(prompts), 4)
 
@@ -181,6 +182,80 @@ class RenameInteractiveTests(unittest.TestCase):
         self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 1})
         self.assertFalse((self.src / "Snapchat-12345.png").exists())
 
+    def test_x_stops_renaming(self):
+        # 'x' ends the whole walk: no more prompts, files left untouched.
+        (self.src / "Snapchat-12345.png").write_text("x")
+        (self.src / "BBl-Screenshot-1700019577590.jpeg").write_text("x")
+        sync = self._sync()
+        prompts = []
+        messages = []
+        stats = rename_held_interactive(
+            sync,
+            input_fn=lambda prompt: (
+                prompts.append(prompt) or "x"
+            ),
+            print_fn=messages.append,
+        )
+        self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 0})
+        self.assertTrue((self.src / "Snapchat-12345.png").exists())
+        self.assertTrue(
+            (self.src / "BBl-Screenshot-1700019577590.jpeg").exists()
+        )
+        # Only the first file was prompted — the walk stopped right away.
+        self.assertEqual(len(prompts), 1)
+        self.assertTrue(any("Stopped" in m for m in messages))
+
+    def test_uppercase_X_stops_renaming(self):
+        (self.src / "Snapchat-12345.png").write_text("x")
+        sync = self._sync()
+        messages = []
+        stats = rename_held_interactive(
+            sync,
+            input_fn=lambda prompt: "X",
+            print_fn=messages.append,
+        )
+        self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 0})
+        self.assertTrue((self.src / "Snapchat-12345.png").exists())
+        self.assertTrue(any("Stopped" in m for m in messages))
+
+    def test_x_with_date_prefill_stops_not_renames(self):
+        # Typing 'x' at the prefilled prompt must stop, not rename the
+        # file to '20260905-x.txt'.
+        (self.src / "Screenshot-2026-09-05-999.txt").write_text("x")
+        sync = self._sync()
+        messages = []
+        stats = rename_held_interactive(
+            sync,
+            input_fn=lambda prompt: "x",
+            print_fn=messages.append,
+        )
+        self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 0})
+        self.assertTrue(
+            (self.src / "Screenshot-2026-09-05-999.txt").exists()
+        )
+        self.assertFalse((self.src / "20260905-x.txt").exists())
+        self.assertTrue(any("Stopped" in m for m in messages))
+
+    def test_x_after_readline_prefill_stops(self):
+        # With readline the prefill is real text on the line, so 'x'
+        # typed at the end arrives as '20260905-x' — still a stop.
+        # (The printed-prefill fallback would have pre-returned 'x', so
+        # simulate the readline path by stubbing the helper's answer.)
+        (self.src / "Screenshot-2026-09-05-999.txt").write_text("x")
+        sync = self._sync()
+        with mock.patch.object(
+            phone_sync, "_input_with_prefill", return_value="20260905-x"
+        ):
+            stats = rename_held_interactive(
+                sync,
+                input_fn=lambda prompt: "",
+                print_fn=lambda msg: None,
+            )
+        self.assertEqual(stats, {"renamed": 0, "kept": 0, "deleted": 0})
+        self.assertTrue(
+            (self.src / "Screenshot-2026-09-05-999.txt").exists()
+        )
+
     def test_date_prefill_prompt_and_rename(self):
         # A YYYY-MM-DD date in the name prefills the normalised date.
         (self.src / "Screenshot-2026-09-05-999.txt").write_text("x")
@@ -196,7 +271,7 @@ class RenameInteractiveTests(unittest.TestCase):
         self.assertEqual(
             prompts[0],
             "name: Screenshot-2026-09-05-999.txt "
-            "new name (d for delete): 20260905-",
+            "new name (d for delete, x for stop): 20260905-",
         )
         self.assertEqual(stats, {"renamed": 1, "kept": 0, "deleted": 0})
         self.assertTrue((self.src / "20260905-party.txt").exists())
@@ -215,7 +290,7 @@ class RenameInteractiveTests(unittest.TestCase):
             ),
             print_fn=lambda msg: None,
         )
-        self.assertTrue(prompts[0].endswith("new name (d for delete): 20260905-"))
+        self.assertTrue(prompts[0].endswith("new name (d for delete, x for stop): 20260905-"))
         self.assertTrue((self.src / "20260905-party.jpg").exists())
 
     def test_date_prefill_enter_alone_keeps(self):
