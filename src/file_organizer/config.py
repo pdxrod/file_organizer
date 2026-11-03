@@ -418,17 +418,27 @@ class Config:
         in the template. Template placeholders get one friendly,
         consolidated warning instead of a wall of per-path jargon.
         """
-        def _is_placeholder(path: str) -> bool:
-            return any(m in path.lower() for m in TEMPLATE_PLACEHOLDER_MARKERS)
+        def _marker_in(path: str):
+            """The placeholder marker as spelled in `path`, or None."""
+            low = path.lower()
+            for marker in TEMPLATE_PLACEHOLDER_MARKERS:
+                pos = low.find(marker)
+                if pos >= 0:
+                    return path[pos:pos + len(marker)]
+            return None
 
         placeholder_hits = []
+        placeholder_markers = []
         missing_hits = []
 
         def _check(path: str, what: str) -> None:
             if not path or os.path.exists(os.path.expanduser(path)):
                 return
-            if _is_placeholder(path):
+            marker = _marker_in(path)
+            if marker:
                 placeholder_hits.append(f"{what}: {path}")
+                if marker not in placeholder_markers:
+                    placeholder_markers.append(marker)
             else:
                 missing_hits.append(f"{what}: {path}")
 
@@ -455,10 +465,11 @@ class Config:
             if len(placeholder_hits) > 8:
                 print(f"      … and {len(placeholder_hits) - 8} more",
                       file=sys.stderr)
+            markers = "', '".join(placeholder_markers)
             print(
                 "    Set your real folders with './organize setup', or "
-                "edit config.yaml and replace 'janedoe' / "
-                "'YourExternalDrive' with your own paths.",
+                f"edit config.yaml and replace '{markers}' with your "
+                "own paths.",
                 file=sys.stderr,
             )
         for hit in missing_hits:
@@ -651,16 +662,36 @@ def report_first_run(config_path: str) -> None:
             print(f"  ? {key}: {path} — not available right now "
                   f"(drive not plugged in?); it will be skipped",
                   file=sys.stderr)
+
+    def _strings(obj):
+        if isinstance(obj, dict):
+            for v in obj.values():
+                yield from _strings(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                yield from _strings(v)
+        elif isinstance(obj, str):
+            yield obj
+
+    text = "\n".join(_strings(cfg)).lower()
+    found = [m for m in TEMPLATE_PLACEHOLDER_MARKERS if m in text]
+    if found:
+        step2 = (
+            "  2. Replace the starter paths (anything with '"
+            + "', '".join(found)
+            + "') with YOUR real paths.\n"
+        )
+    else:
+        step2 = "  2. Replace any starter example paths with YOUR real paths.\n"
     print(
         "\nTo finish setup:\n"
         f"  1. Open {config_path} with TextEdit (Mac), Notepad (Windows) "
         f"or nano (Termux).\n"
-        "  2. Replace the starter paths (anything with 'janedoe' or\n"
-        "     'YourExternalDrive') with YOUR real paths.\n"
-        "  3. Use SPACES for indentation — YAML does not allow TABs.\n"
-        "  4. Run again: ./organize test\n"
-        "\nEverything is OFF until you enable it — nothing moves or "
-        "syncs yet.\n",
+        + step2
+        + "  3. Use SPACES for indentation — YAML does not allow TABs.\n"
+        + "  4. Run again: ./organize test\n"
+        + "\nEverything is OFF until you enable it — nothing moves or "
+        + "syncs yet.\n",
         file=sys.stderr,
     )
 

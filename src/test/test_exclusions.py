@@ -201,6 +201,42 @@ class TemplatePlaceholderTests(unittest.TestCase):
             )
         self.assertIn("skipped", buf.getvalue())
 
+    def test_placeholder_advice_names_only_found_markers(self):
+        # Regression (user report): the advice line used to hardcode
+        # "replace 'janedoe' / 'YourExternalDrive'" even when the config
+        # contained only one of them. It must name only what was found,
+        # spelled the way the config spells it.
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            self._load(
+                "output_base: /tmp/never-created\n"
+                "sync_pairs:\n"
+                "  - folders:\n"
+                "      - \"/Volumes/YourExternalDrive/pol\"\n"
+                "      - \"/Volumes/YourExternalDrive/dev\"\n"
+            )
+        out = buf.getvalue()
+        self.assertNotIn("janedoe", out)
+        self.assertIn("replace 'YourExternalDrive'", out)
+
+    def test_placeholder_advice_lists_all_found_markers(self):
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            self._load(
+                "output_base: /tmp/never-created\n"
+                "sync_pairs:\n"
+                "  - folders:\n"
+                "      - \"/Users/janedoe/Pictures\"\n"
+                "      - \"/Volumes/YourExternalDrive/Music\"\n"
+            )
+        self.assertIn(
+            "replace 'janedoe', 'YourExternalDrive'", buf.getvalue()
+        )
+
     def test_real_missing_drive_warns_and_continues(self):
         # A genuinely missing drive (unmounted volume) also warns and the
         # program keeps running — the drive is skipped until it is plugged
