@@ -175,6 +175,20 @@ class SubcommandMappingTests(unittest.TestCase):
         self.assertIsNone(handled)
         self.assertIn("--rename-held", organize.PHONE_PASSTHROUGH)
 
+    def test_computer_rename_is_explained_not_passed_through(self):
+        # Regression: `organize rename` on a computer used to reach the
+        # computer CLI and die with 'unrecognized arguments: rename'.
+        for spelling in ("rename", "RENAME", "--Rename"):
+            mapped, handled = organize.map_command("computer", [spelling])
+            self.assertEqual(handled, "phone-only-rename", spelling)
+            self.assertEqual(mapped, [], spelling)
+
+    def test_computer_scan_once_is_not_flagged_phone_only(self):
+        # scan-once is a valid computer flag too — must still pass through.
+        mapped, handled = organize.map_command("computer", ["scan-once"])
+        self.assertEqual(mapped, ["--scan-once"])
+        self.assertIsNone(handled)
+
     def test_unknown_flags_pass_through(self):
         mapped, handled = organize.map_command(
             "computer", ["--REAL", "--scan-once"]
@@ -306,6 +320,20 @@ class MainEntryTests(unittest.TestCase):
             self.assertEqual(
                 buf.getvalue().strip(), f"organize {__version__}", spelling
             )
+
+    def test_rename_on_computer_prints_phone_only_message(self):
+        """`organize rename` on a computer must explain itself instead of
+        leaking the computer CLI's argparse error."""
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            code = organize.main(["--computer", "rename"])
+        self.assertEqual(code, 1)
+        text = buf.getvalue()
+        self.assertIn("only works on the phone", text)
+        self.assertIn("./organize route", text)
+        self.assertNotIn("unrecognized arguments", text)
 
     def test_usage_mentions_version_command(self):
         for platform in ("computer", "phone"):

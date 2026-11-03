@@ -111,6 +111,12 @@ PHONE_COMMANDS = {
     "rename": ["--rename-held"],             # rename held files, one by one
 }
 
+# Subcommands that exist only on the phone. On a computer, `organize
+# rename` must explain itself instead of leaking the computer CLI's
+# 'unrecognized arguments: rename' error. (`scan-once` is deliberately
+# NOT here — it is also a valid computer flag.)
+PHONE_ONLY_COMMANDS = ("rename",)
+
 # Phone flags that pass straight through to phone_sync.
 PHONE_PASSTHROUGH = (
     "--scan-once", "--dry-run", "--background", "--daemon",
@@ -163,6 +169,12 @@ def map_command(platform, argv):
     if key in lifecycle[platform]:
         mapped_rest = [normalize_flag(a, passthrough) for a in rest]
         return [key] + mapped_rest, key
+    if platform == "computer" and key.lstrip("-").lower() in PHONE_ONLY_COMMANDS:
+        # A phone-only subcommand on a computer (e.g. `rename`) must be
+        # explained in main(), never passed to the computer CLI. Compare
+        # case/dash-insensitively — unknown tokens keep their original
+        # spelling here.
+        return rest, f"phone-only-{key.lstrip('-').lower()}"
     # Plain passthrough: normalize every known flag in argv.
     return [normalize_flag(a, passthrough) for a in argv], None
 
@@ -677,6 +689,29 @@ def usage(platform):
     return "\n".join(lines)
 
 
+def phone_only_message(command: str) -> str:
+    """What to print when a phone-only command is run on a computer."""
+    if command == "rename":
+        return (
+            f"\n'{command}' only works on the phone (Android/Termux) — it\n"
+            "renames held (app-generated) files one by one there, so it is\n"
+            "not a computer command.\n"
+            "\n"
+            "On this computer, to organize or rename files use:\n"
+            "  ./organize route             plan where files go (by name + content)\n"
+            "  ./organize route-real        actually move them into place\n"
+            "  ./organize collapse-renames  plan 'foo (1).png' family collapse\n"
+            "\n"
+            "To rename the phone's held files, run './organize rename' on the\n"
+            "phone itself (or './organize --phone rename' to run the phone\n"
+            "program on this computer).\n"
+        )
+    return (
+        f"\n'{command}' is a phone-only command — it does not exist on\n"
+        "this computer. Run './organize' for this device's commands.\n"
+    )
+
+
 # ── main ───────────────────────────────────────────────────────────────────
 
 def main(argv=None):
@@ -699,6 +734,11 @@ def main(argv=None):
 
     mapped, handled = map_command(platform, argv)
     log = lambda msg: print(msg, flush=True)
+
+    # Phone-only subcommand used on this computer: explain it and stop.
+    if handled and handled.startswith("phone-only-"):
+        sys.stderr.write(phone_only_message(handled[len("phone-only-"):]))
+        return 1
 
     # ── lifecycle commands handled by organize itself ──
     if handled == "start":
