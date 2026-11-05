@@ -212,6 +212,15 @@ def run_full_cycle(config: Config, dry_run: bool = False):
         logger.info("Auto-git: %s", git_summary)
         actions["git_initialized"] += git_summary.get("initialized", 0)
 
+    # 7b. Wait for the folder sync to finish before anything below deletes
+    # files (dedup / collapse / copy-tidy). A background rsync still in
+    # flight would re-copy a file the dedupe just deleted from the other
+    # side of a pair, so copies came back every cycle (e.g. ~/misc ↔
+    # Proton/misc restoring foo_1.mp3 after the tidy deleted it). The sync
+    # still runs concurrently with the fast scan/organize work above.
+    if sync_thread is not None:
+        sync_thread.join()
+
     # 8. Dedup
     if config.raw_config.get("enable_duplicate_detection", False):
         logger.info("Running deduplication...")
@@ -232,8 +241,8 @@ def run_full_cycle(config: Config, dry_run: bool = False):
 
     # 9. Copy-name tidy-up: repair trailing ' (N)' counters
     # ('foo.m4a (1)' → 'foo_1.m4a', counter preserved, different files
-    # kept) and delete foo_1 / foo (1) / foo-1 / foo (1) (1) copies when
-    # a plain-named file with IDENTICAL content exists. Runs in every
+    # kept) and delete foo_1 / foo (1) / foo-1 / foo 1 / foo (1) (1) copies
+    # when a plain-named file with IDENTICAL content exists. Runs in every
     # auto cycle (previews in dry-run); identical bytes are the only
     # thing ever deleted, so nothing real is lost.
     if config.raw_config.get("dedupe_download_copies", True):
@@ -307,8 +316,8 @@ def _run_collapse(config: Config, dry_run: bool = True) -> dict:
 
 def _run_download_copy_dedupe(config: Config, dry_run: bool = True) -> dict:
     """Delete redundant download copies (foo_1, foo (1), foo-1,
-    foo (1) (1)) across the configured folders when a plain-named file
-    with identical content exists, and repair trailing ' (N)' counters
+    foo 1, foo (1) (1)) across the configured folders when a plain-named
+    file with identical content exists, and repair trailing ' (N)' counters
     ('foo.m4a (1)' → 'foo_1.m4a', different files kept). Returns stats
     {"renamed", "deleted"}."""
     from file_organizer.rename_family import (
@@ -331,7 +340,15 @@ def _run_download_copy_dedupe(config: Config, dry_run: bool = True) -> dict:
 def _dedupe_folders(config: Config):
     """Folders to scan for redundant download copies: organize_folders AND
     source_folders — copies pile up in both (e.g. MAIN_DRIVE/misc and
-    MAIN_DRIVE/pol are sources, not organize targets)."""
+    MAIN_DRIVE/pol are sources, not organize targets).
+
+    Sync-pair peers are included too, or the next sync undoes the work:
+    deleting foo_1.mp3 from ~/misc is pointless when the two-way pair
+    ~/misc ↔ Proton/misc copies it straight back from the other side.
+    For a two-way pair, cleaning one side cleans both; for a one-way
+    pair, the SOURCE is added when the TARGET is a dedupe folder
+    (otherwise the source restores the copies on the next cycle).
+    """
     folders = []
     seen = set()
     for f in (config.raw_config.get("organize_folders") or []) + \
@@ -339,6 +356,26 @@ def _dedupe_folders(config: Config):
         if f not in seen:
             seen.add(f)
             folders.append(f)
+    # Fixpoint: a peer added by one pair may be the target of another
+    # pair (chains), so keep expanding until nothing new appears.
+    changed = True
+    while changed:
+        changed = False
+        for pair in config.raw_config.get("sync_pairs") or []:
+            sides = pair.get("folders") or []
+            if len(sides) == 2 and (
+                    sides[0] in seen or sides[1] in seen):
+                for side in sides:
+                    if side not in seen:
+                        seen.add(side)
+                        folders.append(side)
+                        changed = True
+        for pair in config.raw_config.get("one_way_pairs") or []:
+            sides = pair.get("folders") or []
+            if len(sides) == 2 and sides[1] in seen and sides[0] not in seen:
+                seen.add(sides[0])
+                folders.append(sides[0])
+                changed = True
     return folders
 
 def normalize_flag_token(token, option_strings):

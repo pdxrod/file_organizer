@@ -15,7 +15,8 @@ Three rules live here:
    falls forward to the next free number. Identical copies are deleted
    instead. No `(1)` suffix is ever created or kept.
 
-3. **Download-copy dedupe** — `foo_1.png`, `foo (1).png`, `foo-1.pdf` and
+3. **Download-copy dedupe** — `foo_1.png`, `foo (1).png`, `foo-1.pdf`,
+   `foo 1.ext` (space + number, made by desktop duplicate copies) and
    chained counters like `foo-1_1.pdf` are deleted when a plain-named
    file with IDENTICAL content exists (`plan_download_copies`). The base
    is never touched, and any content doubt keeps the copy.
@@ -58,12 +59,14 @@ _UNDERSCORE_N_RE = re.compile(r"^(?P<base>.+?)_(?P<n>\d+)(?P<ext>\.[^.]+)?$")
 # Download-counter suffixes, stripped repeatedly to find the plain base:
 #   foo (1) (1).jpg → foo (1) → foo
 #   welch_..._rev_12-1_1.pdf → welch_..._rev_12-1 → welch_..._rev_12
-# The (N) group is limited to 1-3 digits so year-style names like
-# "report (2026).txt" are never treated as download counters.
+# The (N) and space-N groups are limited to 1-3 digits so year-style
+# names like "report (2026).txt" or "report 2026.txt" are never treated
+# as download counters.
 _DOWNLOAD_SUFFIX_RES = (
     re.compile(r"^(?P<base>.+?) \((?P<n>\d{1,3})\)$"),  # foo (1)
     re.compile(r"^(?P<base>.+?)_(?P<n>\d+)$"),            # foo_1
     re.compile(r"^(?P<base>.+?)-(?P<n>\d+)$"),            # foo-1
+    re.compile(r"^(?P<base>.+?) (?P<n>\d{1,3})$"),        # foo 1
 )
 
 # A trailing copy counter AFTER the extension: "foo.m4a (1)", "foo.pdf (2)",
@@ -462,7 +465,7 @@ def _strip_download_suffixes(stem: str) -> list:
 
 def plan_download_copies(directory, min_age_seconds: int = 0) -> List[CollapseAction]:
     """Plan the deletion of download-counter copies: foo_1.png, foo (1).png,
-    foo-1.pdf, foo (1) (1).jpg — including chained counters like
+    foo-1.pdf, foo 1.ext, foo (1) (1).jpg — including chained counters like
     foo-1_1.pdf — when a plain-named file with IDENTICAL content exists
     in the same directory.
 

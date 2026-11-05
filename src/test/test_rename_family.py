@@ -252,6 +252,45 @@ class DownloadCopyTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
                          ["welch_labs_guide_to_ai_rev_12.pdf"])
 
+    def test_space_number_copies_deleted_when_base_identical(self):
+        # Desktop "Duplicate" copies use a space: foo 1.pdf, foo 2.pdf.
+        base = self._write("foo.pdf", "same")
+        copies = [
+            self._write("foo 1.pdf", "same"),
+            self._write("foo 2.pdf", "same"),
+        ]
+        actions = plan_download_copies(self.dir)
+        deleted = {a.path.name for a in actions}
+        self.assertEqual(deleted, {"foo 1.pdf", "foo 2.pdf"})
+        apply_collapse(actions, dry_run=False)
+        self.assertTrue(base.exists())
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
+                         ["foo.pdf"])
+
+    def test_space_number_chained_counter_resolves_to_base(self):
+        # foo 1_1.pdf → foo 1 → foo
+        base = self._write("foo.pdf", "x")
+        copy = self._write("foo 1_1.pdf", "x")
+        actions = plan_download_copies(self.dir)
+        self.assertEqual({a.path.name for a in actions}, {"foo 1_1.pdf"})
+        apply_collapse(actions, dry_run=False)
+        self.assertTrue(base.exists())
+
+    def test_space_number_different_content_is_kept(self):
+        self._write("foo.pdf", "original")
+        copy = self._write("foo 1.pdf", "different")
+        actions = plan_download_copies(self.dir)
+        self.assertEqual(actions, [])
+        self.assertTrue(copy.exists())
+
+    def test_space_number_year_is_not_a_counter(self):
+        # 4-digit years after a space are never download counters.
+        self._write("report.txt", "x")
+        year = self._write("report 2026.txt", "x")
+        actions = plan_download_copies(self.dir)
+        self.assertEqual(actions, [])
+        self.assertTrue(year.exists())
+
     def test_missing_base_keeps_copies(self):
         self._write("foo_1.pdf", "x")
         self._write("foo (1).pdf", "x")
