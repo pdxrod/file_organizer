@@ -537,39 +537,7 @@ class Config:
         """Create a starter config.yaml from the template with most features
         turned off for safety.  Returns the path to the created file."""
         template_path = str(find_project_root() / "config_template.yaml")
-
-        if not os.path.exists(template_path):
-            raise ConfigError(
-                f"Template not found at {template_path}. "
-                "Please reinstall file_organizer."
-            )
-
-        with open(template_path, "r") as f:
-            template = yaml.safe_load(f) or {}
-
-        # The merged template has computer:/phone: sections — the computer
-        # program uses only the computer: part (item 5). Legacy flat
-        # templates are accepted as-is.
-        if isinstance(template, dict) and isinstance(template.get("computer"), dict):
-            starter = template["computer"]
-        else:
-            starter = template
-
-        # ── turn off almost everything for a safe starter config ──
-        starter["enable_content_analysis"] = False
-        starter["enable_folder_sync"] = False
-        starter["enable_duplicate_detection"] = False
-        starter["enable_semantic_categories"] = False
-        starter["auto_git"] = False
-        if "ml_content_analysis" in starter:
-            starter["ml_content_analysis"]["enabled"] = False
-        # The router MOVES files, so starter configs always start with it
-        # off. The user turns it on (router.enabled: true) after reading
-        # the router: section comments.
-        if isinstance(starter.get("router"), dict):
-            starter["router"]["enabled"] = False
-        else:
-            starter["router"] = {"enabled": False}
+        starter = starter_data(template_path)
 
         with open(target_path, "w") as f:
             yaml.safe_dump(starter, f, default_flow_style=False, sort_keys=False)
@@ -582,7 +550,9 @@ class Config:
             f"  Most features are OFF by default for safety.\n"
             f"\n"
             f"  To get started:\n"
-            f"    1. Edit {target_path}\n"
+            f"    1. Run './organize config' — a guided editor that sets\n"
+            f"       each section with you, no text editor needed.\n"
+            f"       (Or edit {target_path} by hand — spaces, never tabs.)\n"
             f"    2. Set your drive paths under 'drives:'\n"
             f"    3. Configure 'source_folders' to point at folders you\n"
             f"       want to scan\n"
@@ -599,6 +569,46 @@ class Config:
         )
 
         return str(target_path)
+
+
+def starter_data(template_path: str) -> Dict[str, Any]:
+    """The computer: section of the template with almost everything turned
+    OFF for safety. Shared by create_starter and the interactive
+    './organize config' editor so both start from the same safe base."""
+    if not os.path.exists(template_path):
+        raise ConfigError(
+            f"Template not found at {template_path}. "
+            "Please reinstall file_organizer."
+        )
+
+    with open(template_path, "r") as f:
+        template = yaml.safe_load(f) or {}
+
+    # The merged template has computer:/phone: sections — the computer
+    # program uses only the computer: part (item 5). Legacy flat
+    # templates are accepted as-is.
+    if isinstance(template, dict) and isinstance(template.get("computer"), dict):
+        starter = template["computer"]
+    else:
+        starter = template
+
+    # ── turn off almost everything for a safe starter config ──
+    starter["enable_content_analysis"] = False
+    starter["enable_folder_sync"] = False
+    starter["enable_duplicate_detection"] = False
+    starter["enable_semantic_categories"] = False
+    starter["auto_git"] = False
+    if "ml_content_analysis" in starter:
+        starter["ml_content_analysis"]["enabled"] = False
+    # The router MOVES files, so starter configs always start with it
+    # off. The user turns it on (router.enabled: true) after reading
+    # the router: section comments.
+    if isinstance(starter.get("router"), dict):
+        starter["router"]["enabled"] = False
+    else:
+        starter["router"] = {"enabled": False}
+
+    return starter
 
 
 def _union_list(base: List[str], extra: List[str]) -> List[str]:
@@ -685,8 +695,10 @@ def report_first_run(config_path: str) -> None:
         step2 = "  2. Replace any starter example paths with YOUR real paths.\n"
     print(
         "\nTo finish setup:\n"
-        f"  1. Open {config_path} with TextEdit (Mac), Notepad (Windows) "
-        f"or nano (Termux).\n"
+        "  1. Run './organize config' — a guided editor that sets each\n"
+        "     section with you, no text editor needed.\n"
+        f"     (Or open {config_path} with TextEdit (Mac), Notepad (Windows)\n"
+        "     or nano (Termux).)\n"
         + step2
         + "  3. Use SPACES for indentation — YAML does not allow TABs.\n"
         + "  4. Run again: ./organize test\n"

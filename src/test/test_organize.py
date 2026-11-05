@@ -9,6 +9,7 @@ import importlib.util
 from importlib.machinery import SourceFileLoader
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -291,6 +292,12 @@ class MainEntryTests(unittest.TestCase):
         """`organize help` and `organize` print the same instructions."""
         import io
         from contextlib import redirect_stdout
+        # Bare `organize` on a computer auto-opens the config editor when
+        # config.yaml is missing/invalid (config.yaml is not tracked in
+        # git), so pin the phone platform for this comparison — both
+        # calls then print the same usage text without touching a config.
+        os.environ["ORGANIZE_PLATFORM"] = "phone"
+        self.addCleanup(os.environ.pop, "ORGANIZE_PLATFORM", None)
         buf1, buf2 = io.StringIO(), io.StringIO()
         with redirect_stdout(buf1):
             organize.main([])
@@ -340,6 +347,98 @@ class MainEntryTests(unittest.TestCase):
             self.assertIn(
                 "./organize version", organize.usage(platform)
             )
+
+
+class ConfigSubcommandTests(unittest.TestCase):
+    """`organize config` — the guided editor subcommand (item: config flag)."""
+
+    def test_computer_config_is_handled_by_organize(self):
+        for spelling in ("config", "Config", "CONFIG"):
+            mapped, handled = organize.map_command("computer", [spelling])
+            self.assertEqual(handled, "config", spelling)
+            self.assertEqual(mapped, [spelling], spelling)
+
+    def test_dashed_config_flag_still_passes_through(self):
+        # `--config FILE` keeps its old meaning: a config path for the CLI.
+        mapped, handled = organize.map_command(
+            "computer", ["--config", "MyConfig.YAML"]
+        )
+        self.assertIsNone(handled)
+        self.assertEqual(mapped, ["--config", "MyConfig.YAML"])
+        # The dashed form alone is a CLI error, not the editor.
+        mapped, handled = organize.map_command("computer", ["--config"])
+        self.assertIsNone(handled)
+
+    def test_phone_config_is_explained_not_passed_through(self):
+        mapped, handled = organize.map_command("phone", ["config"])
+        self.assertEqual(handled, "computer-only-config")
+        self.assertEqual(mapped, [])
+        # ...while the dashed flag still passes through on the phone.
+        mapped, handled = organize.map_command("phone", ["--config", "p.yaml"])
+        self.assertIsNone(handled)
+        self.assertEqual(mapped, ["--config", "p.yaml"])
+
+    def test_computer_only_message_points_at_phone_setup(self):
+        text = organize.computer_only_message("config")
+        self.assertIn("make-config", text)
+        self.assertIn("phone_sync_config.yaml", text)
+
+    def test_computer_usage_mentions_config_command(self):
+        text = organize.usage("computer")
+        self.assertIn("./organize config", text)
+        self.assertIn("guided", text)
+        # The phone usage points at the computer's config editor too,
+        # but never lists it as a phone command.
+        phone_text = organize.usage("phone")
+        self.assertIn("./organize config", phone_text)
+        self.assertNotIn("./organize config        ", phone_text)
+
+
+class BareRunActionTests(unittest.TestCase):
+    """Plain `./organize` auto-opens the editor when config.yaml is
+    missing or invalid (the user's rule)."""
+
+    def _tmp_config(self, text=None):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "config.yaml"
+        if text is not None:
+            path.write_text(text)
+        return path
+
+    def test_phone_always_prints_usage(self):
+        self.assertEqual(
+            organize.bare_run_action("phone", config_path="/no/such/file"),
+            "usage",
+        )
+
+    def test_missing_config_opens_editor(self):
+        path = self._tmp_config()
+        self.assertEqual(
+            organize.bare_run_action("computer", config_path=str(path)),
+            "config",
+        )
+
+    def test_valid_config_prints_usage(self):
+        path = self._tmp_config("output_base: organized\n")
+        self.assertEqual(
+            organize.bare_run_action("computer", config_path=str(path)),
+            "usage",
+        )
+
+    def test_invalid_config_opens_editor(self):
+        path = self._tmp_config("drives:\n\tMAIN_DRIVE: /tmp\n")
+        self.assertEqual(
+            organize.bare_run_action("computer", config_path=str(path)),
+            "config",
+        )
+
+    def test_yaml_syntax_error_opens_editor(self):
+        path = self._tmp_config("drives: [unclosed\n")
+        self.assertEqual(
+            organize.bare_run_action("computer", config_path=str(path)),
+            "config",
+        )
 
 
 if __name__ == "__main__":

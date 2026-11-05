@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CLI entry point for file_organizer."""
 
-import os, sys, argparse, logging, signal, subprocess, time
+import os, sys, argparse, logging, signal, subprocess, time, yaml
 from pathlib import Path
 
 from file_organizer.config import Config, ConfigError, report_first_run, resolve_log_path, find_project_root, ensure_output_dir
@@ -461,11 +461,16 @@ def main(argv=None):
 
     try:
         config = Config(config_path)
-    except ConfigError as e:
+    except (ConfigError, yaml.YAMLError) as e:
+        # YAML syntax errors used to crash with a traceback (only
+        # ConfigError was caught) — both cases now point at the guided
+        # editor that fixes the file for the user.
         print(
             f"\nERROR: {e}\n"
-            "\nOpen your config file in TextEdit (Mac), Notepad (Windows) "
-            "or nano (Termux), fix the problem above, then run again.\n",
+            "\nRun './organize config' to fix it — a guided editor that\n"
+            "changes config.yaml section by section for you. (Or open the\n"
+            "file in TextEdit (Mac), Notepad (Windows) or nano (Termux),\n"
+            "fix the problem above, then run again.)\n",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -117,6 +117,11 @@ PHONE_COMMANDS = {
 # NOT here — it is also a valid computer flag.)
 PHONE_ONLY_COMMANDS = ("rename",)
 
+# Subcommands that exist only on the computer. On a phone, `organize
+# config` must explain itself instead of leaking the phone CLI's
+# 'unrecognized arguments' error.
+COMPUTER_ONLY_COMMANDS = ("config",)
+
 # Phone flags that pass straight through to phone_sync.
 PHONE_PASSTHROUGH = (
     "--scan-once", "--dry-run", "--background", "--daemon",
@@ -175,6 +180,18 @@ def map_command(platform, argv):
         # case/dash-insensitively — unknown tokens keep their original
         # spelling here.
         return rest, f"phone-only-{key.lstrip('-').lower()}"
+    if (platform == "computer" and not head.startswith("-")
+            and key.lstrip("-").lower() == "config"):
+        # `organize config` — the guided section-by-section editor that
+        # organize itself implements. The DASHED form `--config FILE`
+        # keeps its old meaning (pass a config path through to the CLI).
+        mapped_rest = [normalize_flag(a, passthrough) for a in rest]
+        return [key] + mapped_rest, "config"
+    if (platform == "phone" and not head.startswith("-")
+            and key.lstrip("-").lower() in COMPUTER_ONLY_COMMANDS):
+        # A computer-only subcommand on a phone (e.g. `config`) must be
+        # explained in main(), never passed to the phone CLI.
+        return rest, f"computer-only-{key.lstrip('-').lower()}"
     # Plain passthrough: normalize every known flag in argv.
     return [normalize_flag(a, passthrough) for a in argv], None
 
@@ -213,6 +230,32 @@ def run_phone_cli(args):
     if not any(a == "--config" for a in argv):
         argv += ["--config", phone_config_path()]
     phone_sync.main(argv)
+
+
+def computer_config_edit():
+    """Run the guided section-by-section config.yaml editor.
+
+    Returns its exit code: 0 when a config was saved, 1 when the user
+    cancelled or the result failed validation.
+    """
+    _insert_src_path()
+    from file_organizer.config_editor import run_editor
+    return run_editor(
+        str(computer_config_path()),
+        template_path=str(HERE / "config_template.yaml"),
+    )
+
+
+def bare_run_action(platform, config_path=None):
+    """What plain `./organize` (no subcommand) should do: print the usage
+    text — or, on a computer whose config.yaml is missing or invalid,
+    open the guided config editor automatically."""
+    if platform != "computer":
+        return "usage"
+    _insert_src_path()
+    from file_organizer.config_editor import needs_editor
+    target = config_path or str(computer_config_path())
+    return "config" if needs_editor(target) else "usage"
 
 
 def computer_pid_log():
@@ -317,13 +360,20 @@ def _windows_kill(pid, log):
 
 def computer_start(log):
     cfg_path = computer_config_path()
-    if not cfg_path.exists():
-        # cli creates the starter config and prints the will-it-work report.
-        run_computer_cli(["--scan-once"])
+    _insert_src_path()
+    from file_organizer.config_editor import needs_editor
+    if needs_editor(str(cfg_path)):
+        # Missing or broken config: walk the user through it with the
+        # guided editor instead of starting blind (or telling them to
+        # hand-edit YAML).
         log("")
-        log("A starter config.yaml has been created.")
-        log("Please edit it before starting the background program.")
-        raise SystemExit(1)
+        log("config.yaml is missing or invalid — let's set it up first.")
+        computer_config_edit()
+        if needs_editor(str(cfg_path)):
+            log("")
+            log("config.yaml still needs work. Run './organize config',")
+            log("then './organize start' again.")
+            raise SystemExit(1)
 
     pid_file, log_file = computer_pid_log()
     proc = subprocess.Popen(
@@ -445,8 +495,11 @@ def tail_log(path, log):
 
 def computer_setup(log):
     cfg_path = computer_config_path()
-    if not cfg_path.exists():
-        run_computer_cli(["--scan-once"])  # creates starter + report
+    _insert_src_path()
+    from file_organizer.config_editor import needs_editor
+    if needs_editor(str(cfg_path)):
+        # Missing or broken config: the guided editor, not a text editor.
+        computer_config_edit()
     out_dir = computer_output_base()
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -455,9 +508,8 @@ def computer_setup(log):
     log("")
     log(f"Soft-link folder (replaces ~/organized): {out_dir}")
     log("Next steps:")
-    log(f"  1. Edit {cfg_path} (TextEdit on Mac, Notepad on Windows, nano on Termux).")
-    log("     - Set your real paths under 'drives:' and 'source_folders:'.")
-    log("     - Never use TAB characters in YAML — spaces only.")
+    log("  1. Change any setting: ./organize config (guided, section by section).")
+    log(f"     - Or edit {cfg_path} (TextEdit/Notepad/nano) — spaces, never tabs.")
     log("  2. Dry-run test:   ./organize test")
     log("  3. Production run: ./organize test-real")
     log("  4. Run in the background: ./organize start")
@@ -615,6 +667,8 @@ def usage(platform):
             "  ./organize route-undo    put the last moved files back",
             "  (sort, sort-real, sort-status, sort-undo are the same commands)",
             "  ./organize setup         first-time setup (config + report)",
+            "  ./organize config        change config.yaml section by section,",
+            "                           guided — no text editor needed",
             "  ./organize gui           desktop app      ./organize web   web UI",
             "  ./organize pull|push|list   phone sync over USB (needs adb)",
             "",
@@ -672,9 +726,11 @@ def usage(platform):
         lines += [
             "",
             "Config: this computer uses config.yaml next to organize — created",
-            "from config_template.yaml the first time you run. The phone's",
+            "from config_template.yaml the first time you run. Change it with",
+            "'./organize config' (guided, section by section); if you edit the",
+            "file by hand, use spaces, never tabs. The phone's",
             "phone_sync_config.yaml is created from the same template's 'phone:'",
-            "section on the phone. Edit them with spaces, never tabs.",
+            "section on the phone.",
             "",
         ]
     else:
@@ -682,8 +738,9 @@ def usage(platform):
             "",
             "Config: this phone uses phone_sync_config.yaml next to organize —",
             "created from the 'phone:' section of config_template.yaml the first",
-            "time you run. The computer's config.yaml is created from the same",
-            "template on the computer. Edit them with spaces, never tabs.",
+            "time you run. Edit it with spaces, never tabs. The computer's",
+            "config.yaml is created from the same template on the computer;",
+            "change it there with './organize config' (guided, no text editor).",
             "",
         ]
     return "\n".join(lines)
@@ -712,6 +769,25 @@ def phone_only_message(command: str) -> str:
     )
 
 
+def computer_only_message(command: str) -> str:
+    """What to print when a computer-only command is run on a phone."""
+    if command == "config":
+        return (
+            f"\n'{command}' edits config.yaml — the computer's settings — so\n"
+            "it only exists on a computer (macOS/Linux/Windows).\n"
+            "\n"
+            "On this phone the settings live in phone_sync_config.yaml:\n"
+            "  ./organize make-config      create it from the template\n"
+            "  nano phone_sync_config.yaml  edit it (spaces, never tabs)\n"
+            "\n"
+            "Or run './organize config' on your computer.\n"
+        )
+    return (
+        f"\n'{command}' is a computer-only command — it does not exist on\n"
+        "this phone. Run './organize' for this device's commands.\n"
+    )
+
+
 # ── main ───────────────────────────────────────────────────────────────────
 
 def main(argv=None):
@@ -719,7 +795,22 @@ def main(argv=None):
     platform = detect_platform(argv)
     _, argv = split_platform_args(argv)
 
-    if not argv or argv[0].lstrip("-").lower() in ("help", "h"):
+    if not argv:
+        # Plain `./organize` with no subcommand: normally the usage text.
+        # On a computer whose config.yaml is missing or invalid, open the
+        # guided config editor instead (help/--help still prints usage).
+        if bare_run_action(platform) == "config":
+            sys.stderr.write(
+                "\nconfig.yaml is missing or invalid, so let's fix that "
+                "first —\nopening the guided config editor instead of the "
+                "command list.\n(Run './organize help' for the commands any "
+                "time.)\n"
+            )
+            return computer_config_edit()
+        sys.stdout.write(usage(platform))
+        return 0
+
+    if argv[0].lstrip("-").lower() in ("help", "h"):
         sys.stdout.write(usage(platform))
         return 0
 
@@ -740,7 +831,14 @@ def main(argv=None):
         sys.stderr.write(phone_only_message(handled[len("phone-only-"):]))
         return 1
 
+    # Computer-only subcommand used on a phone: explain it and stop.
+    if handled and handled.startswith("computer-only-"):
+        sys.stderr.write(computer_only_message(handled[len("computer-only-"):]))
+        return 1
+
     # ── lifecycle commands handled by organize itself ──
+    if handled == "config":
+        return computer_config_edit()
     if handled == "start":
         (computer_start if platform == "computer" else phone_start)(log)
         return 0

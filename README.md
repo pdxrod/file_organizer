@@ -39,6 +39,8 @@ which commands to use.
 
 ```bash
 ./organize              # prints what it does + the commands for THIS device
+                        # (if config.yaml is missing or invalid, it opens the
+                        # guided config editor instead — see 'config' below)
 
 # Every platform
 ./organize auto         # production scan — just works
@@ -52,6 +54,8 @@ which commands to use.
 ./organize setup        # first-time setup (config + will-it-work report)
 
 # Computer
+./organize config       # change config.yaml section by section — a guided
+                        # editor, no text editor or YAML knowledge needed
 ./organize test-real    # one production scan (alias: scan)
 ./organize sync         # sync folders only
 ./organize dedupe       # remove duplicate files only
@@ -290,6 +294,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `gui` / `web` | Desktop GUI / web UI |
 | `pull` / `push` / `list` | Phone ↔ computer over USB (adb) |
 | `create-test` | Create a sample test environment |
+| `config` | Guided editor: change config.yaml section by section, no text editor. Runs automatically when you run plain `./organize` with a missing or invalid config.yaml |
 | `setup` | First-time setup (config + will-it-work report) |
 | `version` | Print the version number |
 
