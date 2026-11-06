@@ -16,7 +16,12 @@ Design rules:
   yaml.safe_dump (spaces, never tabs), loaded back through Config to
   validate, and only then moved into place with os.replace. The previous
   config.yaml survives any failure.
-- Ctrl+C / EOF anywhere cancels cleanly without writing anything.
+- Typing 'x' (case-insensitive) at ANY prompt quits immediately with
+  nothing saved — the same 'x stops' convention as './organize rename'
+  on the phone. Ctrl+C and EOF cancel cleanly too.
+- Typing 's' at ANY prompt does the opposite: it saves everything
+  entered so far (including edits in the middle of a section — the
+  section editors mutate the config in place) and exits 0.
 """
 
 import io
@@ -36,7 +41,11 @@ from file_organizer.config import (
 
 
 class EditorAbort(Exception):
-    """The user cancelled (Ctrl+C, EOF, or answered 'no' to saving)."""
+    """The user cancelled (Ctrl+C, EOF, 'x', or answered 'no' to saving)."""
+
+
+class EditorSaveQuit(Exception):
+    """The user typed 's' — save what has changed so far and exit."""
 
 
 # ── config health check (used by the launcher's auto-open rule) ────────────
@@ -90,6 +99,8 @@ def needs_editor(config_path: str) -> bool:
 def ask(question: str, input_fn, output_fn=None, default: Any = "",
         allow_blank: bool = True, validate=None) -> str:
     """One line of input. Blank returns `default` (None means 'no answer').
+    'x' (case-insensitive) quits the whole editor without saving;
+    's' saves what has changed so far and exits.
     validate(value) may return an error string to reject the answer."""
     while True:
         try:
@@ -97,11 +108,17 @@ def ask(question: str, input_fn, output_fn=None, default: Any = "",
         except (EOFError, KeyboardInterrupt):
             raise EditorAbort()
         value = raw.strip()
+        low = value.lower()
+        if low == "x":
+            raise EditorAbort()
+        if low == "s":
+            raise EditorSaveQuit()
         if not value:
             if allow_blank:
                 return default
             if output_fn:
-                output_fn("  (please type something, or press Ctrl+C to quit)")
+                output_fn("  (please type something, x to quit, s to save "
+                          "and quit, or Ctrl+C)")
             continue
         if validate:
             err = validate(value)
@@ -113,7 +130,8 @@ def ask(question: str, input_fn, output_fn=None, default: Any = "",
 
 
 def confirm(question: str, input_fn, output_fn=None, default: bool = True) -> bool:
-    """y/n question; blank returns the default."""
+    """y/n question; blank returns the default, 'x' quits the editor,
+    's' saves what has changed so far and exits."""
     hint = "[Y/n]" if default else "[y/N]"
     while True:
         try:
@@ -121,6 +139,10 @@ def confirm(question: str, input_fn, output_fn=None, default: bool = True) -> bo
         except (EOFError, KeyboardInterrupt):
             raise EditorAbort()
         v = raw.strip().lower()
+        if v == "x":
+            raise EditorAbort()
+        if v == "s":
+            raise EditorSaveQuit()
         if not v:
             return default
         if v in ("y", "yes"):
@@ -128,7 +150,7 @@ def confirm(question: str, input_fn, output_fn=None, default: bool = True) -> bo
         if v in ("n", "no"):
             return False
         if output_fn:
-            output_fn("  (answer y or n)")
+            output_fn("  (answer y or n, x to quit, s to save and quit)")
 
 
 # ── path status (shared by every section that shows paths) ─────────────────
@@ -156,9 +178,29 @@ def _section(output_fn, title: str, text: str) -> None:
         output_fn(f"  {line}")
 
 
+def _pick_number(kind: str, entries, input_fn, output_fn) -> Optional[int]:
+    """Which numbered entry to act on, for a bare 'e'/'r' with no number.
+    Auto-picks when there is exactly one entry; blank cancels."""
+    if not entries:
+        output_fn("  (nothing here yet — press a to add one)")
+        return None
+    if len(entries) == 1:
+        return 1
+    answer = ask("  which number?", input_fn, output_fn, default=None)
+    if answer is None:
+        return None
+    if not answer.isdigit():
+        output_fn(f"  (type the {kind}'s number, e.g. 4 — or blank to skip)")
+        return None
+    return int(answer)
+
+
 def edit_drives(drives, input_fn, output_fn) -> Dict[str, str]:
-    """Edit the drives: map of NAME -> folder. Add/edit/remove entries."""
-    drives = dict(drives or {})
+    """Edit the drives: map of NAME -> folder. Add/edit/remove entries.
+    Mutates the passed dict in place, so a mid-section save-and-quit
+    keeps everything entered so far."""
+    if drives is None:
+        drives = {}
     hints = {
         "MAIN_DRIVE": "your home folder on this computer",
         "EXTERNAL_DRIVE": "an external/backup disk you use sometimes",
@@ -172,7 +214,10 @@ def edit_drives(drives, input_fn, output_fn) -> Dict[str, str]:
         "'/Users/you/Documents'. Each drive is a folder on this computer,\n"
         "cloud drives included (give the folder the cloud app keeps its\n"
         "files in). A drive that isn't there right now is skipped with a\n"
-        "warning, so keep entries for disks you use sometimes.",
+        "warning, so keep entries for disks you use sometimes.\n"
+        "\n"
+        "Type e to edit one — you can change BOTH its name and its\n"
+        "folder (e4 edits drive 4 directly). r removes, a adds.",
     )
     while True:
         output_fn("")
@@ -184,13 +229,19 @@ def edit_drives(drives, input_fn, output_fn) -> Dict[str, str]:
                 output_fn(f"     {path_status(drives[name])}")
         else:
             output_fn("  (no drives yet — press a to add one)")
-        prompt = ("  [enter]=done, a=add, e<N>=edit, r<N>=remove"
-                  if names else "  [enter]=done, a=add drive")
+        prompt = ("  [enter]=done, a=add, e=edit, r=remove, "
+                  "x=quit, s=save+quit"
+                  if names else "  [enter]=done, a=add drive, "
+                  "x=quit, s=save+quit")
         try:
             raw = input_fn(prompt + " > ")
         except (EOFError, KeyboardInterrupt):
             raise EditorAbort()
         cmd = raw.strip().lower()
+        if cmd == "x":
+            raise EditorAbort()
+        if cmd == "s":
+            raise EditorSaveQuit()
         if not cmd:
             break
         if cmd in ("a", "add"):
@@ -204,27 +255,45 @@ def edit_drives(drives, input_fn, output_fn) -> Dict[str, str]:
             if value is not None:
                 drives[name] = value
                 output_fn(f"  {name}: {value}  ({path_status(value)})")
-        elif cmd[0] == "e" and cmd[1:].isdigit():
-            idx = int(cmd[1:])
-            if 1 <= idx <= len(names):
-                name = names[idx - 1]
-                value = ask(f"  new folder for {name} [enter keeps]:",
-                            input_fn, output_fn, default=None)
-                if value is not None:
-                    drives[name] = value
-                    output_fn(f"  {name}: {value}  ({path_status(value)})")
-            else:
-                output_fn(f"  there is no drive {idx}")
+            continue
+        edit_num = remove_num = None
+        if cmd[0] == "e" and cmd[1:].isdigit():
+            edit_num = int(cmd[1:])
+        elif cmd in ("e", "edit"):
+            edit_num = _pick_number("drive", names, input_fn, output_fn)
         elif cmd[0] == "r" and cmd[1:].isdigit():
-            idx = int(cmd[1:])
-            if 1 <= idx <= len(names):
-                name = names.pop(idx - 1)
+            remove_num = int(cmd[1:])
+        elif cmd in ("r", "remove"):
+            remove_num = _pick_number("drive", names, input_fn, output_fn)
+
+        if edit_num is not None:
+            if 1 <= edit_num <= len(names):
+                name = names[edit_num - 1]
+                new_name = ask(f"  name [{name}] (Enter keeps):",
+                               input_fn, output_fn, default=name)
+                new_name = new_name.strip().upper()
+                if new_name != name and new_name in drives:
+                    output_fn(f"  {new_name} already exists — keeping {name}")
+                    new_name = name
+                value = ask(f"  folder [{drives[name]}] (Enter keeps):",
+                            input_fn, output_fn, default=drives[name])
+                if new_name != name:
+                    drives[new_name] = drives.pop(name)
+                drives[new_name] = value
+                output_fn(f"  {new_name}: {value}  ({path_status(value)})")
+            else:
+                output_fn(f"  there is no drive {edit_num}")
+            continue
+        if remove_num is not None:
+            if 1 <= remove_num <= len(names):
+                name = names.pop(remove_num - 1)
                 drives.pop(name, None)
                 output_fn(f"  removed {name}")
             else:
-                output_fn(f"  there is no drive {idx}")
-        else:
-            output_fn("  (enter to finish, a to add, e<N> to edit, r<N> to remove)")
+                output_fn(f"  there is no drive {remove_num}")
+            continue
+        output_fn("  (e edits a drive — its name AND its folder, e.g. e4; "
+                  "r removes; enter finishes)")
     return drives
 
 
@@ -233,7 +302,8 @@ def edit_path_list(title: str, items, explanation: str, input_fn, output_fn,
                    show_status: bool = True) -> List[str]:
     """Menu-driven editor for a list of paths (or patterns when
     show_status=False)."""
-    items = list(items or [])
+    if items is None:
+        items = []
     _section(output_fn, title, explanation)
     if example:
         output_fn(f"  example: {example}")
@@ -245,13 +315,18 @@ def edit_path_list(title: str, items, explanation: str, input_fn, output_fn,
                 output_fn(f"  {i}. {item}{status}")
         else:
             output_fn("  (none)")
-        prompt = ("  [enter]=done, a=add, e<N>=edit, r<N>=remove"
-                  if items else "  [enter]=done, a=add")
+        prompt = ("  [enter]=done, a=add, e=edit, r=remove, "
+                  "x=quit, s=save+quit"
+                  if items else "  [enter]=done, a=add, x=quit, s=save+quit")
         try:
             raw = input_fn(prompt + " > ")
         except (EOFError, KeyboardInterrupt):
             raise EditorAbort()
         cmd = raw.strip().lower()
+        if cmd == "x":
+            raise EditorAbort()
+        if cmd == "s":
+            raise EditorSaveQuit()
         if not cmd:
             break
         if cmd in ("a", "add"):
@@ -259,24 +334,34 @@ def edit_path_list(title: str, items, explanation: str, input_fn, output_fn,
             if value is not None:
                 items.append(value)
                 output_fn(f"  added {value}")
-        elif cmd[0] == "e" and cmd[1:].isdigit():
-            idx = int(cmd[1:])
-            if 1 <= idx <= len(items):
-                value = ask(f"  new value for item {idx}:", input_fn,
+            continue
+        edit_num = remove_num = None
+        if cmd[0] == "e" and cmd[1:].isdigit():
+            edit_num = int(cmd[1:])
+        elif cmd in ("e", "edit"):
+            edit_num = _pick_number("entry", items, input_fn, output_fn)
+        elif cmd[0] == "r" and cmd[1:].isdigit():
+            remove_num = int(cmd[1:])
+        elif cmd in ("r", "remove"):
+            remove_num = _pick_number("entry", items, input_fn, output_fn)
+        if edit_num is not None:
+            if 1 <= edit_num <= len(items):
+                value = ask(f"  new value for item {edit_num}:", input_fn,
                             output_fn, default=None)
                 if value is not None:
-                    items[idx - 1] = value
+                    items[edit_num - 1] = value
             else:
-                output_fn(f"  there is no item {idx}")
-        elif cmd[0] == "r" and cmd[1:].isdigit():
-            idx = int(cmd[1:])
-            if 1 <= idx <= len(items):
-                removed = items.pop(idx - 1)
+                output_fn(f"  there is no item {edit_num}")
+            continue
+        if remove_num is not None:
+            if 1 <= remove_num <= len(items):
+                removed = items.pop(remove_num - 1)
                 output_fn(f"  removed {removed}")
             else:
-                output_fn(f"  there is no item {idx}")
-        else:
-            output_fn("  (enter to finish, a to add, e<N> to edit, r<N> to remove)")
+                output_fn(f"  there is no item {remove_num}")
+            continue
+        output_fn("  (e edits an entry, e.g. e2 — or just e; "
+                  "r removes; enter finishes)")
     return items
 
 
@@ -295,7 +380,7 @@ def edit_pairs(title: str, pairs, one_way: bool, input_fn, output_fn) -> List[Di
             "Missing files are copied across and the newest version wins\n"
             "when both changed. Order doesn't matter."
         )
-    pairs = [dict(p) for p in (pairs or [])]
+    pairs = pairs if pairs is not None else []
     _section(output_fn, title, explanation)
     while True:
         output_fn("")
@@ -309,13 +394,19 @@ def edit_pairs(title: str, pairs, one_way: bool, input_fn, output_fn) -> List[Di
                 output_fn(f"     ({path_status(a)})   ({path_status(b)})")
         else:
             output_fn("  (none)")
-        prompt = ("  [enter]=done, a=add pair, e<N>=edit, r<N>=remove"
-                  if pairs else "  [enter]=done, a=add pair")
+        prompt = ("  [enter]=done, a=add pair, e=edit, r=remove, "
+                  "x=quit, s=save+quit"
+                  if pairs else "  [enter]=done, a=add pair, "
+                  "x=quit, s=save+quit")
         try:
             raw = input_fn(prompt + " > ")
         except (EOFError, KeyboardInterrupt):
             raise EditorAbort()
         cmd = raw.strip().lower()
+        if cmd == "x":
+            raise EditorAbort()
+        if cmd == "s":
+            raise EditorSaveQuit()
         if not cmd:
             break
         if cmd in ("a", "add"):
@@ -327,28 +418,38 @@ def edit_pairs(title: str, pairs, one_way: bool, input_fn, output_fn) -> List[Di
                 continue
             pairs.append({"folders": [a, b]})
             output_fn(f"  added: {a}  {arrow}  {b}")
-        elif cmd[0] == "e" and cmd[1:].isdigit():
-            idx = int(cmd[1:])
-            if 1 <= idx <= len(pairs):
-                folders = list(pairs[idx - 1].get("folders") or [])
+            continue
+        edit_num = remove_num = None
+        if cmd[0] == "e" and cmd[1:].isdigit():
+            edit_num = int(cmd[1:])
+        elif cmd in ("e", "edit"):
+            edit_num = _pick_number("pair", pairs, input_fn, output_fn)
+        elif cmd[0] == "r" and cmd[1:].isdigit():
+            remove_num = int(cmd[1:])
+        elif cmd in ("r", "remove"):
+            remove_num = _pick_number("pair", pairs, input_fn, output_fn)
+        if edit_num is not None:
+            if 1 <= edit_num <= len(pairs):
+                folders = list(pairs[edit_num - 1].get("folders") or [])
                 while len(folders) < 2:
                     folders.append("")
                 a = ask(f"  first folder [{folders[0]}]:", input_fn,
                         output_fn, default=folders[0])
                 b = ask(f"  second folder [{folders[1]}]:", input_fn,
                         output_fn, default=folders[1])
-                pairs[idx - 1]["folders"] = [a, b]
+                pairs[edit_num - 1]["folders"] = [a, b]
             else:
-                output_fn(f"  there is no pair {idx}")
-        elif cmd[0] == "r" and cmd[1:].isdigit():
-            idx = int(cmd[1:])
-            if 1 <= idx <= len(pairs):
-                removed = pairs.pop(idx - 1)
-                output_fn(f"  removed pair {idx}")
+                output_fn(f"  there is no pair {edit_num}")
+            continue
+        if remove_num is not None:
+            if 1 <= remove_num <= len(pairs):
+                removed = pairs.pop(remove_num - 1)
+                output_fn(f"  removed pair {remove_num}")
             else:
-                output_fn(f"  there is no pair {idx}")
-        else:
-            output_fn("  (enter to finish, a to add, e<N> to edit, r<N> to remove)")
+                output_fn(f"  there is no pair {remove_num}")
+            continue
+        output_fn("  (e edits a pair, e.g. e1 — or just e; "
+                  "r removes; enter finishes)")
     return pairs
 
 
@@ -422,16 +523,18 @@ def _router(cfg: Dict, input_fn, output_fn) -> None:
         targets[name] = value
     router["target_folders"] = targets
 
-    router["route_roots"] = edit_path_list(
+    router.setdefault("route_roots", [])
+    edit_path_list(
         "Route roots",
-        router.get("route_roots") or [],
+        router["route_roots"],
         "Folders swept when you run './organize route'. Files there are\n"
         "classified once.",
         input_fn, output_fn, example="MAIN_DRIVE/misc",
     )
-    router["watch_folders"] = edit_path_list(
+    router.setdefault("watch_folders", [])
+    edit_path_list(
         "Watch folders",
-        router.get("watch_folders") or [],
+        router["watch_folders"],
         "New files dropped here are routed automatically on every\n"
         "production cycle (./organize auto / start).",
         input_fn, output_fn, example="MAIN_DRIVE/Downloads",
@@ -553,9 +656,11 @@ def run_editor(config_path: str, template_path: Optional[str] = None,
     output_fn("")
     output_fn("organize config — change config.yaml section by section.")
     output_fn("I ask, you type; press Enter to keep what's there.")
-    output_fn("Ctrl+C quits without changing anything.")
+    output_fn("Type x at any prompt to quit without saving, or s to save")
+    output_fn("what you've changed so far and quit.")
     output_fn("")
 
+    cfg = None
     try:
         problem = config_problem(config_path)
         if problem:
@@ -587,25 +692,25 @@ def run_editor(config_path: str, template_path: Optional[str] = None,
             output_fn("stays exactly as it is.")
 
         # ── the section walk ──
-        cfg["drives"] = edit_drives(cfg.get("drives") or {}, input_fn, output_fn)
+        cfg.setdefault("drives", {})
+        edit_drives(cfg["drives"], input_fn, output_fn)
 
-        cfg["source_folders"] = edit_path_list(
+        cfg.setdefault("source_folders", [])
+        edit_path_list(
             "Source folders",
-            cfg.get("source_folders") or [],
+            cfg["source_folders"],
             "Folders to scan — the 'organized' tree is built from these\n"
             "and duplicate detection looks inside them.",
             input_fn, output_fn,
             example="MAIN_DRIVE/Documents, MAIN_DRIVE/Pictures",
         )
 
-        cfg["sync_pairs"] = edit_pairs(
-            "Sync pairs (both ways)", cfg.get("sync_pairs") or [],
-            False, input_fn, output_fn,
-        )
-        cfg["one_way_pairs"] = edit_pairs(
-            "One-way backups", cfg.get("one_way_pairs") or [],
-            True, input_fn, output_fn,
-        )
+        cfg.setdefault("sync_pairs", [])
+        edit_pairs("Sync pairs (both ways)", cfg["sync_pairs"],
+                   False, input_fn, output_fn)
+        cfg.setdefault("one_way_pairs", [])
+        edit_pairs("One-way backups", cfg["one_way_pairs"],
+                   True, input_fn, output_fn)
 
         _output_base(cfg, input_fn, output_fn)
 
@@ -640,9 +745,10 @@ def run_editor(config_path: str, template_path: Optional[str] = None,
             "'./organize git-preview'.",
             input_fn, output_fn,
         ):
-            cfg["auto_git_folders"] = edit_path_list(
+            cfg.setdefault("auto_git_folders", [])
+            edit_path_list(
                 "Auto-git folders",
-                cfg.get("auto_git_folders") or [],
+                cfg["auto_git_folders"],
                 "Any folder under these gets git init + .gitignore +\n"
                 "first commit.",
                 input_fn, output_fn, example="MAIN_DRIVE/dev",
@@ -663,9 +769,10 @@ def run_editor(config_path: str, template_path: Optional[str] = None,
         _router(cfg, input_fn, output_fn)
         _phone_pull(cfg, input_fn, output_fn)
 
-        cfg["exclude_patterns"] = edit_path_list(
+        cfg.setdefault("exclude_patterns", [])
+        edit_path_list(
             "Excluded names",
-            cfg.get("exclude_patterns") or [],
+            cfg["exclude_patterns"],
             "Files or folders with these names are never copied, synced\n"
             "or linked. Built-in safety names (.git, node_modules,\n"
             "caches…) stay protected even if you delete them here — this\n"
@@ -693,6 +800,25 @@ def run_editor(config_path: str, template_path: Optional[str] = None,
         output_fn("Next: ./organize test     (dry run — shows what would happen)")
         output_fn("      ./organize auto     (the real production scan)")
         output_fn("      ./organize start    (run in the background, forever)")
+        return 0
+    except EditorSaveQuit:
+        # 's' anywhere: save exactly what has been entered so far.
+        if cfg is None:
+            # Quit-save before anything was loaded (at the very first
+            # question): save a safe starter with everything off.
+            try:
+                cfg = starter_data(template_path)
+            except ConfigError as e:
+                output_fn(f"✗  {e}")
+                return 1
+            output_fn("(Nothing configured yet — saving a starter with "
+                      "everything off.)")
+        err = write_config(config_path, cfg, output_fn)
+        if err:
+            output_fn(f"✗  {err}")
+            output_fn("Your previous config.yaml was left untouched.")
+            return 1
+        output_fn(f"✓  Saved {config_path} (your changes so far) — exiting.")
         return 0
     except EditorAbort:
         output_fn("")

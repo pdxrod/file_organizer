@@ -175,6 +175,28 @@ class PromptHelperTests(unittest.TestCase):
         with self.assertRaises(ce.EditorAbort):
             ce.ask("q?", Scripted([]))
 
+    def test_ask_x_aborts_case_insensitively(self):
+        for answer in ("x", "X", " x "):
+            with self.assertRaises(ce.EditorAbort, msg=answer):
+                ce.ask("q?", Scripted([answer]))
+
+    def test_confirm_x_aborts(self):
+        with self.assertRaises(ce.EditorAbort):
+            ce.confirm("q?", Scripted(["x"]))
+        with self.assertRaises(ce.EditorAbort):
+            ce.confirm("q?", Scripted(["X"]))
+
+    def test_ask_s_save_quits_case_insensitively(self):
+        for answer in ("s", "S", " s "):
+            with self.assertRaises(ce.EditorSaveQuit, msg=answer):
+                ce.ask("q?", Scripted([answer]))
+
+    def test_confirm_s_save_quits(self):
+        with self.assertRaises(ce.EditorSaveQuit):
+            ce.confirm("q?", Scripted(["s"]))
+        with self.assertRaises(ce.EditorSaveQuit):
+            ce.confirm("q?", Scripted(["S"]))
+
     def test_ask_validate_reprompts(self):
         answers = Scripted(["bad", "good"])
         value = ce.ask("q?", answers, validate=lambda v: "nope" if v == "bad" else None)
@@ -213,9 +235,49 @@ class EditDrivesTests(unittest.TestCase):
     def test_edit_changes_value(self):
         drives = {"MAIN_DRIVE": "/tmp"}
         out = Capture()
-        result = ce.edit_drives(drives, Scripted(["e1", "/tmp/other", ""]), out)
+        # e1 → name prompt (blank keeps) → folder prompt (new value)
+        result = ce.edit_drives(drives, Scripted(["e1", "", "/tmp/other", ""]),
+                                out)
         self.assertEqual(result["MAIN_DRIVE"], "/tmp/other")
         self.assertIn("exists", out.text())
+
+    def test_edit_renames_drive(self):
+        drives = {"MAIN_DRIVE": "/tmp"}
+        result = ce.edit_drives(drives, Scripted(["e1", "gdrive", "", ""]),
+                                Capture())
+        self.assertNotIn("MAIN_DRIVE", result)
+        self.assertEqual(result["GDRIVE"], "/tmp")
+
+    def test_edit_renames_and_changes_value(self):
+        drives = {"MAIN_DRIVE": "/tmp"}
+        result = ce.edit_drives(drives, Scripted(["e1", "gdrive", "/tmp/x", ""]),
+                                Capture())
+        self.assertEqual(result["GDRIVE"], "/tmp/x")
+
+    def test_edit_rename_to_existing_name_keeps_old_name(self):
+        drives = {"MAIN_DRIVE": "/tmp", "BACKUP_DRIVE": "/tmp2"}
+        result = ce.edit_drives(drives, Scripted(["e1", "backup_drive", "", ""]),
+                                Capture())
+        self.assertEqual(result["MAIN_DRIVE"], "/tmp")
+        self.assertEqual(result["BACKUP_DRIVE"], "/tmp2")
+
+    def test_bare_e_edits_only_drive(self):
+        drives = {"MAIN_DRIVE": "/tmp"}
+        result = ce.edit_drives(drives, Scripted(["e", "", "/tmp/y", ""]),
+                                Capture())
+        self.assertEqual(result["MAIN_DRIVE"], "/tmp/y")
+
+    def test_bare_e_asks_which_number(self):
+        drives = {"MAIN_DRIVE": "/tmp", "EXTERNAL_DRIVE": "/Volumes/x"}
+        result = ce.edit_drives(drives, Scripted(["e", "2", "", "/tmp/z", ""]),
+                                Capture())
+        self.assertEqual(result["MAIN_DRIVE"], "/tmp")
+        self.assertEqual(result["EXTERNAL_DRIVE"], "/tmp/z")
+
+    def test_bare_r_removes_only_drive(self):
+        drives = {"MAIN_DRIVE": "/tmp"}
+        result = ce.edit_drives(drives, Scripted(["r", ""]), Capture())
+        self.assertEqual(result, {})
 
     def test_remove_drops_drive(self):
         drives = {"MAIN_DRIVE": "/tmp", "EXTERNAL_DRIVE": "/Volumes/x"}
@@ -232,6 +294,10 @@ class EditDrivesTests(unittest.TestCase):
     def test_eof_aborts(self):
         with self.assertRaises(ce.EditorAbort):
             ce.edit_drives({"MAIN_DRIVE": "/tmp"}, Scripted([]), Capture())
+
+    def test_x_aborts(self):
+        with self.assertRaises(ce.EditorAbort):
+            ce.edit_drives({"MAIN_DRIVE": "/tmp"}, Scripted(["X"]), Capture())
 
 
 class EditPathListTests(unittest.TestCase):
@@ -259,6 +325,34 @@ class EditPathListTests(unittest.TestCase):
                                    Scripted([""]), Capture())
         self.assertEqual(result, items)
 
+    def test_x_aborts(self):
+        with self.assertRaises(ce.EditorAbort):
+            ce.edit_path_list("t", ["/tmp/a"], "explain",
+                              Scripted(["x"]), Capture())
+
+    def test_bare_e_edits_only_entry(self):
+        items = ["/tmp/a"]
+        result = ce.edit_path_list("t", items, "explain",
+                                   Scripted(["e", "/tmp/z", ""]), Capture())
+        self.assertEqual(result, ["/tmp/z"])
+
+    def test_bare_e_asks_which_number(self):
+        items = ["/tmp/a", "/tmp/b"]
+        result = ce.edit_path_list("t", items, "explain",
+                                   Scripted(["e", "2", "/tmp/z", ""]), Capture())
+        self.assertEqual(result, ["/tmp/a", "/tmp/z"])
+
+    def test_bare_r_removes_only_entry(self):
+        items = ["/tmp/a"]
+        result = ce.edit_path_list("t", items, "explain",
+                                   Scripted(["r", ""]), Capture())
+        self.assertEqual(result, [])
+
+    def test_s_save_quits(self):
+        with self.assertRaises(ce.EditorSaveQuit):
+            ce.edit_path_list("t", ["/tmp/a"], "explain",
+                              Scripted(["s"]), Capture())
+
 
 class EditPairsTests(unittest.TestCase):
     def test_enter_keeps_empty(self):
@@ -282,9 +376,28 @@ class EditPairsTests(unittest.TestCase):
 
     def test_edit_pair_changes(self):
         pairs = [{"folders": ["A", "B"]}]
-        result = ce.edit_pairs("t", pairs, True, Scripted(["e1", "X", "Y", ""]),
+        result = ce.edit_pairs("t", pairs, True, Scripted(["e1", "C", "D", ""]),
                                Capture())
-        self.assertEqual(result, [{"folders": ["X", "Y"]}])
+        self.assertEqual(result, [{"folders": ["C", "D"]}])
+
+    def test_x_aborts(self):
+        with self.assertRaises(ce.EditorAbort):
+            ce.edit_pairs("t", [], False, Scripted(["x"]), Capture())
+
+    def test_bare_e_asks_which_number(self):
+        pairs = [{"folders": ["A", "B"]}, {"folders": ["C", "D"]}]
+        result = ce.edit_pairs("t", pairs, True,
+                               Scripted(["e", "2", "E", "F", ""]), Capture())
+        self.assertEqual(result[1], {"folders": ["E", "F"]})
+
+    def test_bare_r_removes_only_pair(self):
+        pairs = [{"folders": ["A", "B"]}]
+        result = ce.edit_pairs("t", pairs, False, Scripted(["r", ""]), Capture())
+        self.assertEqual(result, [])
+
+    def test_s_save_quits(self):
+        with self.assertRaises(ce.EditorSaveQuit):
+            ce.edit_pairs("t", [], False, Scripted(["s"]), Capture())
 
 
 class ToggleTests(unittest.TestCase):
@@ -385,6 +498,74 @@ class RunEditorTests(TempConfigTests):
         self.assertEqual(rc, 1)
         self.assertFalse(self.config.exists())
 
+    def test_x_at_drives_menu_quits_without_saving(self):
+        out = Capture()
+        rc = ce.run_editor(str(self.config), template_path=str(self.template),
+                           input_fn=Scripted(["y", "x"]), output_fn=out)
+        self.assertEqual(rc, 1)
+        self.assertFalse(self.config.exists())
+        self.assertIn("Cancelled", out.text())
+
+    def test_s_at_drives_menu_saves_changes_so_far_and_exits(self):
+        out = Capture()
+        # fresh start, edit MAIN_DRIVE (e1: keep name, new folder), then s
+        rc = ce.run_editor(str(self.config), template_path=str(self.template),
+                           input_fn=Scripted(["y", "e1", "", "/tmp", "s"]),
+                           output_fn=out)
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.config.exists())
+        saved = yaml.safe_load(self.config.read_text())
+        self.assertEqual(saved["drives"]["MAIN_DRIVE"], "/tmp")
+        self.assertFalse(saved["enable_folder_sync"])  # starter default kept
+        self.assertIn("Saved", out.text())
+
+    def test_s_before_anything_loaded_saves_safe_starter(self):
+        out = Capture()
+        rc = ce.run_editor(str(self.config), template_path=str(self.template),
+                           input_fn=Scripted(["s"]), output_fn=out)
+        self.assertEqual(rc, 0)
+        saved = yaml.safe_load(self.config.read_text())
+        self.assertFalse(saved["router"]["enabled"])
+        self.assertIn("starter", out.text())
+
+    def test_s_mid_section_saves_in_progress_edits(self):
+        out = Capture()
+        rc = ce.run_editor(str(self.config), template_path=str(self.template),
+                           input_fn=Scripted(
+                               ["y", "", "a", "/tmp/new-src", "s"]),
+                           output_fn=out)
+        self.assertEqual(rc, 0)
+        saved = yaml.safe_load(self.config.read_text())
+        self.assertIn("/tmp/new-src", saved["source_folders"])
+        self.assertIn("Saved", out.text())
+
+    def test_x_at_toggle_quits_without_saving(self):
+        out = Capture()
+        rc = ce.run_editor(str(self.config), template_path=str(self.template),
+                           input_fn=Scripted(
+                               ["y", "", "", "", "", "", "x"]
+                           ), output_fn=out)
+        self.assertEqual(rc, 1)
+        self.assertFalse(self.config.exists())
+        self.assertIn("Cancelled", out.text())
+
+    def test_x_at_save_prompt_leaves_existing_file_alone(self):
+        self.write("output_base: organized\n")
+        original = self.config.read_text()
+        # no phone_pull keys → walk is 15 prompts, then x declines at save
+        answers = [
+            "", "", "", "", "",
+            "y", "y", "y", "y", "y", "y", "y",
+            "y", "y", "",
+            "x",
+        ]
+        out = Capture()
+        rc = ce.run_editor(str(self.config), template_path=str(self.template),
+                           input_fn=Scripted(answers), output_fn=out)
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.config.read_text(), original)
+        self.assertIn("Cancelled", out.text())
+
     def test_declining_save_leaves_existing_file_alone(self):
         self.write("output_base: organized\n")
         original = self.config.read_text()
@@ -441,7 +622,7 @@ class RunEditorTests(TempConfigTests):
         # Edit MAIN_DRIVE during the walk, then save.
         answers = [
             "y",                       # start fresh
-            "e1", "/tmp", "",          # drives: edit item 1, then done
+            "e1", "", "/tmp", "",      # drives: edit 1 (keep name, new folder), then done
             "",                        # source folders: done
             "",                        # sync pairs: done
             "",                        # one-way pairs: done

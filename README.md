@@ -55,7 +55,9 @@ which commands to use.
 
 # Computer
 ./organize config       # change config.yaml section by section — a guided
-                        # editor, no text editor or YAML knowledge needed
+                        # editor, no text editor or YAML knowledge needed.
+                        # Enter keeps a value, e edits (a drive's name AND
+                        # folder), x quits without saving, s saves and quits
 ./organize test-real    # one production scan (alias: scan)
 ./organize sync         # sync folders only
 ./organize dedupe       # remove duplicate files only
@@ -294,7 +296,7 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `gui` / `web` | Desktop GUI / web UI |
 | `pull` / `push` / `list` | Phone ↔ computer over USB (adb) |
 | `create-test` | Create a sample test environment |
-| `config` | Guided editor: change config.yaml section by section, no text editor. Runs automatically when you run plain `./organize` with a missing or invalid config.yaml |
+| `config` | Guided editor: change config.yaml section by section, no text editor. Enter keeps a value, `e` edits (a drive's name AND folder), `x` quits without saving, `s` saves and quits. Runs automatically when you run plain `./organize` with a missing or invalid config.yaml |
 | `setup` | First-time setup (config + will-it-work report) |
 | `version` | Print the version number |
 
