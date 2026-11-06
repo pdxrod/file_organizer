@@ -378,6 +378,98 @@ class ConfigSubcommandTests(unittest.TestCase):
         self.assertIsNone(handled)
         self.assertEqual(mapped, ["--config", "p.yaml"])
 
+
+class WrongDeviceTests(unittest.TestCase):
+    """A command that exists on the OTHER device must explain itself —
+    never leak the local CLI's 'unrecognized arguments' error."""
+
+    COMPUTER_ONLY = [
+        "test-real", "sync", "dedupe", "cleanup", "clean", "git-preview",
+        "git-init", "collapse-renames", "create-test",
+        "route", "route-real", "route-status", "route-undo",
+        "sort", "sort-real", "sort-status", "sort-undo",
+        "gui", "web", "pull", "push", "list", "config",
+    ]
+
+    PHONE_ONLY = ["rename", "dry-run", "stats", "find-cloud-drives",
+                  "make-config"]
+
+    def test_phone_running_computer_commands_explains_them(self):
+        for cmd in self.COMPUTER_ONLY:
+            mapped, handled = organize.map_command("phone", [cmd])
+            self.assertEqual(handled, f"computer-only-{cmd}", cmd)
+            self.assertEqual(mapped, [], cmd)
+
+    def test_computer_running_phone_commands_explains_them(self):
+        for cmd in self.PHONE_ONLY:
+            mapped, handled = organize.map_command("computer", [cmd])
+            self.assertEqual(handled, f"phone-only-{cmd}", cmd)
+            self.assertEqual(mapped, [], cmd)
+
+    def test_wrong_device_commands_are_case_and_dash_insensitive(self):
+        mapped, handled = organize.map_command("phone", ["-Test-Real"])
+        self.assertEqual(handled, "computer-only-test-real")
+        mapped, handled = organize.map_command("computer", ["--STATS"])
+        self.assertEqual(handled, "phone-only-stats")
+
+    def test_valid_flags_still_pass_through(self):
+        # scan-once is both a phone subcommand and a real computer flag.
+        mapped, handled = organize.map_command("computer", ["scan-once"])
+        self.assertIsNone(handled)
+        self.assertEqual(mapped, ["--scan-once"])
+        # --config FILE stays a passthrough on both devices.
+        for platform in ("phone", "computer"):
+            mapped, handled = organize.map_command(
+                platform, ["--config", "some.yaml"]
+            )
+            self.assertIsNone(handled, platform)
+
+    def test_commands_that_exist_on_both_still_work(self):
+        for cmd in ("test", "scan", "auto", "start", "stop", "status",
+                    "restart", "log", "setup"):
+            for platform in ("phone", "computer"):
+                _, handled = organize.map_command(platform, [cmd])
+                # Lifecycle commands (start/status/…) are handled by
+                # organize itself — but none may ever come back as a
+                # wrong-device explanation.
+                self.assertTrue(
+                    handled is None or handled == cmd,
+                    f"{platform} {cmd} -> {handled}",
+                )
+
+    def test_test_real_message_points_at_phone_scan(self):
+        text = organize.computer_only_message("test-real")
+        self.assertIn("computer-only", text)
+        self.assertIn("./organize scan", text)
+
+    def test_route_message_points_at_phone_rename(self):
+        text = organize.computer_only_message("route")
+        self.assertIn("./organize rename", text)
+        self.assertIn("computer", text)
+
+    def test_stats_message_points_at_computer_status(self):
+        text = organize.phone_only_message("stats")
+        self.assertIn("./organize status", text)
+        self.assertIn("phone-only", text)
+
+    def test_generic_message_names_the_device(self):
+        self.assertIn("computer-only", organize.computer_only_message("x-y-z"))
+        self.assertIn("phone-only", organize.phone_only_message("x-y-z"))
+
+    def test_wrong_device_command_explains_itself_via_main(self):
+        """The real entry point prints the explanation, not argparse's
+        'unrecognized arguments'."""
+        import io
+        from contextlib import redirect_stderr
+        for argv, marker in ((["--phone", "test-real"], "computer-only"),
+                             (["--computer", "stats"], "phone-only")):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                code = organize.main(argv)
+            self.assertEqual(code, 1, argv)
+            self.assertIn(marker, buf.getvalue(), argv)
+            self.assertNotIn("unrecognized", buf.getvalue(), argv)
+
     def test_computer_only_message_points_at_phone_setup(self):
         text = organize.computer_only_message("config")
         self.assertIn("make-config", text)

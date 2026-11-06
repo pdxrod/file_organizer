@@ -111,16 +111,31 @@ PHONE_COMMANDS = {
     "rename": ["--rename-held"],             # rename held files (d deletes, x stops)
 }
 
-# Subcommands that exist only on the phone. On a computer, `organize
-# rename` must explain itself instead of leaking the computer CLI's
-# 'unrecognized arguments: rename' error. (`scan-once` is deliberately
-# NOT here — it is also a valid computer flag.)
-PHONE_ONLY_COMMANDS = ("rename",)
+# ── wrong-device subcommands ─────────────────────────────────────────────
+# Every subcommand that exists on only ONE device, computed from the
+# command tables above so the lists can never drift out of sync.
+# map_command explains them ("only works on the phone/computer") instead
+# of leaking the local CLI's 'unrecognized arguments' error.
+# (`scan-once` is deliberately NOT phone-only — it is also a valid
+# computer flag.)
+COMPUTER_LIFECYCLE = ("start", "stop", "restart", "status", "log", "clean",
+                     "gui", "web", "pull", "push", "list", "setup")
+PHONE_LIFECYCLE = ("start", "stop", "restart", "status", "log", "setup")
 
-# Subcommands that exist only on the computer. On a phone, `organize
-# config` must explain itself instead of leaking the phone CLI's
-# 'unrecognized arguments' error.
-COMPUTER_ONLY_COMMANDS = ("config",)
+# Exists only on the computer — a phone running it gets an explanation.
+COMPUTER_ONLY_COMMANDS = frozenset(
+    set(COMPUTER_COMMANDS) - set(PHONE_COMMANDS)
+) | (
+    frozenset(COMPUTER_LIFECYCLE)
+    - frozenset(PHONE_COMMANDS)
+    - frozenset(PHONE_LIFECYCLE)
+) | {"config"}
+
+# Exists only on the phone — a computer running it gets an explanation.
+PHONE_ONLY_COMMANDS = frozenset(
+    (set(PHONE_COMMANDS) - set(COMPUTER_COMMANDS) - set(COMPUTER_LIFECYCLE))
+    | (set(PHONE_LIFECYCLE) - set(COMPUTER_LIFECYCLE))
+) - {"scan-once"}
 
 # Phone flags that pass straight through to phone_sync.
 PHONE_PASSTHROUGH = (
@@ -161,24 +176,20 @@ def map_command(platform, argv):
     passthrough = (COMPUTER_PASSTHROUGH if platform == "computer"
                    else PHONE_PASSTHROUGH)
     commands = COMPUTER_COMMANDS if platform == "computer" else PHONE_COMMANDS
-    lifecycle = {
-        "computer": ("start", "stop", "restart", "status", "log", "clean",
-                     "gui", "web", "pull", "push", "list", "setup"),
-        "phone": ("start", "stop", "restart", "status", "log", "setup"),
-    }
+    lifecycle = COMPUTER_LIFECYCLE if platform == "computer" else PHONE_LIFECYCLE
     head, rest = argv[0], argv[1:]
-    key = normalize_flag(head, list(commands) + list(lifecycle[platform]))
+    key = normalize_flag(head, list(commands) + list(lifecycle))
     if key in commands:
         mapped_rest = [normalize_flag(a, passthrough) for a in rest]
         return commands[key] + mapped_rest, None
-    if key in lifecycle[platform]:
+    if key in lifecycle:
         mapped_rest = [normalize_flag(a, passthrough) for a in rest]
         return [key] + mapped_rest, key
     if platform == "computer" and key.lstrip("-").lower() in PHONE_ONLY_COMMANDS:
-        # A phone-only subcommand on a computer (e.g. `rename`) must be
-        # explained in main(), never passed to the computer CLI. Compare
-        # case/dash-insensitively — unknown tokens keep their original
-        # spelling here.
+        # A phone-only subcommand on a computer (rename, stats,
+        # make-config, …) must be explained in main(), never passed to
+        # the computer CLI. Compare case/dash-insensitively — unknown
+        # tokens keep their original spelling here.
         return rest, f"phone-only-{key.lstrip('-').lower()}"
     if (platform == "computer" and not head.startswith("-")
             and key.lstrip("-").lower() == "config"):
@@ -187,11 +198,13 @@ def map_command(platform, argv):
         # keeps its old meaning (pass a config path through to the CLI).
         mapped_rest = [normalize_flag(a, passthrough) for a in rest]
         return [key] + mapped_rest, "config"
-    if (platform == "phone" and not head.startswith("-")
-            and key.lstrip("-").lower() in COMPUTER_ONLY_COMMANDS):
-        # A computer-only subcommand on a phone (e.g. `config`) must be
-        # explained in main(), never passed to the phone CLI.
-        return rest, f"computer-only-{key.lstrip('-').lower()}"
+    phone_key = key.lstrip("-").lower()
+    if (platform == "phone" and phone_key in COMPUTER_ONLY_COMMANDS
+            and not (phone_key == "config" and head.startswith("-"))):
+        # A computer-only subcommand on a phone (test-real, route, sync,
+        # config, …) must be explained in main(), never passed to the
+        # phone CLI. (`--config FILE` stays a phone passthrough flag.)
+        return rest, f"computer-only-{phone_key}"
     # Plain passthrough: normalize every known flag in argv.
     return [normalize_flag(a, passthrough) for a in argv], None
 
@@ -690,6 +703,9 @@ def usage(platform):
             "  ./organize test    dry-run scan     ./organize scan    production scan",
             "  ./organize start   run in the background    ./organize stop",
             "  ./organize rename  rename held files, one by one (d deletes, x stops)",
+            "",
+            "Phone commands typed here (rename, stats, make-config, …)",
+            "explain themselves — no 'unrecognized argument' errors.",
         ]
     else:
         lines += [
@@ -721,6 +737,9 @@ def usage(platform):
             "",
             "On a computer (run there instead):",
             "  ./organize auto    ★ production scan     ./organize test    dry-run scan",
+            "",
+            "Computer commands typed here (test-real, sync, route, config, …)",
+            "explain themselves — no 'unrecognized argument' errors.",
         ]
     if platform == "computer":
         lines += [
@@ -763,10 +782,32 @@ def phone_only_message(command: str) -> str:
             "phone itself (or './organize --phone rename' to run the phone\n"
             "program on this computer).\n"
         )
-    return (
-        f"\n'{command}' is a phone-only command — it does not exist on\n"
-        "this computer. Run './organize' for this device's commands.\n"
-    )
+    hints = {
+        "dry-run":
+            "On this computer the dry run is './organize test' — it scans\n"
+            "and reports what WOULD happen, changing nothing.",
+        "stats":
+            "'stats' is the phone sync database. On this computer, use\n"
+            "'./organize status' to see if the background program is\n"
+            "running, and './organize log' to follow its log.",
+        "find-cloud-drives":
+            "On this computer the cloud drives go in config.yaml under\n"
+            "'drives:' — run './organize config' to set them (it checks\n"
+            "each path as you type).",
+        "make-config":
+            "On this computer config.yaml is created automatically the\n"
+            "first time you run — change it with './organize config'.",
+    }
+    hint = hints.get(command)
+    lines = [
+        f"\n'{command}' is a phone-only command — it exists only on the",
+        "phone (Android/Termux), not on this computer.",
+    ]
+    if hint:
+        lines += ["", hint, ""]
+    else:
+        lines += ["", "Run './organize' for this computer's commands.", ""]
+    return "\n".join(lines)
 
 
 def computer_only_message(command: str) -> str:
@@ -782,10 +823,71 @@ def computer_only_message(command: str) -> str:
             "\n"
             "Or run './organize config' on your computer.\n"
         )
-    return (
-        f"\n'{command}' is a computer-only command — it does not exist on\n"
-        "this phone. Run './organize' for this device's commands.\n"
-    )
+    if command in ("route", "route-real", "route-status", "route-undo",
+                   "sort", "sort-real", "sort-status", "sort-undo"):
+        return (
+            f"\n'{command}' only works on a computer (macOS/Linux/Windows) —\n"
+            "it moves files into category folders (pol, Pictures, Music, …)\n"
+            "by name and content, and this phone has no category folders.\n"
+            "\n"
+            "On this phone, held (app-generated) files are renamed one by\n"
+            "one with './organize rename'.\n"
+            "\n"
+            "Run './organize route' on the computer instead.\n"
+        )
+    if command in ("pull", "push", "list"):
+        return (
+            f"\n'{command}' only works on a computer — the computer pulls\n"
+            "files FROM this phone over USB, so it has to run there.\n"
+            "\n"
+            f"Plug the phone into the computer and run './organize {command}'\n"
+            "on the computer.\n"
+        )
+    hints = {
+        "test-real":
+            "On this phone './organize scan' is the production scan —\n"
+            "phone scans are always production. './organize test' is the\n"
+            "dry run.",
+        "sync":
+            "Folder sync runs on the computer. The phone only stages new\n"
+            "files ('./organize scan') for the computer to pull.",
+        "dedupe":
+            "Duplicate removal runs on the computer — './organize dedupe'\n"
+            "there.",
+        "cleanup":
+            "The organized folder lives on the computer — run\n"
+            "'./organize cleanup' there.",
+        "clean":
+            "The organized folder lives on the computer — run\n"
+            "'./organize clean' there.",
+        "git-preview":
+            "git repositories live on the computer — run './organize\n"
+            "git-preview' there.",
+        "git-init":
+            "git repositories live on the computer — run './organize\n"
+            "git-init' there.",
+        "collapse-renames":
+            "Rename families are collapsed on the computer — run\n"
+            "'./organize collapse-renames' there. (On this phone, rename\n"
+            "held files one by one with './organize rename'.)",
+        "create-test":
+            "The test environment is built on the computer — run\n"
+            "'./organize create-test' there.",
+        "gui":
+            "The desktop app runs on the computer — './organize gui' there.",
+        "web":
+            "The web UI runs on the computer — './organize web' there.",
+    }
+    hint = hints.get(command)
+    lines = [
+        f"\n'{command}' is a computer-only command — it exists only on a",
+        "computer (macOS/Linux/Windows), not on this phone.",
+    ]
+    if hint:
+        lines += ["", hint, ""]
+    else:
+        lines += ["", "Run './organize' for this phone's commands.", ""]
+    return "\n".join(lines)
 
 
 # ── main ───────────────────────────────────────────────────────────────────
