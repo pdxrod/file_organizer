@@ -24,8 +24,10 @@ Design rules:
   section editors mutate the config in place) and exits 0.
 """
 
+import builtins
 import io
 import os
+import sys
 import yaml
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -96,15 +98,81 @@ def needs_editor(config_path: str) -> bool:
 
 # ── low-level prompt helpers ───────────────────────────────────────────────
 
+def _input_with_prefill(prompt: str, prefill: str, input_fn=input) -> str:
+    """input_fn(prompt) with `prefill` already on the line as editable
+    text when possible, e.g.
+        name [GOOGLE_DRIVE] (Enter keeps): GOOGLE_DRIVE▏
+    On an interactive terminal (input_fn is the builtin input and stdin
+    is a tty) the prefill arrives as real typed text: GNU readline builds
+    (Termux, Homebrew, python.org) use the pre-input hook, and macOS's
+    libedit builds — whose builtin input() ignores the readline module's
+    hooks entirely — get the prefill pushed into the terminal input
+    queue with TIOCSTI instead. Either way the user can edit it in place
+    and Enter keeps it. Otherwise the prompt is plain — piped/scripted
+    answers are taken as complete values.
+    (Same idea as phone_sync._input_with_prefill, but the prefill is the
+    whole current value here, not a prefix.)
+    """
+    if not prefill:
+        return input_fn(prompt)
+    if input_fn is builtins.input and sys.stdin.isatty():
+        try:
+            import readline
+
+            if "libedit" in (readline.__doc__ or "").lower():
+                # macOS libedit: the readline module's hooks are ignored
+                # by the builtin input(), so push the prefill into the
+                # terminal's input queue (TIOCSTI) — the kernel hands it
+                # to the process exactly as if the user had typed it.
+                # The tty would echo the injected bytes itself, and then
+                # libedit redraws its buffer after the prompt — two
+                # copies. Inject with ECHO off so only libedit's redraw
+                # shows the text, right after the prompt, cursor after it.
+                import fcntl
+                import termios
+                attrs = termios.tcgetattr(sys.stdin.fileno())
+                try:
+                    quiet = attrs[:]
+                    quiet[3] &= ~termios.ECHO
+                    termios.tcsetattr(sys.stdin.fileno(),
+                                      termios.TCSADRAIN, quiet)
+                    for byte in prefill.encode("utf-8"):
+                        fcntl.ioctl(sys.stdin.fileno(),
+                                    termios.TIOCSTI, bytes([byte]))
+                finally:
+                    termios.tcsetattr(sys.stdin.fileno(),
+                                      termios.TCSADRAIN, attrs)
+                return input_fn(prompt)
+
+            # GNU readline: the pre-input hook inserts editable text.
+            def _hook():
+                readline.insert_text(prefill)
+                readline.redisplay()
+
+            hook_setter = (getattr(readline, "set_pre_input_hook", None)
+                           or getattr(readline, "set_startup_hook", None))
+            if hook_setter is not None:
+                hook_setter(_hook)
+                try:
+                    return input_fn(prompt)
+                finally:
+                    hook_setter(None)
+        except Exception:
+            pass  # no readline/ioctl support — plain prompt
+    return input_fn(prompt)
+
+
 def ask(question: str, input_fn, output_fn=None, default: Any = "",
-        allow_blank: bool = True, validate=None) -> str:
+        allow_blank: bool = True, validate=None,
+        prefill: Optional[str] = None) -> str:
     """One line of input. Blank returns `default` (None means 'no answer').
     'x' (case-insensitive) quits the whole editor without saving;
-    's' saves what has changed so far and exits.
+    's' saves what has changed so far and exits. `prefill` puts the
+    current value on the line as editable text on a real terminal.
     validate(value) may return an error string to reject the answer."""
     while True:
         try:
-            raw = input_fn(f"{question} ")
+            raw = _input_with_prefill(f"{question} ", prefill or "", input_fn)
         except (EOFError, KeyboardInterrupt):
             raise EditorAbort()
         value = raw.strip()
@@ -113,6 +181,13 @@ def ask(question: str, input_fn, output_fn=None, default: Any = "",
             raise EditorAbort()
         if low == "s":
             raise EditorSaveQuit()
+        if prefill:
+            # 'x'/'s' typed right after the prefilled value also win,
+            # like the phone's rename command.
+            if low == (prefill + "x").lower():
+                raise EditorAbort()
+            if low == (prefill + "s").lower():
+                raise EditorSaveQuit()
         if not value:
             if allow_blank:
                 return default
@@ -270,13 +345,15 @@ def edit_drives(drives, input_fn, output_fn) -> Dict[str, str]:
             if 1 <= edit_num <= len(names):
                 name = names[edit_num - 1]
                 new_name = ask(f"  name [{name}] (Enter keeps):",
-                               input_fn, output_fn, default=name)
+                               input_fn, output_fn, default=name,
+                               prefill=name)
                 new_name = new_name.strip().upper()
                 if new_name != name and new_name in drives:
                     output_fn(f"  {new_name} already exists — keeping {name}")
                     new_name = name
                 value = ask(f"  folder [{drives[name]}] (Enter keeps):",
-                            input_fn, output_fn, default=drives[name])
+                            input_fn, output_fn, default=drives[name],
+                            prefill=drives[name])
                 if new_name != name:
                     drives[new_name] = drives.pop(name)
                 drives[new_name] = value
@@ -346,10 +423,11 @@ def edit_path_list(title: str, items, explanation: str, input_fn, output_fn,
             remove_num = _pick_number("entry", items, input_fn, output_fn)
         if edit_num is not None:
             if 1 <= edit_num <= len(items):
-                value = ask(f"  new value for item {edit_num}:", input_fn,
-                            output_fn, default=None)
-                if value is not None:
-                    items[edit_num - 1] = value
+                current = items[edit_num - 1]
+                value = ask(f"  new value for item {edit_num} "
+                            f"[{current}] (Enter keeps):", input_fn,
+                            output_fn, default=current, prefill=current)
+                items[edit_num - 1] = value
             else:
                 output_fn(f"  there is no item {edit_num}")
             continue
@@ -434,9 +512,9 @@ def edit_pairs(title: str, pairs, one_way: bool, input_fn, output_fn) -> List[Di
                 while len(folders) < 2:
                     folders.append("")
                 a = ask(f"  first folder [{folders[0]}]:", input_fn,
-                        output_fn, default=folders[0])
+                        output_fn, default=folders[0], prefill=folders[0])
                 b = ask(f"  second folder [{folders[1]}]:", input_fn,
-                        output_fn, default=folders[1])
+                        output_fn, default=folders[1], prefill=folders[1])
                 pairs[edit_num - 1]["folders"] = [a, b]
             else:
                 output_fn(f"  there is no pair {edit_num}")
@@ -479,7 +557,7 @@ def _output_base(cfg: Dict, input_fn, output_fn) -> None:
         "e.g. ~/organized or PROTON_DRIVE/organized.",
     )
     value = ask("  folder for the organized tree [enter keeps current]:",
-                input_fn, output_fn, default=current)
+                input_fn, output_fn, default=current, prefill=current)
     if value in (None, "", "organized", "~/organized"):
         cfg["output_base"] = "organized"
     else:
@@ -519,7 +597,8 @@ def _router(cfg: Dict, input_fn, output_fn) -> None:
     ):
         current = targets.get(name, "")
         value = ask(f"  {name} ({desc}) [{current or 'not set'}]:",
-                    input_fn, output_fn, default=current)
+                    input_fn, output_fn, default=current,
+                    prefill=current or None)
         targets[name] = value
     router["target_folders"] = targets
 
@@ -552,6 +631,7 @@ def _router(cfg: Dict, input_fn, output_fn) -> None:
             f"  API key file path [enter keeps: "
             f"{deepseek.get('api_key_path', '') or 'use env var'}]:",
             input_fn, output_fn, default=deepseek.get("api_key_path", ""),
+            prefill=deepseek.get("api_key_path") or None,
         )
 
 
@@ -570,14 +650,17 @@ def _phone_pull(cfg: Dict, input_fn, output_fn) -> None:
         f"  where phone files land on this computer "
         f"[{pp.get('local_stage', '')}]:",
         input_fn, output_fn, default=pp.get("local_stage", ""),
+        prefill=pp.get("local_stage") or None,
     ) or ""
     pp["remote_stage"] = ask(
         f"  what syncs back to the phone [{pp.get('remote_stage', '')}]:",
         input_fn, output_fn, default=pp.get("remote_stage", ""),
+        prefill=pp.get("remote_stage") or None,
     ) or ""
     pp["adb_path"] = ask(
         f"  path to the adb tool [{pp.get('adb_path', '')}]:",
         input_fn, output_fn, default=pp.get("adb_path", ""),
+        prefill=pp.get("adb_path") or None,
     ) or ""
 
 

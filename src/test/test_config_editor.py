@@ -197,6 +197,121 @@ class PromptHelperTests(unittest.TestCase):
         with self.assertRaises(ce.EditorSaveQuit):
             ce.confirm("q?", Scripted(["S"]))
 
+    def test_input_with_prefill_plain_when_not_interactive(self):
+        # Test doubles get a plain prompt — answers are complete values.
+        calls = []
+
+        def fn(prompt):
+            calls.append(prompt)
+            return "answer"
+
+        result = ce._input_with_prefill("p:", "PF", input_fn=fn)
+        self.assertEqual(result, "answer")
+        self.assertEqual(calls, ["p:"])
+
+    def test_input_with_prefill_inserts_editable_text_on_tty(self):
+        from unittest import mock
+
+        class FakeReadline:
+            __doc__ = "Importing this module enables command line editing " \
+                      "using GNU readline."
+
+            def __init__(self):
+                self.inserted = None
+                self.hook = None
+
+            def insert_text(self, text):
+                self.inserted = text
+
+            def redisplay(self):
+                pass
+
+            def set_pre_input_hook(self, fn):
+                self.hook = fn
+
+        fake = FakeReadline()
+        calls = []
+
+        def fake_input(prompt):
+            calls.append(prompt)
+            if fake.hook:
+                fake.hook()  # readline would run it before the prompt
+            return fake.inserted or ""
+
+        with mock.patch("builtins.input", fake_input), \
+                mock.patch.dict(sys.modules, {"readline": fake}), \
+                mock.patch.object(sys.stdin, "isatty", lambda: True):
+            result = ce._input_with_prefill("p:", "PF", input_fn=fake_input)
+        self.assertEqual(result, "PF")
+        self.assertEqual(fake.inserted, "PF")
+        self.assertIsNone(fake.hook)  # hook cleared afterwards
+        self.assertEqual(calls, ["p:"])
+
+    def test_input_with_prefill_libedit_pushes_typed_text(self):
+        """macOS libedit: input() ignores readline hooks, so the prefill
+        is pushed into the terminal input queue (TIOCSTI) with echo
+        turned off during the injection."""
+        from unittest import mock
+
+        class FakeReadline:
+            __doc__ = "Importing this module enables command line editing " \
+                      "using libedit readline."
+
+        class FakeFcntl:
+            def __init__(self):
+                self.calls = []
+
+            def ioctl(self, fd, request, data):
+                self.calls.append((fd, request, data))
+
+        class FakeTermios:
+            TIOCSTI = 0x80000000
+            TCSADRAIN = 1
+            ECHO = 0o10
+
+            def __init__(self):
+                self.attrs = [0, 0, 0, 0o10, 0, 0, 0]  # lflag = ECHO on
+                self.set_attrs = []
+
+            def tcgetattr(self, fd):
+                return self.attrs[:]
+
+            def tcsetattr(self, fd, when, attrs):
+                self.set_attrs.append((fd, when, attrs))
+
+        fake_fcntl = FakeFcntl()
+        fake_termios = FakeTermios()
+        calls = []
+
+        def fake_input(prompt):
+            calls.append(prompt)
+            return "PF"
+
+        with mock.patch("builtins.input", fake_input), \
+                mock.patch.dict(sys.modules, {
+                    "readline": FakeReadline(),
+                    "fcntl": fake_fcntl,
+                    "termios": fake_termios,
+                }), \
+                mock.patch.object(sys.stdin, "isatty", lambda: True):
+            result = ce._input_with_prefill("p:", "PF", input_fn=fake_input)
+        self.assertEqual(result, "PF")
+        # one TIOCSTI per byte, injected with ECHO off, then restored
+        self.assertEqual(fake_fcntl.calls,
+                         [(0, fake_termios.TIOCSTI, b"P"),
+                          (0, fake_termios.TIOCSTI, b"F")])
+        self.assertEqual(fake_termios.set_attrs[0][2][3], 0)       # ECHO off
+        self.assertEqual(fake_termios.set_attrs[-1][2][3], 0o10)   # restored
+        self.assertEqual(calls, ["p:"])
+
+    def test_ask_prefill_trailing_x_still_quits(self):
+        with self.assertRaises(ce.EditorAbort):
+            ce.ask("q?", Scripted(["PFx"]), prefill="PF")
+
+    def test_ask_prefill_trailing_s_still_saves(self):
+        with self.assertRaises(ce.EditorSaveQuit):
+            ce.ask("q?", Scripted(["PFs"]), prefill="PF")
+
     def test_ask_validate_reprompts(self):
         answers = Scripted(["bad", "good"])
         value = ce.ask("q?", answers, validate=lambda v: "nope" if v == "bad" else None)
