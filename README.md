@@ -300,6 +300,16 @@ copied. Deleting it later removes it from staging on the next cleanup.
 | `setup` | First-time setup (config + will-it-work report) |
 | `version` | Print the version number |
 
+The desktop GUI (`./organize gui`) needs Tk 8.6+ — Apple's bundled
+python3 has Tk 8.5, which draws an empty black window on modern macOS.
+`organize gui` automatically launches with a newer python3 (e.g.
+Homebrew's python-tk@3.x) when one is installed; if none is found it
+tells you how to install it:
+
+```bash
+brew install python-tk@3.14
+```
+
 ## Everyday commands — phone
 
 ```bash

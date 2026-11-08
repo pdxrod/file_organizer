@@ -12,6 +12,7 @@ This is the only program in this folder. Everything else lives in src/.
 import os
 import sys
 import time
+import shutil
 import signal
 import subprocess
 from pathlib import Path
@@ -604,9 +605,65 @@ def adb_argv(argv):
     return flags + list(argv[1:])
 
 
+# ── GUI interpreter ─────────────────────────────────────────────────────────
+# Apple's bundled /usr/bin/python3 ships Tk 8.5 (2010-era Aqua Tk), which
+# draws an empty black window and burns CPU on modern macOS. The desktop
+# GUI needs an interpreter whose Tk is 8.6 or newer (Homebrew's
+# python-tk@3.x ships 8.6/9.0). desktop_app.py re-checks when run directly;
+# this just picks the best interpreter to launch it with.
+
+GUI_PYTHON_CANDIDATES = (
+    "python3.14", "python3.13", "python3.12", "python3.11", "python3.10",
+)
+
+GUI_TK_CHECK = "import tkinter,sys;sys.exit(0 if tkinter.TkVersion>=8.6 else 1)"
+
+
+def tk_is_modern(exe):
+    """True if `exe` can import tkinter with Tk 8.6 or newer."""
+    try:
+        proc = subprocess.run(
+            [exe, "-c", GUI_TK_CHECK], capture_output=True, timeout=20
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def gui_python():
+    """Best interpreter for the desktop GUI, or None if none has Tk 8.6+.
+
+    None means even the current interpreter is too old — the caller
+    prints install instructions instead of opening a black window.
+    """
+    if tk_is_modern(sys.executable):
+        return sys.executable
+    for name in GUI_PYTHON_CANDIDATES:
+        exe = shutil.which(name)
+        if exe and exe != sys.executable and tk_is_modern(exe):
+            return exe
+    return None
+
+
 def computer_gui(log):
     app = PACKAGE / "desktop_app.py"
-    subprocess.run([sys.executable, str(app)])
+    exe = gui_python()
+    if exe is None:
+        log(
+            "\nNo Python with Tk 8.6+ found — this computer's python3 has "
+            "Tk 8.5,\nwhich draws an empty black window on modern macOS.\n"
+            "\n"
+            "Fix it with Homebrew, then run this again:\n"
+            "  brew install python-tk@3.14\n"
+            "\n"
+            "('./organize gui' picks up python3.10+ with a modern Tk\n"
+            "automatically once one is installed.)\n"
+        )
+        return 1
+    if exe != sys.executable:
+        log(f"(using {exe} — this python3's Tk is too old to draw the window)")
+    subprocess.run([exe, str(app)])
+    return 0
 
 
 def computer_web(log):
@@ -968,8 +1025,7 @@ def main(argv=None):
         computer_clean(log)
         return 0
     if handled == "gui":
-        computer_gui(log)
-        return 0
+        return computer_gui(log)
     if handled == "web":
         computer_web(log)
         return 0

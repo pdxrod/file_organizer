@@ -8,9 +8,11 @@ pure parts: platform detection, subcommand mapping, and usage text.
 import importlib.util
 from importlib.machinery import SourceFileLoader
 import os
+import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 # The repo layout is: organize at the root, package under src/, tests under
@@ -531,6 +533,62 @@ class BareRunActionTests(unittest.TestCase):
             organize.bare_run_action("computer", config_path=str(path)),
             "config",
         )
+
+
+class GuiInterpreterTests(unittest.TestCase):
+    """'organize gui' must launch with an interpreter whose Tk is 8.6+.
+
+    Apple's bundled /usr/bin/python3 ships Tk 8.5 (2010-era Aqua Tk),
+    which draws an empty black window on modern macOS. gui_python()
+    prefers the current interpreter when its Tk is modern, otherwise
+    the newest installed python3 with a modern Tk, otherwise None.
+    """
+
+    def test_current_interpreter_preferred_when_tk_modern(self):
+        with mock.patch.object(organize, "tk_is_modern", return_value=True):
+            self.assertEqual(organize.gui_python(), sys.executable)
+
+    def test_newer_python_chosen_when_current_tk_old(self):
+        def fake_modern(exe):
+            return exe != sys.executable
+
+        with mock.patch.object(organize, "tk_is_modern",
+                               side_effect=fake_modern), \
+             mock.patch.object(shutil, "which",
+                               return_value="/opt/homebrew/bin/python3.14"):
+            self.assertEqual(organize.gui_python(),
+                             "/opt/homebrew/bin/python3.14")
+
+    def test_none_when_no_modern_tk_anywhere(self):
+        with mock.patch.object(organize, "tk_is_modern", return_value=False), \
+             mock.patch.object(shutil, "which", return_value=None):
+            self.assertIsNone(organize.gui_python())
+
+    def test_candidates_checked_newest_first(self):
+        checked = []
+
+        def fake_modern(exe):
+            checked.append(exe)
+            return False
+
+        with mock.patch.object(organize, "tk_is_modern",
+                               side_effect=fake_modern), \
+             mock.patch.object(shutil, "which",
+                               side_effect=lambda name: f"/opt/{name}"):
+            self.assertIsNone(organize.gui_python())
+        self.assertEqual(
+            checked,
+            [sys.executable, "/opt/python3.14", "/opt/python3.13",
+             "/opt/python3.12", "/opt/python3.11", "/opt/python3.10"],
+        )
+
+    def test_current_interpreter_never_relaunched(self):
+        # A candidate resolving to sys.executable itself must be skipped
+        # (it cannot be newer than the interpreter already running).
+        with mock.patch.object(organize, "tk_is_modern", return_value=False), \
+             mock.patch.object(shutil, "which",
+                               return_value=sys.executable):
+            self.assertIsNone(organize.gui_python())
 
 
 if __name__ == "__main__":

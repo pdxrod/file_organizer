@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Desktop GUI wrapper for file_organizer using Tkinter."""
 
-import sys, os, threading, subprocess
+import sys, os, shutil, threading, subprocess
 from pathlib import Path
 
 # Add src/ to path so we can import the package
@@ -21,6 +21,47 @@ try:
 except ImportError:
     print("Tkinter not available — GUI requires Python with tkinter support.")
     print("Install: brew install python-tk@3.x (macOS) or apt install python3-tk (Linux)")
+    sys.exit(1)
+
+# Apple's bundled /usr/bin/python3 ships Tk 8.5 (2010-era Aqua Tk), which
+# draws an empty black window and burns CPU on modern macOS. If this
+# process was launched directly with such an interpreter, re-launch under
+# a newer python3 (Tk 8.6+). './organize gui' already picks one; this
+# heals direct runs like 'python3 desktop_app.py'.
+if tk.TkVersion < 8.6 and sys.platform == "darwin":
+    _relaunch = None
+    for _name in ("python3.14", "python3.13", "python3.12",
+                  "python3.11", "python3.10"):
+        _exe = shutil.which(_name)
+        if not _exe or _exe == sys.executable:
+            continue
+        try:
+            _proc = subprocess.run(
+                [_exe, "-c",
+                 "import tkinter,sys;sys.exit(0 if tkinter.TkVersion>=8.6 else 1)"],
+                capture_output=True, timeout=20,
+            )
+        except Exception:
+            continue
+        if _proc.returncode == 0:
+            _relaunch = _exe
+            break
+    if _relaunch:
+        # flush=True: os.execv discards buffered stdout, so the message
+        # must be written before the exec replaces this process.
+        print(f"(re-launching with {_relaunch} — this python3's Tk "
+              f"{tk.TkVersion} draws a black window on modern macOS)",
+              flush=True)
+        os.execv(_relaunch,
+                 [_relaunch, str(Path(__file__).resolve())] + sys.argv[1:])
+    print(
+        "This python3's Tk is too old for the GUI (it draws an empty\n"
+        "black window on modern macOS) and no python3 with Tk 8.6+\n"
+        "was found.\n"
+        "\n"
+        "Fix it with Homebrew, then run './organize gui' again:\n"
+        "  brew install python-tk@3.14\n"
+    )
     sys.exit(1)
 
 
@@ -88,8 +129,9 @@ class OrganizerGUI:
         self.log_text = scrolledtext.ScrolledText(log_frame, height=20, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        # Try to load default config
+        # Try to load default config, then start the log auto-refresh
         self._auto_load_config()
+        self._refresh_log()
 
     def _default_config(self):
         """config.yaml lives at the project root (next to organize)."""
@@ -124,8 +166,12 @@ class OrganizerGUI:
             subprocess.Popen(["xdg-open", str(config_path)])
 
     def _log(self, message):
+        # _refresh_log leaves the widget DISABLED (read-only); enable it
+        # around the insert or the write silently raises.
+        self.log_text.configure(state=tk.NORMAL)
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
+        self.log_text.configure(state=tk.DISABLED)
         self.root.update_idletasks()
 
     def _refresh_log(self):
