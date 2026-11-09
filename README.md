@@ -115,7 +115,8 @@ config_template.yaml
 
 ### Editing a config file
 
-On the computer, don't edit `config.yaml` by hand — use the guided editor:
+On the computer, you don't have to edit `config.yaml` by hand — the
+guided editor is the easy way:
 
 ```bash
 ./organize config
@@ -145,6 +146,14 @@ phone daemon's built-in parser reads, so it works on Termux as-is.
 It also opens automatically when plain `./organize` finds the phone
 config missing or invalid. `./organize make-config` still just creates
 the file from the template with no questions.
+
+Prefer a text editor? Both files are ordinary YAML, so if you know YAML
+you can edit them directly: `config.yaml` with **TextEdit** (macOS),
+**Notepad** (Windows) or any plain-text editor, and
+`phone_sync_config.yaml` with **nano** on the phone. Two rules: use
+SPACES for indentation, never tabs, and replace the placeholder paths
+(`janedoe`, `YourExternalDrive`) with your real ones. The programs check
+the result and tell you plainly when something is wrong.
 
 ---
 
