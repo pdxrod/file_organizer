@@ -39,8 +39,8 @@ which commands to use.
 
 ```bash
 ./organize              # prints what it does + the commands for THIS device
-                        # (if config.yaml is missing or invalid, it opens the
-                        # guided config editor instead — see 'config' below)
+                        # (if the device's config is missing or invalid, it
+                        # opens the guided config editor instead — see 'config' below)
 
 # Every platform
 ./organize auto         # production scan — just works
@@ -58,6 +58,7 @@ which commands to use.
                         # editor, no text editor or YAML knowledge needed.
                         # Enter keeps a value, e edits (a drive's name AND
                         # folder), x quits without saving, s saves and quits
+                        # (on a phone the same editor edits phone_sync_config.yaml)
 ./organize test-real    # one production scan (alias: scan)
 ./organize sync         # sync folders only
 ./organize dedupe       # remove duplicate files only
@@ -136,8 +137,14 @@ failure. It writes spaces, never tabs, and placeholder paths like
 values there. The editor also opens automatically when you run plain
 `./organize` with a missing or invalid `config.yaml`.
 
-On the phone, `./organize make-config` creates `phone_sync_config.yaml`
-from the template; edit it with `nano phone_sync_config.yaml`.
+On the phone, the SAME editor edits `phone_sync_config.yaml` the same
+way — source folders, the staging folder, cloud sync, the free-space
+guard, the grace period, rename rules, scan timing, filters and
+exclusions. It needs no PyYAML: it writes the flat YAML subset the
+phone daemon's built-in parser reads, so it works on Termux as-is.
+It also opens automatically when plain `./organize` finds the phone
+config missing or invalid. `./organize make-config` still just creates
+the file from the template with no questions.
 
 ---
 
@@ -224,10 +231,10 @@ Watch what it does:
    ./organize make-config
    ```
 
-5. Edit the config with **nano** (spaces, never tabs):
+5. Change the settings with the guided editor (no text editor needed):
 
    ```bash
-   nano phone_sync_config.yaml
+   ./organize config
    ```
 
 6. Test without copying anything:
@@ -362,7 +369,8 @@ server prints how to free it or pick another port.
 | `test` | Single **dry-run** scan — no files copied |
 | `scan` (alias `auto`) | Single production scan |
 | `find-cloud-drives` | Locate your cloud drive folders (Proton Drive, Google Drive, Dropbox, …) |
-| `make-config` | Create phone_sync_config.yaml from the template |
+| `config` | Guided editor for phone_sync_config.yaml — same conversation as on the computer (Enter keeps, `e` edits, `x` quits without saving, `s` saves and quits) |
+| `make-config` | Create phone_sync_config.yaml from the template (no questions) |
 | `rename` | Rename held app-generated files one by one (`name: X new name (d for delete, x for stop): ` — Enter keeps, `d` deletes, `x` stops the walk; a date in the name is prefilled as `YYYYMMDD-`) |
 | `setup` | First-time setup wizard |
 | `version` | Print the version number |

@@ -199,6 +199,11 @@ def map_command(platform, argv):
         # keeps its old meaning (pass a config path through to the CLI).
         mapped_rest = [normalize_flag(a, passthrough) for a in rest]
         return [key] + mapped_rest, "config"
+    if (platform == "phone" and not head.startswith("-")
+            and key.lstrip("-").lower() == "config"):
+        # Same editor on the phone, for phone_sync_config.yaml.
+        mapped_rest = [normalize_flag(a, passthrough) for a in rest]
+        return [key] + mapped_rest, "config"
     phone_key = key.lstrip("-").lower()
     if (platform == "phone" and phone_key in COMPUTER_ONLY_COMMANDS
             and not (phone_key == "config" and head.startswith("-"))):
@@ -260,16 +265,35 @@ def computer_config_edit():
     )
 
 
+def phone_config_edit():
+    """Run the guided phone_sync_config.yaml editor on the phone.
+
+    Returns its exit code: 0 when a config was saved, 1 when the user
+    cancelled or the result failed validation.
+    """
+    _insert_src_path()
+    from file_organizer.phone_config_editor import run_phone_editor
+    return run_phone_editor(
+        phone_config_path(),
+        template_path=str(HERE / "config_template.yaml"),
+    )
+
+
 def bare_run_action(platform, config_path=None):
     """What plain `./organize` (no subcommand) should do: print the usage
-    text — or, on a computer whose config.yaml is missing or invalid,
-    open the guided config editor automatically."""
-    if platform != "computer":
+    text — or, when the device's config is missing or invalid, open the
+    guided config editor automatically (computer: config.yaml, phone:
+    phone_sync_config.yaml)."""
+    if platform not in ("computer", "phone"):
         return "usage"
     _insert_src_path()
-    from file_organizer.config_editor import needs_editor
-    target = config_path or str(computer_config_path())
-    return "config" if needs_editor(target) else "usage"
+    if platform == "computer":
+        from file_organizer.config_editor import needs_editor
+        target = config_path or str(computer_config_path())
+        return "config" if needs_editor(target) else "usage"
+    from file_organizer.phone_config_editor import needs_phone_editor
+    target = config_path or phone_config_path()
+    return "config" if needs_phone_editor(target) else "usage"
 
 
 def computer_pid_log():
@@ -830,7 +854,8 @@ def usage(platform):
             "  ./organize log           follow the log file (Ctrl+C to stop)",
             "  ./organize stats         sync database statistics",
             "  ./organize find-cloud-drives  locate your cloud drive folders",
-            "  ./organize make-config   create phone_sync_config.yaml",
+            "  ./organize config        guided editor for phone_sync_config.yaml",
+            "  ./organize make-config   create phone_sync_config.yaml (no questions)",
             "  ./organize rename        rename held files, one by one (d deletes, x stops)",
             "  ./organize setup         first-time setup wizard",
             "",
@@ -866,9 +891,9 @@ def usage(platform):
             "",
             "Config: this phone uses phone_sync_config.yaml next to organize —",
             "created from the 'phone:' section of config_template.yaml the first",
-            "time you run. Edit it with spaces, never tabs. The computer's",
-            "config.yaml is created from the same template on the computer;",
-            "change it there with './organize config' (guided, no text editor).",
+            "time you run. Change it with './organize config' — a guided editor",
+            "(Enter keeps, e edits, x quits, s saves) — no text editor needed.",
+            "The computer's config.yaml is changed the same way on the computer.",
             "",
         ]
     return "\n".join(lines)
@@ -921,17 +946,6 @@ def phone_only_message(command: str) -> str:
 
 def computer_only_message(command: str) -> str:
     """What to print when a computer-only command is run on a phone."""
-    if command == "config":
-        return (
-            f"\n'{command}' edits config.yaml — the computer's settings — so\n"
-            "it only exists on a computer (macOS/Linux/Windows).\n"
-            "\n"
-            "On this phone the settings live in phone_sync_config.yaml:\n"
-            "  ./organize make-config      create it from the template\n"
-            "  nano phone_sync_config.yaml  edit it (spaces, never tabs)\n"
-            "\n"
-            "Or run './organize config' on your computer.\n"
-        )
     if command in ("route", "route-real", "route-status", "route-undo",
                    "sort", "sort-real", "sort-status", "sort-undo"):
         return (
@@ -1008,16 +1022,18 @@ def main(argv=None):
 
     if not argv:
         # Plain `./organize` with no subcommand: normally the usage text.
-        # On a computer whose config.yaml is missing or invalid, open the
-        # guided config editor instead (help/--help still prints usage).
+        # When the device's config is missing or invalid (computer:
+        # config.yaml, phone: phone_sync_config.yaml), open the guided
+        # config editor instead (help/--help still prints usage).
         if bare_run_action(platform) == "config":
             sys.stderr.write(
-                "\nconfig.yaml is missing or invalid, so let's fix that "
+                "\nThe config is missing or invalid, so let's fix that "
                 "first —\nopening the guided config editor instead of the "
                 "command list.\n(Run './organize help' for the commands any "
                 "time.)\n"
             )
-            return computer_config_edit()
+            return (phone_config_edit() if platform == "phone"
+                    else computer_config_edit())
         sys.stdout.write(usage(platform))
         return 0
 
@@ -1049,7 +1065,8 @@ def main(argv=None):
 
     # ── lifecycle commands handled by organize itself ──
     if handled == "config":
-        return computer_config_edit()
+        return (phone_config_edit() if platform == "phone"
+                else computer_config_edit())
     if handled == "start":
         (computer_start if platform == "computer" else phone_start)(log)
         return 0

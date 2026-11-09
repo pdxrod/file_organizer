@@ -239,10 +239,11 @@ class UsageTests(unittest.TestCase):
         # old "Both are created ... the first time you run" claim is gone.
         self.assertNotIn("Both are created", text)
 
-    def test_phone_usage_says_computer_config_is_created_on_the_computer(self):
+    def test_phone_usage_says_config_is_changed_with_the_editor(self):
         text = organize.usage("phone")
         self.assertIn("phone_sync_config.yaml next to organize", text)
-        self.assertIn("template on the computer", text)
+        self.assertIn("./organize config", text)
+        self.assertIn("guided editor", text)
         self.assertNotIn("Both are created", text)
 
 
@@ -294,15 +295,17 @@ class MainEntryTests(unittest.TestCase):
         """`organize help` and `organize` print the same instructions."""
         import io
         from contextlib import redirect_stdout
-        # Bare `organize` on a computer auto-opens the config editor when
-        # config.yaml is missing/invalid (config.yaml is not tracked in
-        # git), so pin the phone platform for this comparison — both
+        # Bare `organize` auto-opens the config editor when the device's
+        # config is missing/invalid (neither config is tracked in git),
+        # so pin the platform AND mock the auto-open decision — both
         # calls then print the same usage text without touching a config.
         os.environ["ORGANIZE_PLATFORM"] = "phone"
         self.addCleanup(os.environ.pop, "ORGANIZE_PLATFORM", None)
         buf1, buf2 = io.StringIO(), io.StringIO()
-        with redirect_stdout(buf1):
-            organize.main([])
+        with mock.patch.object(organize, "bare_run_action",
+                               return_value="usage"):
+            with redirect_stdout(buf1):
+                organize.main([])
         with redirect_stdout(buf2):
             organize.main(["help"])
         self.assertEqual(buf1.getvalue(), buf2.getvalue())
@@ -371,14 +374,19 @@ class ConfigSubcommandTests(unittest.TestCase):
         mapped, handled = organize.map_command("computer", ["--config"])
         self.assertIsNone(handled)
 
-    def test_phone_config_is_explained_not_passed_through(self):
+    def test_phone_config_is_the_guided_editor(self):
         mapped, handled = organize.map_command("phone", ["config"])
-        self.assertEqual(handled, "computer-only-config")
-        self.assertEqual(mapped, [])
+        self.assertEqual(handled, "config")
+        self.assertEqual(mapped, ["config"])
         # ...while the dashed flag still passes through on the phone.
         mapped, handled = organize.map_command("phone", ["--config", "p.yaml"])
         self.assertIsNone(handled)
         self.assertEqual(mapped, ["--config", "p.yaml"])
+
+    def test_phone_config_keeps_extra_args(self):
+        mapped, handled = organize.map_command("phone", ["config", "-v"])
+        self.assertEqual(handled, "config")
+        self.assertEqual(mapped, ["config", "-v"])
 
 
 class WrongDeviceTests(unittest.TestCase):
@@ -390,7 +398,7 @@ class WrongDeviceTests(unittest.TestCase):
         "git-init", "collapse-renames", "create-test",
         "route", "route-real", "route-status", "route-undo",
         "sort", "sort-real", "sort-status", "sort-undo",
-        "gui", "web", "pull", "push", "list", "config",
+        "gui", "web", "pull", "push", "list",
     ]
 
     PHONE_ONLY = ["rename", "dry-run", "stats", "find-cloud-drives",
@@ -472,20 +480,24 @@ class WrongDeviceTests(unittest.TestCase):
             self.assertIn(marker, buf.getvalue(), argv)
             self.assertNotIn("unrecognized", buf.getvalue(), argv)
 
-    def test_computer_only_message_points_at_phone_setup(self):
+    def test_config_is_not_a_wrong_device_command(self):
+        # `config` now exists on BOTH devices (computer: config.yaml,
+        # phone: phone_sync_config.yaml) — it must never be explained
+        # away as a computer-only command.
         text = organize.computer_only_message("config")
-        self.assertIn("make-config", text)
-        self.assertIn("phone_sync_config.yaml", text)
+        self.assertNotIn("make-config", text)
+        mapped, handled = organize.map_command("phone", ["config"])
+        self.assertEqual(handled, "config")
 
     def test_computer_usage_mentions_config_command(self):
         text = organize.usage("computer")
         self.assertIn("./organize config", text)
         self.assertIn("guided", text)
-        # The phone usage points at the computer's config editor too,
-        # but never lists it as a phone command.
+        # The phone usage lists its own guided config editor — for
+        # phone_sync_config.yaml — not the computer's config.yaml line.
         phone_text = organize.usage("phone")
-        self.assertIn("./organize config", phone_text)
-        self.assertNotIn("./organize config        ", phone_text)
+        self.assertIn("phone_sync_config.yaml", phone_text)
+        self.assertNotIn("change config.yaml section by section", phone_text)
 
 
 class BareRunActionTests(unittest.TestCase):
@@ -500,10 +512,24 @@ class BareRunActionTests(unittest.TestCase):
             path.write_text(text)
         return path
 
-    def test_phone_always_prints_usage(self):
+    def test_phone_missing_config_opens_editor(self):
         self.assertEqual(
             organize.bare_run_action("phone", config_path="/no/such/file"),
+            "config",
+        )
+
+    def test_phone_valid_config_prints_usage(self):
+        path = self._tmp_config("target_directory: /storage/emulated/0/staging\n")
+        self.assertEqual(
+            organize.bare_run_action("phone", config_path=str(path)),
             "usage",
+        )
+
+    def test_phone_invalid_config_opens_editor(self):
+        path = self._tmp_config("target_directory\n\t/storage/x\n")
+        self.assertEqual(
+            organize.bare_run_action("phone", config_path=str(path)),
+            "config",
         )
 
     def test_missing_config_opens_editor(self):
