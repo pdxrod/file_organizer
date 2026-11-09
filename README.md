@@ -114,18 +114,30 @@ config_template.yaml
 
 ### Editing a config file
 
-| Platform | Open it with |
-|----------|--------------|
-| macOS | **TextEdit** (plain text mode) |
-| Windows | **Notepad** |
-| Android / Termux | **nano** (`nano phone_sync_config.yaml`) |
+On the computer, don't edit `config.yaml` by hand — use the guided editor:
 
-Two rules:
+```bash
+./organize config
+```
 
-1. **Never use TAB characters** in YAML — only spaces. (The programs catch
-   tabs and tell you plainly.)
-2. Replace every placeholder path (`janedoe`, `YourExternalDrive`) with your
-   real paths.
+It walks you through every setting in plain words — drives, folders to
+scan, sync pairs, one-way backups, the organized folder, feature toggles,
+routing, phone pull, excluded names. At any prompt:
+
+- **Enter** keeps the current value
+- **e** edits it (for a drive: its name AND its folder)
+- **x** quits without saving anything
+- **s** saves everything entered so far and exits
+
+The editor never writes a broken file: the result is validated first and
+swapped in only if it loads, so your previous `config.yaml` survives any
+failure. It writes spaces, never tabs, and placeholder paths like
+`janedoe` or `YourExternalDrive` are fixed by editing the drive/folder
+values there. The editor also opens automatically when you run plain
+`./organize` with a missing or invalid `config.yaml`.
+
+On the phone, `./organize make-config` creates `phone_sync_config.yaml`
+from the template; edit it with `nano phone_sync_config.yaml`.
 
 ---
 
@@ -139,8 +151,8 @@ cd /path/to/file_organizer
 #    placeholders you must edit.
 ./organize test
 
-# 2. Open config.yaml with TextEdit (macOS) or your favourite editor,
-#    replace the placeholder paths, then run the test again.
+# 2. Fix the placeholder paths with the guided editor, then test again.
+./organize config
 ./organize test
 
 # 3. When the test looks right, run for real (one cycle):
@@ -170,9 +182,9 @@ Watch what it does:
 
    (or `py -m file_organizer scan-once` from inside `src\`)
 
-3. This creates `config.yaml` and prints the "Will it work?" report. Open
-   `config.yaml` with **Notepad**, replace the placeholder paths, and run the
-   command again.
+3. This creates `config.yaml` and prints the "Will it work?" report. Fix
+   the placeholder paths with the guided editor (`py organize config`),
+   then run the command again.
 4. Symlinks in the `organized` folder require Administrator rights or
    Windows Developer Mode.
 
