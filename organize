@@ -666,9 +666,59 @@ def computer_gui(log):
     return 0
 
 
+# ── Web interpreter ─────────────────────────────────────────────────────────
+# Apple's bundled /usr/bin/python3 doesn't ship flask, so './organize web'
+# must pick a python3 that has it (Homebrew's python3.14 on this machine).
+# web_app.py imports flask at the top, so launching with a flask-less
+# interpreter dies with a traceback before anything useful is printed.
+
+WEB_FLASK_CHECK = "import flask"
+
+
+def flask_available(exe):
+    """True if `exe` can import flask."""
+    try:
+        proc = subprocess.run(
+            [exe, "-c", WEB_FLASK_CHECK], capture_output=True, timeout=20
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def web_python():
+    """Best interpreter for the web UI, or None if none has flask.
+
+    None means even the current interpreter lacks flask — the caller
+    prints install instructions instead of a traceback.
+    """
+    if flask_available(sys.executable):
+        return sys.executable
+    for name in GUI_PYTHON_CANDIDATES:
+        exe = shutil.which(name)
+        if exe and exe != sys.executable and flask_available(exe):
+            return exe
+    return None
+
+
 def computer_web(log):
     app = PACKAGE / "web_app.py"
-    subprocess.run([sys.executable, str(app)])
+    exe = web_python()
+    if exe is None:
+        log(
+            "\nNo Python with flask found — the web UI needs it.\n"
+            "\n"
+            "Fix it, then run this again:\n"
+            "  brew install python@3.14 && python3.14 -m pip install flask\n"
+            "\n"
+            "('./organize web' picks up python3.10+ with flask\n"
+            "automatically once one is installed.)\n"
+        )
+        return 1
+    if exe != sys.executable:
+        log(f"(using {exe} — this python3 has no flask)")
+    subprocess.run([exe, str(app)])
+    return 0
 
 
 # ── usage ──────────────────────────────────────────────────────────────────

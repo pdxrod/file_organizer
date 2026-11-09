@@ -101,14 +101,70 @@ def _is_running():
     except Exception:
         return False
 
-if __name__ == "__main__":
+def _lan_ip():
+    """Best physical-LAN IPv4 address to print as the browser URL.
+
+    Werkzeug's own banner lists every interface, including VPN tunnels
+    (utun*). Opening a tunnel address in a browser hangs: the request is
+    routed into the tunnel and never answered. Ask the OS for the
+    physical interface address first; fall back to the default-route
+    trick (which is itself fooled by VPNs — that is why the OS is asked
+    first).
+    """
     import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    if sys.platform == "darwin":
+        for dev in ("en0", "en1", "en2", "en3"):
+            try:
+                out = subprocess.run(
+                    ["ipconfig", "getifaddr", dev],
+                    capture_output=True, text=True, timeout=5,
+                )
+                ip = (out.stdout or "").strip()
+                if ip:
+                    return ip
+            except Exception:
+                pass
     try:
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
     except Exception:
-        local_ip = "127.0.0.1"
-    finally:
-        s.close()
-    app.run(host="0.0.0.0", port=5000, debug=False)
+        return "127.0.0.1"
+
+
+if __name__ == "__main__":
+    from werkzeug.serving import make_server
+
+    port = 5000
+    try:
+        server = make_server("0.0.0.0", port, app, threaded=True)
+    except OSError as exc:
+        print(
+            f"Cannot start the web UI on port {port}: {exc}\n"
+            "\n"
+            "On macOS, AirPlay Receiver often claims port 5000. Either turn\n"
+            "it off (System Settings > General > AirDrop & Handoff >\n"
+            "AirPlay Receiver), or pick another port by editing PORT in\n"
+            "web_app.py.\n"
+        )
+        sys.exit(1)
+
+    lan = _lan_ip()
+    print("File Organizer web UI — view the organized folder and run scans",
+          flush=True)
+    print("from a phone or tablet on the same Wi-Fi network:\n", flush=True)
+    print(f"  this computer:  http://127.0.0.1:{port}", flush=True)
+    if lan and lan != "127.0.0.1":
+        print(f"  phone/tablet:   http://{lan}:{port}", flush=True)
+    print(
+        "\nIf the page hangs, use the other address — VPN/tunnel addresses\n"
+        "(utun, Tailscale, ...) are not reachable from a browser.",
+        flush=True,
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass

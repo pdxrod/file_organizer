@@ -591,5 +591,60 @@ class GuiInterpreterTests(unittest.TestCase):
             self.assertIsNone(organize.gui_python())
 
 
+class WebInterpreterTests(unittest.TestCase):
+    """'organize web' must launch with an interpreter that has flask.
+
+    Apple's bundled /usr/bin/python3 doesn't ship flask, so web_python()
+    prefers the current interpreter when it can import flask, otherwise
+    the newest installed python3 with flask, otherwise None.
+    """
+
+    def test_current_interpreter_preferred_when_flask_present(self):
+        with mock.patch.object(organize, "flask_available", return_value=True):
+            self.assertEqual(organize.web_python(), sys.executable)
+
+    def test_newer_python_chosen_when_current_lacks_flask(self):
+        def fake_available(exe):
+            return exe != sys.executable
+
+        with mock.patch.object(organize, "flask_available",
+                               side_effect=fake_available), \
+             mock.patch.object(shutil, "which",
+                               return_value="/opt/homebrew/bin/python3.14"):
+            self.assertEqual(organize.web_python(),
+                             "/opt/homebrew/bin/python3.14")
+
+    def test_none_when_no_flask_anywhere(self):
+        with mock.patch.object(organize, "flask_available", return_value=False), \
+             mock.patch.object(shutil, "which", return_value=None):
+            self.assertIsNone(organize.web_python())
+
+    def test_candidates_checked_newest_first(self):
+        checked = []
+
+        def fake_available(exe):
+            checked.append(exe)
+            return False
+
+        with mock.patch.object(organize, "flask_available",
+                               side_effect=fake_available), \
+             mock.patch.object(shutil, "which",
+                               side_effect=lambda name: f"/opt/{name}"):
+            self.assertIsNone(organize.web_python())
+        self.assertEqual(
+            checked,
+            [sys.executable, "/opt/python3.14", "/opt/python3.13",
+             "/opt/python3.12", "/opt/python3.11", "/opt/python3.10"],
+        )
+
+    def test_current_interpreter_never_relaunched(self):
+        # A candidate resolving to sys.executable itself must be skipped
+        # (it cannot be newer than the interpreter already running).
+        with mock.patch.object(organize, "flask_available", return_value=False), \
+             mock.patch.object(shutil, "which",
+                               return_value=sys.executable):
+            self.assertIsNone(organize.web_python())
+
+
 if __name__ == "__main__":
     unittest.main()

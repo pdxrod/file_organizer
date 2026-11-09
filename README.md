@@ -310,6 +310,32 @@ tells you how to install it:
 brew install python-tk@3.14
 ```
 
+### Web UI (`./organize web`)
+
+A small web page served on your computer, made for opening from a phone
+or tablet on the same Wi-Fi network. It shows the `organized` folder's
+categories and links, and has a Run Scan button to trigger one
+production cycle. It runs on port 5000:
+
+```bash
+./organize web
+```
+
+The server prints the addresses to open — use the `this computer` one
+in a browser on the computer, the `phone/tablet` one from other devices
+on the same network. (Addresses like `utun` or VPN tunnels are not
+reachable from a browser — opening one just hangs.)
+
+`organize web` needs flask and launches with a python3 that has it,
+installing guidance included:
+
+```bash
+brew install python@3.14 && python3.14 -m pip install flask
+```
+
+If port 5000 is taken (macOS AirPlay Receiver often claims it), the
+server prints how to free it or pick another port.
+
 ## Everyday commands — phone
 
 ```bash
