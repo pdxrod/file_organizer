@@ -129,7 +129,17 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     else:
         logger.info("=== PRODUCTION MODE — changes will be applied ===")
 
-    # 1. Scan — build allowed extensions from organize_file_types config
+    # 1. Auto phone pull — FIRST, before anything else: if a phone is
+    # connected, its staged files land on this computer before the scan
+    # builds the organized tree, so freshly pulled files are organized
+    # and synced in this same cycle instead of the next one. Best-effort:
+    # no device = one quiet log line.
+    if not dry_run:
+        pulled = run_auto_phone_pull(config)
+        if pulled:
+            logger.info("Auto phone pull: pulled phone files into staging")
+
+    # 2. Scan — build allowed extensions from organize_file_types config
     allowed_types: list[str] = config.raw_config.get("organize_file_types", []) or []
     if allowed_types:
         allowed_extensions: set[str] = {
@@ -144,7 +154,7 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     scanned = list(scanner.scan_all_sources(allowed_extensions=allowed_extensions))
     logger.info("Scanned %d files.", len(scanned))
 
-    # 2. Analyze
+    # 3. Analyze
     if config.raw_config.get("enable_content_analysis", False):
         logger.info("Analyzing file contents...")
         file_keywords = []
@@ -158,7 +168,7 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     else:
         categories = []
 
-    # 3. Organize
+    # 4. Organize
     logger.info("Building organized link tree...")
     # Build mapping of file -> assigned categories
     file_cat_map: dict = {}
@@ -175,15 +185,6 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     valid_files = {sf.path for sf in scanned}
     if not dry_run:
         actions["orphans_removed"] += organizer.clean_orphaned_links(valid_files)
-
-    # 4. Auto phone pull — if a phone is connected, pull its
-    # file_organizer_staging files onto this computer BEFORE the folder
-    # sync starts, so the pulled files ride along to the cloud drive in
-    # the same cycle. Best-effort: no device = one quiet log line.
-    if not dry_run:
-        pulled = run_auto_phone_pull(config)
-        if pulled:
-            logger.info("Auto phone pull: pulled phone files into staging")
 
     # 5. Sync — run in background thread so slow ProtonDrive/external
     # drives don't block the fast scan + organize work

@@ -290,7 +290,9 @@ Phone (Termux)                         Computer                        Cloud
    `MAIN_DRIVE/misc` (created on demand) for anything it can't place.
    With `phone_pull.auto_pull: true` (the default), every production
    `./organize auto` cycle does this pull automatically when a phone is
-   connected — no separate `pull` command needed.
+   connected — FIRST, before anything else, so the pulled files are
+   organized and synced in that same cycle — no separate `pull` command
+   needed.
 3. The computer's sync pairs then mirror those folders to Proton Drive,
    Google Drive, or an external disk.
 4. `./organize push` copies files from the cloud back to the phone.

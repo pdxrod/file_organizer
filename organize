@@ -757,11 +757,11 @@ def usage(platform):
         )
     else:
         auto_does = (
-            "one production scan: builds the 'organized' soft-link folder, "
-            "pulls phone files over USB when a phone is plugged in, syncs "
-            "folders with Proton Drive/Google Drive/external drives, runs "
-            "auto-git, and sorts new files from your watch folders into "
-            "their buckets. One command — it just works."
+            "one production scan: pulls phone files over USB first (when a "
+            "phone is plugged in), then builds the 'organized' soft-link "
+            "folder, syncs folders with Proton Drive/Google Drive/external "
+            "drives, runs auto-git, and sorts new files from your watch "
+            "folders into their buckets. One command — it just works."
         )
     lines = [
         "",
