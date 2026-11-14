@@ -443,6 +443,158 @@ a git/venv project) that you can point a config at to try the program out.
 The phone equivalent is `./organize test` on the phone (dry-run scan of the
 real folders — it copies nothing).
 
+A scripted walkthrough of the whole phone → computer → cloud pipeline is
+below: **End-to-end test plan**.
+
+---
+
+## End-to-end test plan — phone → computer → Proton Drive
+
+A repeatable walkthrough that starts from a clean slate and exercises the
+whole pipeline: phone scan → staging folder → USB pull → organize (soft
+links) → sync to Proton Drive. Steps marked ⚠️ are the ones you do by hand;
+everything else is a script.
+
+### 0. Preparation (computer, in the file_organizer folder)
+
+```bash
+python3 src/test/restore-major-folders.py   # if a previous run left files in /tmp, put them back first
+python3 src/test/backup-major-folders.py    # sweep ~/Pictures ~/Downloads ~/Documents ~/Music ~/misc to /tmp
+mv config.yaml /tmp/config.yaml.saved       # you will generate a fresh one
+rm -rf organized                            # start with an empty organized/ folder
+```
+
+### 1. Fresh computer config
+
+Run `./organize config` (it opens automatically — config.yaml is missing).
+Answer like this:
+
+- **drives**: your real paths — MAIN_DRIVE = your home, PROTON_DRIVE = your
+  Proton Drive folder, and so on. EXTERNAL_DRIVE may be left as a
+  placeholder (missing drives are reported and skipped).
+- **Folder sync: ON** — this is what copies to Proton Drive. Keep your
+  normal sync pairs (dev, Documents, Pictures, misc, pol).
+- **Duplicate detection: OFF**. Semantic categories: your choice.
+- **Router: ON** (with Downloads and Desktop as watch folders) — the
+  Downloads part of this plan relies on it moving files out of ~/Downloads.
+- **Phone pull: auto_pull ON.** Note: the computer only pulls staged files
+  older than `phone_pull.min_age_minutes` (5). Either wait 5+ minutes
+  between the phone run and the computer run, or set it to 0 afterwards
+  with `./organize config`… if it asks — otherwise edit one line:
+  `nano config.yaml` → under `phone_pull:` → `min_age_minutes: 0`.
+
+Sanity check: `./organize test` should plan without errors and without
+"janedoe" placeholders.
+
+### 2. Test files on the computer
+
+```bash
+# A tiny project in ~/dev — it must reach Proton Drive, its .git must NOT
+mkdir -p ~/dev/sync_test_project/.git
+echo 'print("alpha")'  > ~/dev/sync_test_project/a.py
+echo 'print("beta")'   > ~/dev/sync_test_project/b.py
+echo 'local git data'  > ~/dev/sync_test_project/.git/config
+
+# One small file in each now-empty major folder
+echo "pictures test"  > ~/Pictures/20261111_pictures_test.txt
+echo "documents test" > ~/Documents/20261111_documents_test.txt
+echo "music test"     > ~/Music/20261111_music_test.txt
+echo "misc test"      > ~/misc/20261111_misc_test.txt
+echo "downloads test" > ~/Downloads/20261111_downloads_test.txt
+```
+
+What to expect: Documents, Pictures and misc are synced to Proton Drive;
+the Downloads file is MOVED out by the router to one of its buckets
+(~/pol, ~/dev, ~/Documents…); Music stays local (its one-way pair copies
+FROM Proton Drive).
+
+### 3. Test files on the phone
+
+On the phone (Termux), in the file_organizer folder:
+
+```bash
+git pull
+python src/test/create-files-on-phone.py
+```
+
+It creates six files: three ready to copy (`20261111_celtic.png`,
+`20261111_phone_notes.txt`, `20261111_phone_download.txt`) and three held
+app-generated ones (`Screenshot_20261114_666_X.jpg`,
+`Screenshot_20261114_777_X.jpg`, `IMG_20261114_153021.jpg`).
+
+⚠️ Make sure the phone's grace period is 0 (fresh files copy at once):
+`./organize config` → "Grace period (minutes)" → `0` (or check
+`phone_sync_config.yaml` says `min_age_minutes: 0`).
+
+### 4. Rename on the phone
+
+```bash
+./organize rename
+```
+
+- For `Screenshot_20261114_666_X.jpg` type the new name
+  `2026114_foo_baz.jpg` and press Enter (clear the date prefill if one
+  appears — type the full name).
+- For `Screenshot_20261114_777_X.jpg`: press **Enter alone** (keep it).
+- For `IMG_20261114_153021.jpg`: press **Enter alone** (keep it).
+- `x` stops the walk if you need to.
+
+Keeping two of them held is the point: they prove held files are not
+copied, while the renamed one now copies.
+
+### 5. Phone production scan
+
+```bash
+./organize auto
+```
+
+Ready files are copied into `file_organizer_staging/` keeping their folder
+structure; the held ones are logged as "Held until renamed".
+
+⚠️ Check: `ls file_organizer_staging/DCIM/Screenshots` should show ONLY
+`2026114_foo_baz.jpg` (no `777_X`, no `666_X`).
+
+### 6. Computer production run
+
+⚠️ Phone plugged in, **USB debugging ON**, and accept the "Allow USB
+debugging?" prompt if it appears.
+
+```bash
+./organize list    # optional — shows the phone
+./organize auto
+```
+
+This pulls the staging folder FIRST (into ~/misc and matching folders),
+then organizes and syncs to Proton Drive in the same cycle. ⚠️ If it
+pulled 0 files, the files are probably younger than
+`phone_pull.min_age_minutes` — wait 5 minutes (or set it to 0, see step 1)
+and run `./organize auto` again.
+
+### 7. Verify
+
+```bash
+python3 src/test/verify-test-results.py
+```
+
+Prints PASS/FAIL per check: phone files pulled (and held ones not),
+major-folder files in place, the router move, `~/dev/sync_test_project`
+mirrored to Proton Drive with `.git` excluded, Proton mirrors of the phone
+files, and organized/ soft links (intact, reaching into ~/pol and ~/dev).
+
+⚠️ Then eyeball: open Proton Drive and check Documents/, Pictures/,
+dev/sync_test_project (a.py, b.py, NO .git), misc/DCIM/Camera/
+20261111_celtic.png; open organized/ and follow a few links.
+
+### 8. Tear-down (computer)
+
+```bash
+python3 src/test/restore-major-folders.py
+```
+
+Your real Pictures/Downloads/Documents/Music/misc contents come back
+(test files stay — delete them if you like). Keep the fresh config or put
+your old one back: `mv /tmp/config.yaml.saved config.yaml`.
+
 ---
 
 ## What gets organized / synced — and what never does
