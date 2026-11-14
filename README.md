@@ -458,11 +458,16 @@ everything else is a script.
 ### 0. Preparation (computer, in the file_organizer folder)
 
 ```bash
+./organize stop                          # no daemon running with the old config
 python3 src/test/restore-major-folders.py   # if a previous run left files in /tmp, put them back first
 python3 src/test/backup-major-folders.py    # sweep ~/Pictures ~/Downloads ~/Documents ~/Music ~/misc to /tmp
 mv config.yaml /tmp/config.yaml.saved       # you will generate a fresh one
 rm -rf organized                            # start with an empty organized/ folder
 ```
+
+⚠️ From here until the one-way pairs from step 1 are in place, do NOT run
+`./organize auto` (and don't `./organize start`): a both-ways pair would
+refill the emptied folders with everything on Proton Drive.
 
 ### 1. Fresh computer config
 
@@ -472,9 +477,15 @@ Answer like this:
 - **drives**: your real paths — MAIN_DRIVE = your home, PROTON_DRIVE = your
   Proton Drive folder, and so on. EXTERNAL_DRIVE may be left as a
   placeholder (missing drives are reported and skipped).
-- **Folder sync: ON** — this is what copies to Proton Drive. The
-  scripted checks assume three MAIN ↔ PROTON pairs exist: `Documents`,
-  `Pictures` and `misc` (add them if your normal set differs).
+- **Folder sync: ON — with ONE-WAY pairs for this test.** The scripted
+  checks assume three push pairs exist: `MAIN_DRIVE/Documents →
+  PROTON_DRIVE/Documents`, `MAIN_DRIVE/Pictures → PROTON_DRIVE/Pictures`,
+  `MAIN_DRIVE/misc → PROTON_DRIVE/misc`. Do NOT use both-ways pairs for
+  these, and remove any pair whose SOURCE is on Proton Drive (e.g. Proton
+  Music → MAIN Music). Reason: both-ways pairs copy FROM Proton Drive too,
+  and with your folders emptied the next run would refill them with
+  everything in the cloud. Nothing on Proton Drive needs emptying —
+  pushes never delete anything there.
 - **Duplicate detection: OFF**. Semantic categories: your choice.
 - **Router: ON** (with Downloads and Desktop as watch folders) — the
   Downloads part of this plan relies on it moving files out of ~/Downloads.
@@ -504,10 +515,11 @@ echo "misc test"      > ~/misc/20261111_misc_test.txt
 echo "downloads test" > ~/Downloads/20261111_downloads_test.txt
 ```
 
-What to expect: Documents, Pictures and misc are synced to Proton Drive;
-the Downloads file is MOVED out by the router into one of YOUR router's
-target folders (whatever you configured); Music stays local (its one-way
-pair copies FROM Proton Drive).
+What to expect: Documents, Pictures and misc are PUSHED to Proton Drive
+by the one-way pairs (nothing comes back down); the Downloads file is
+MOVED out by the router into one of YOUR router's target folders
+(whatever you configured); Music stays local (its one-way pair copies
+FROM Proton Drive).
 
 ### 3. Test files on the phone
 

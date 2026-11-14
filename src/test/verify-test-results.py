@@ -79,7 +79,8 @@ def parse_config(path: Path) -> dict:
         if not stripped or stripped.startswith("#"):
             continue
         indent = len(raw) - len(raw.lstrip(" "))
-        # router watch_folders list items ("- MAIN_DRIVE/Downloads") have no colon
+        # List items without a colon: router watch_folders entries and the
+        # folder paths inside sync_pairs / one_way_pairs.
         if (
             section == "router"
             and indent == 4
@@ -89,6 +90,14 @@ def parse_config(path: Path) -> dict:
             cfg["router"]["watch_folders"].append(
                 stripped.lstrip("-").strip()
             )
+            continue
+        if (
+            section in ("sync_pairs", "one_way_pairs")
+            and subsection == "folders"
+            and stripped.startswith("-")
+            and ":" not in stripped
+        ):
+            cfg[section][-1].append(stripped.lstrip("-").strip())
             continue
         if ":" not in stripped:
             continue
@@ -114,6 +123,11 @@ def parse_config(path: Path) -> dict:
                 if sub_val.strip():
                     cfg["router"]["target_folders"][sub_key.strip()] = \
                         sub_val.strip().strip("'\"")
+        elif section in ("sync_pairs", "one_way_pairs"):
+            if stripped.startswith("-") and not val:
+                # "- folders:" starts a new pair
+                cfg.setdefault(section, []).append([])
+                subsection = "folders"
     return cfg
 
 
@@ -172,6 +186,49 @@ def main() -> None:
     report("INFO", f"phone pull stage = {local_stage}")
     report("INFO", f"organized     = {organized}")
     report("INFO", "")
+
+    # Safety nudge: both-ways pairs (and one-way pairs whose source is on
+    # Proton Drive) copy FROM the cloud into the folders this plan empties.
+    # The plan expects one-way push pairs instead, so warn loudly.
+    if proton_drive:
+        major_folders = {
+            os.path.realpath(main_drive / name)
+            for name in ("Documents", "Pictures", "Music", "misc",
+                         "Downloads")
+        }
+        proton_prefix = os.path.realpath(proton_drive) + os.sep
+        for pair in cfg.get("sync_pairs", []):
+            if len(pair) != 2:
+                continue
+            a_real = os.path.realpath(resolve(pair[0], cfg))
+            b_real = os.path.realpath(resolve(pair[1], cfg))
+            if (
+                (a_real.startswith(proton_prefix) and b_real in major_folders)
+                or (b_real.startswith(proton_prefix)
+                    and a_real in major_folders)
+            ):
+                report(
+                    "INFO",
+                    f"WARNING: both-ways pair {pair[0]} <-> {pair[1]} "
+                    "copies FROM Proton Drive into a folder this plan "
+                    "empties — the plan expects ONE-WAY push pairs for "
+                    "the test",
+                )
+        for pair in cfg.get("one_way_pairs", []):
+            if len(pair) != 2:
+                continue
+            src_real = os.path.realpath(resolve(pair[0], cfg))
+            dst_real = os.path.realpath(resolve(pair[1], cfg))
+            if (
+                src_real.startswith(proton_prefix)
+                and dst_real in major_folders
+            ):
+                report(
+                    "INFO",
+                    f"WARNING: one-way pair {pair[0]} -> {pair[1]} copies "
+                    "FROM Proton Drive into a folder this plan empties — "
+                    "remove it for the test",
+                )
 
     # 1. Phone files: ready ones present, held ones absent.
     roots = [local_stage] + [
