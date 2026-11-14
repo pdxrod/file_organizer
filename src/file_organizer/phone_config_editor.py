@@ -399,7 +399,8 @@ def run_phone_editor(config_path: str, template_path: Optional[str] = None,
         _ask_number(
             cfg, "min_age_minutes", "Grace period (minutes)",
             "Files younger than this are left alone — time to delete\n"
-            "unwanted photos BEFORE they get copied. 0 = copy immediately.",
+            "unwanted photos BEFORE they get copied. 0 = copy\n"
+            "immediately (the default).",
             input_fn, output_fn, minimum=0,
         )
         _toggle(
