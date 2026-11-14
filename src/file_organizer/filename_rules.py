@@ -64,6 +64,17 @@ APP_GENERATED_PATTERNS = [
     r"^imag\d{4}(?:\.[^.]+)?$",                  # HTC IMAG0001.jpg
     r"^\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}" + _DECO + r"(?:\.[^.]+)?$",
     r"^\d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}",  # iOS "2026-01-01 at 12.34.56"
+    # Broader hold rules (user-requested): pure numbers, bare dates,
+    # digits_digits_APP tags, "screenshot"/"IMG" anywhere, more app formats.
+    r"^\d+(?:_\d+)*" + _DECO + r"(?:\.[^.]+)?$",   # just numbers: 20260909.jpg / 20260909_666.jpg
+    r"^\d{4}[-_.]\d{2}[-_.]\d{2}" + _DECO + r"(?:\.[^.]+)?$",  # bare date: 2026-01-01.jpg
+    r"^\d+_\d+_[A-Za-z0-9]{1,8}" + _DECO + r"(?:\.[^.]+)?$",  # 20260909_666_X.jpg (app tag)
+    r".*screenshot.*",                            # "screenshot" anywhere in the name
+    r".*(?<![a-z])img(?=\d).*",                   # IMG+digits anywhere (camera style)
+    r"^received[_-]\d+",                          # WhatsApp Received_123…
+    r"^aud-?\d{8}-?wa\d+",                       # WhatsApp AUD-20260101-WA0000.m4a
+    r"^ptt-?\d{8}-?wa\d+",                       # WhatsApp PTT-20260101-WA0000.opus
+    r"^signal[-_]\d{4}-\d{2}-\d{2}",             # Signal-2026-01-01-123456.jpg
 ]
 
 _COMPILED = [re.compile(p, re.IGNORECASE) for p in APP_GENERATED_PATTERNS]

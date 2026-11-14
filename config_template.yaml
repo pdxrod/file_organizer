@@ -614,9 +614,10 @@ phone:
   # './organize test' (dry-run log shows the planned renames/deletes).
   collapse_rename_families: false
 
-  # Item 13 — hold app-generated filenames (Screenshot_…,
-  # YYYYMMDD_HHMMSS.jpg, IMG-YYYYMMDD-WA0001.jpg, PXL_…, …) until you
-  # rename them to something meaningful; such files are NOT copied.
+  # Item 13 — hold app-generated filenames (Screenshot…, IMG…, VID…,
+  # YYYYMMDD_HHMMSS.jpg, plain numbers like 20260909.jpg,
+  # 20260909_666_X.jpg, PXL_…, …) until you rename them to something
+  # meaningful; such files are NOT copied.
   # A timestamp with real words added (e.g.
   # 20231203_014527_lehmann_shulevitz_hard_moral_choices.jpg) counts as
   # renamed and IS copied.

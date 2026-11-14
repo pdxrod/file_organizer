@@ -55,6 +55,18 @@ class AppGeneratedTests(unittest.TestCase):
             "Audio_20260101_123456.m4a",
             "2026-01-01 12.34.56.jpg",
             "2026-01-01 at 12.34.56.jpg",
+            # Broader rules: pure numbers, bare dates, app tags, anywhere forms
+            "20260909.jpg",
+            "20260909_666.jpg",
+            "20260909_666_X.jpg",
+            "2026-01-01.jpg",
+            "20260909-screenshot.jpg",
+            "my-screenshot.png",
+            "20260909_IMG12345.jpg",
+            "Received_123456789.jpg",
+            "AUD-20260101-WA0000.m4a",
+            "PTT-20260101-WA0000.opus",
+            "signal-2026-01-01-123456.jpg",
         ]
         for name in held:
             self.assertTrue(is_app_generated(name), name)
@@ -69,6 +81,10 @@ class AppGeneratedTests(unittest.TestCase):
             "2026-09-23_macklemore_mocha_miracles.png",
             "report (2026).txt",
             "IMG-2026-01-01-birthday.jpg",  # IMG + date + real words
+            "img_comparison.png",  # user word, not a camera IMG
+            "imagine.png",
+            "2026-01-01-birthday.jpg",  # date + real word = renamed
+            "20260101 party.jpg",  # digits + real word = renamed
         ]
         for name in copied:
             self.assertFalse(is_app_generated(name), name)
