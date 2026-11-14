@@ -1,57 +1,83 @@
 #!/usr/bin/env python3
-"""Put the real contents of the major folders back after a test run.
+"""Put the swept files back after the end-to-end test plan.
 
-Moves everything from /tmp/major-folders-backup/<name> back into
-~/<name> for: Pictures, Downloads, Documents, Music, misc.
+Reads the manifest written by backup-major-folders.py and moves every
+backed-up entry back into its original folder. Anything already present in
+the target (e.g. test files created during the plan, or files the sync
+brought back from the one-way source) is left alone and reported as
+skipped. The manifest is removed once everything is restored.
 
-Anything already present in the target folder (e.g. test files you made)
-is left alone and reported as skipped.
+Cross-platform: works wherever the backup script ran (the manifest stores
+absolute original paths).
 
 Usage:  python3 src/test/restore-major-folders.py
 """
 
+import json
 import shutil
+import sys
 from pathlib import Path
 
-MAJOR_FOLDERS = ["Pictures", "Downloads", "Documents", "Music", "misc"]
-BACKUP_ROOT = Path("/tmp/major-folders-backup")
-HOME = Path.home()
+import testplan_common as tc
 
 
 def main() -> None:
-    if not BACKUP_ROOT.exists():
-        print(f"Nothing to restore — {BACKUP_ROOT} does not exist.")
+    if not tc.MANIFEST_PATH.exists():
+        print(f"Nothing to restore — {tc.MANIFEST_PATH} does not exist.")
         return
 
-    for name in MAJOR_FOLDERS:
-        src_dir = BACKUP_ROOT / name
-        dst_dir = HOME / name
-        if not src_dir.exists() or not any(src_dir.iterdir()):
-            print(f"{name:10} nothing to restore")
+    try:
+        manifest = json.loads(tc.MANIFEST_PATH.read_text())
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: cannot read manifest {tc.MANIFEST_PATH}: {exc}")
+        sys.exit(1)
+
+    folders = manifest.get("folders", [])
+    if not folders:
+        print("Manifest is empty — nothing to restore.")
+        tc.MANIFEST_PATH.unlink(missing_ok=True)
+        return
+
+    for entry in folders:
+        original = Path(entry["original"])
+        backup = Path(entry["backup"])
+        if not backup.is_dir():
+            print(f"SKIP  backup folder missing: {backup}")
             continue
-        dst_dir.mkdir(parents=True, exist_ok=True)
+        original.mkdir(parents=True, exist_ok=True)
         restored = 0
         skipped = 0
-        for entry in src_dir.iterdir():
-            target = dst_dir / entry.name
+        for item in backup.iterdir():
+            target = original / item.name
             if target.exists():
-                print(f"  SKIP  {name}/{entry.name} — already in ~/{name}")
+                print(f"  SKIP  {original.name}/{item.name} — already in "
+                      f"{original}")
                 skipped += 1
                 continue
-            shutil.move(str(entry), str(target))
+            shutil.move(str(item), str(target))
             restored += 1
-        if not any(src_dir.iterdir()):
-            src_dir.rmdir()
-        print(f"{name:10} restored {restored} item(s)"
+        if not any(backup.iterdir()):
+            backup.rmdir()
+        print(f"{original}: restored {restored} item(s)"
               + (f", skipped {skipped}" if skipped else ""))
 
-    if BACKUP_ROOT.exists() and not any(BACKUP_ROOT.iterdir()):
-        BACKUP_ROOT.rmdir()
+    tc.MANIFEST_PATH.unlink(missing_ok=True)
+    leftovers = [p for p in (tc.BACKUP_ROOT / "folders").iterdir()] \
+        if (tc.BACKUP_ROOT / "folders").is_dir() else []
+    if leftovers:
+        print("WARNING: some backup folders still have content: "
+              + ", ".join(str(p) for p in leftovers))
+    for sub in (tc.BACKUP_ROOT / "folders", tc.BACKUP_ROOT):
+        try:
+            if sub.is_dir() and not any(sub.iterdir()):
+                sub.rmdir()
+        except OSError:
+            pass
 
     print()
-    print("Done. Your real files are back in the major folders.")
-    print("(Test files created during the plan stay where they are —")
-    print("delete them by hand if you don't want them.)")
+    print("Done. Your files are back in their original folders.")
+    print("(Files created during the plan stay where they are — delete")
+    print("them by hand if you don't want them.)")
 
 
 if __name__ == "__main__":

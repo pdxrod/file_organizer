@@ -458,68 +458,65 @@ everything else is a script.
 ### 0. Preparation (computer, in the file_organizer folder)
 
 ```bash
-./organize stop                          # no daemon running with the old config
-python3 src/test/restore-major-folders.py   # if a previous run left files in /tmp, put them back first
-python3 src/test/backup-major-folders.py    # sweep ~/Pictures ~/Downloads ~/Documents ~/Music ~/misc to /tmp
-mv config.yaml /tmp/config.yaml.saved       # you will generate a fresh one
+./organize stop                          # no daemon running during the test
+python3 src/test/restore-major-folders.py   # undo any previous run
+python3 src/test/backup-major-folders.py    # sweep the test folders (see below)
 rm -rf organized                            # start with an empty organized/ folder
 ```
 
-⚠️ From here until the one-way pairs from step 1 are in place, do NOT run
-`./organize auto` (and don't `./organize start`): a both-ways pair would
-refill the emptied folders with everything on Proton Drive.
+`backup-major-folders.py` reads YOUR config.yaml and picks two pairs
+(`--list` shows the candidates; `--sync-pair N` / `--one-way-pair N` pick
+others, 1-based numbers from that list):
 
-### 1. Fresh computer config
+- one **sync_pair**: BOTH sides are swept to a temp backup, then two test
+  files (`20261111_side_a_test.txt` on side A, `20261111_side_b_test.txt`
+  on side B) and a tiny project (`sync_test_project/` with a.py, b.py and
+  a .git folder) are created on side A. After `organize auto`, both sides
+  must contain BOTH test files, and the project must have reached the
+  other side WITHOUT .git.
+- one **one_way_pair** (source exists, target is a local folder): only the
+  TARGET side is swept — its source is left untouched. After
+  `organize auto` the target must have been refilled from the source; e.g.
+  with the pair `PROTON_DRIVE/Music → MAIN_DRIVE/Music`, an emptied
+  ~/Music gets repopulated from Proton Drive.
 
-Run `./organize config` (it opens automatically — config.yaml is missing).
-Answer like this:
+The default picks are the smallest eligible pairs, so the sweep is fast
+and nothing important travels far (everything comes back in step 8).
+Nothing on Proton Drive is ever emptied: the one-way pair only loses its
+local target's contents, and the sync pair's cloud side holds only the
+tiny test files during the run.
 
-- **drives**: your real paths — MAIN_DRIVE = your home, PROTON_DRIVE = your
-  Proton Drive folder, and so on. EXTERNAL_DRIVE may be left as a
-  placeholder (missing drives are reported and skipped).
-- **Folder sync: ON — with ONE-WAY pairs for this test.** The scripted
-  checks assume three push pairs exist: `MAIN_DRIVE/Documents →
-  PROTON_DRIVE/Documents`, `MAIN_DRIVE/Pictures → PROTON_DRIVE/Pictures`,
-  `MAIN_DRIVE/misc → PROTON_DRIVE/misc`. Do NOT use both-ways pairs for
-  these, and remove any pair whose SOURCE is on Proton Drive (e.g. Proton
-  Music → MAIN Music). Reason: both-ways pairs copy FROM Proton Drive too,
-  and with your folders emptied the next run would refill them with
-  everything in the cloud. Nothing on Proton Drive needs emptying —
-  pushes never delete anything there.
-- **Duplicate detection: OFF**. Semantic categories: your choice.
-- **Router: ON** (with Downloads and Desktop as watch folders) — the
-  Downloads part of this plan relies on it moving files out of ~/Downloads.
-- **Phone pull: auto_pull ON.** Note: the computer only pulls staged files
-  older than `phone_pull.min_age_minutes` (5). Either wait 5+ minutes
-  between the phone run and the computer run, or set it to 0 afterwards
-  with `./organize config`… if it asks — otherwise edit one line:
-  `nano config.yaml` → under `phone_pull:` → `min_age_minutes: 0`.
+⚠️ Do not run `./organize auto` or `./organize start` yet — the swept
+folders must stay empty until step 6.
 
-Sanity check: `./organize test` should plan without errors and without
-"janedoe" placeholders.
+### 1. Sanity check (computer)
 
-### 2. Test files on the computer
+Your real config.yaml is used as-is — nothing needs regenerating.
 
 ```bash
-# A tiny project in ~/misc — it must reach Proton Drive, its .git must NOT
-mkdir -p ~/misc/sync_test_project/.git
-echo 'print("alpha")'  > ~/misc/sync_test_project/a.py
-echo 'print("beta")'   > ~/misc/sync_test_project/b.py
-echo 'local git data'  > ~/misc/sync_test_project/.git/config
+./organize test     # dry run: no errors, no "janedoe" placeholders
+```
 
-# One small file in each now-empty major folder
-echo "pictures test"  > ~/Pictures/20261111_pictures_test.txt
-echo "documents test" > ~/Documents/20261111_documents_test.txt
-echo "music test"     > ~/Music/20261111_music_test.txt
-echo "misc test"      > ~/misc/20261111_misc_test.txt
+Two timing knobs to know about:
+
+- the computer only pulls staged phone files older than
+  `phone_pull.min_age_minutes` (5) — wait 5+ minutes between the phone
+  run and the computer run, or set it to 0 (one line under `phone_pull:`
+  in config.yaml);
+- the phone's own grace period must be 0 so fresh files copy at once
+  (step 3).
+
+### 2. One more computer-side test file (router)
+
+If your router watches ~/Downloads (config.yaml → router → watch_folders):
+
+```bash
 echo "downloads test" > ~/Downloads/20261111_downloads_test.txt
 ```
 
-What to expect: Documents, Pictures and misc are PUSHED to Proton Drive
-by the one-way pairs (nothing comes back down); the Downloads file is
-MOVED out by the router into one of YOUR router's target folders
-(whatever you configured); Music stays local (its one-way pair copies
-FROM Proton Drive).
+`organize auto` should MOVE it out of ~/Downloads into one of your
+router's target folders. No router in your config? Skip this — the
+verifier skips it too.
 
 ### 3. Test files on the phone
 
@@ -578,10 +575,10 @@ debugging?" prompt if it appears.
 ```
 
 This pulls the staging folder FIRST (into ~/misc and matching folders),
-then organizes and syncs to Proton Drive in the same cycle. ⚠️ If it
-pulled 0 files, the files are probably younger than
-`phone_pull.min_age_minutes` — wait 5 minutes (or set it to 0, see step 1)
-and run `./organize auto` again.
+then organizes, runs the router, and syncs all your pairs (both-ways and
+one-way) in the same cycle. ⚠️ If it pulled 0 files, the files are
+probably younger than `phone_pull.min_age_minutes` — wait 5 minutes (or
+set it to 0, see step 1) and run `./organize auto` again.
 
 ### 7. Verify
 
@@ -589,14 +586,17 @@ and run `./organize auto` again.
 python3 src/test/verify-test-results.py
 ```
 
-Prints PASS/FAIL per check: phone files pulled (and held ones not),
-major-folder files in place, the router move, `~/misc/sync_test_project`
-mirrored to Proton Drive with `.git` excluded, Proton mirrors of the phone
-files, and organized/ soft links (intact, pointing at your real files).
+Prints PASS/FAIL per check: phone files pulled (and held ones not), the
+sync pair synchronised BOTH ways (both sides have each other's test
+files, and the project arrived without .git), the one-way target refilled
+from its source, the router move, and organized/ soft links (intact,
+pointing at your real files). It reads the backup manifest, so it checks
+exactly the pairs the backup script swept — no flags needed
+(`--sync-pair` / `--one-way-pair` exist only for checking a pair when no
+manifest is present).
 
-⚠️ Then eyeball: open Proton Drive and check Documents/, Pictures/,
-misc/ (sync_test_project with a.py + b.py and NO .git),
-misc/DCIM/Camera/20261111_celtic.png; open organized/ and follow a few
+⚠️ Then eyeball: both folders of the sync pair and the one-way target
+(the script prints them), Proton Drive, and organized/ — follow a few
 links back to your files.
 
 ### 8. Tear-down (computer)
@@ -605,9 +605,10 @@ links back to your files.
 python3 src/test/restore-major-folders.py
 ```
 
-Your real Pictures/Downloads/Documents/Music/misc contents come back
-(test files stay — delete them if you like). Keep the fresh config or put
-your old one back: `mv /tmp/config.yaml.saved config.yaml`.
+Everything the backup script swept goes back where it was. Anything the
+sync copied into the swept folders first stays put (e.g. the one-way
+target now also holds copies of its source's files — delete them by hand
+if you don't want them). Your config.yaml was never touched.
 
 ---
 
