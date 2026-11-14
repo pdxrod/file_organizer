@@ -41,12 +41,16 @@ _APP_WORDS = (
 # Patterns without an explicit $ keep matching when decorations follow.
 APP_GENERATED_PATTERNS = [
     r"^screenshot[\s_-]",                        # Screenshot_20250831_190852_Gmail.jpg
+    r"^screenshot\d",                             # Screenshot20261114-153021.png (no separator)
     r"^screen ?(shot|recording)[\s_-]",          # "Screen Shot …", "Screen Recording …"
     r"^[a-z0-9]+-screenshot-\d+",                # BBl-Screenshot-1700019577590.jpeg
     r"^img-?\d{8}-?wa\d+",                       # IMG-20240219-WA0000.jpg
     r"^vid-?\d{8}-?wa\d+",                       # VID-20240219-WA0001.mp4
     r"^img[_-]\d{8}[_-]\d{6}",                   # IMG_20260101_123456.jpg
     r"^vid[_-]\d{8}[_-]\d{6}",                   # VID_20260101_123456.mp4
+    r"^img\d{14,}",                              # IMG20261114153021.jpg (no separators)
+    r"^vid\d{14,}",                              # VID20261114153021.mp4 (no separators)
+    r"^img[_-]\d{3,7}" + _DECO + r"(?:\.[^.]+)?$",  # IMG_0123.jpg (iOS camera roll)
     r"^pxl_\d{8}_\d+",                           # Google Pixel
     r"^mvimg_\d{8}_\d+",                         # Google motion photo
     r"^panorama_\d{8}_\d+",
