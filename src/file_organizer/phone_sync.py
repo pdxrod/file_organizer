@@ -1105,18 +1105,28 @@ def collect_held_files(sync: "PhoneSync") -> list:
     min_age = 0 — a fresh screenshot can be renamed straight away. The
     list is sorted by path for a stable prompt order.
     """
+    files, _scanned = collect_held_files_detailed(sync)
+    return files
+
+
+def collect_held_files_detailed(sync: "PhoneSync") -> tuple:
+    """(held_files, scanned_count) — collect_held_files plus how many
+    candidate files the scan saw, so 'organize rename' can explain itself
+    when nothing is found."""
     if not sync.hold_app_generated_names:
-        return []
+        return [], 0
     include_ext, exclude_ext, exclude_pat = sync._scan_filters()
-    return sorted(
-        filepath
-        for filepath, _mtime in scan_sources(
-            sync.source_dirs, include_ext, exclude_ext, exclude_pat,
-            sync.exclude_folder_patterns, sync.exclude_folder_names,
-            sync.max_size_mb, 0,
-        )
-        if is_app_generated(filepath.name)
-    )
+    held = []
+    scanned = 0
+    for filepath, _mtime in scan_sources(
+        sync.source_dirs, include_ext, exclude_ext, exclude_pat,
+        sync.exclude_folder_patterns, sync.exclude_folder_names,
+        sync.max_size_mb, 0,
+    ):
+        scanned += 1
+        if is_app_generated(filepath.name):
+            held.append(filepath)
+    return sorted(held), scanned
 
 
 def _input_with_prefill(prompt: str, prefill: str, input_fn=input) -> str:
@@ -1180,10 +1190,28 @@ def rename_held_interactive(
 
     Returns {"renamed": n, "kept": m, "deleted": k}.
     """
-    files = collect_held_files(sync)
+    files, scanned = collect_held_files_detailed(sync)
     stats = {"renamed": 0, "kept": 0, "deleted": 0}
     if not files:
         print_fn("Nothing to rename — no held app-generated files found.")
+        if not sync.hold_app_generated_names:
+            print_fn(
+                "  hold_app_generated_names is OFF — nothing is held, so "
+                "there is nothing to rename. './organize config' turns it "
+                "back on."
+            )
+        print_fn(
+            f"  scanned {scanned} candidate file(s) in the source "
+            f"directories"
+        )
+        print_fn(f"  source directories ({len(sync.source_dirs)}):")
+        for d in sync.source_dirs:
+            state = "found" if os.path.isdir(d) else "MISSING"
+            print_fn(f"    {state}: {d}")
+        if sync.exclude_folder_patterns:
+            print_fn(
+                f"  excluded folder patterns: {sync.exclude_folder_patterns}"
+            )
         return stats
     print_fn(
         f"{len(files)} held file(s). Type a new name for each and press "
