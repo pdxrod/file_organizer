@@ -20,7 +20,7 @@ your computer, cloud drives, and Android phone.
 |------------|--------------|
 | **Organize** | Scans folders and builds a tree of **soft links** under the `organized` folder — inside the `file_organizer` folder by default, anywhere you like via `output_base` — grouped by type, year, and content categories. Original files stay where they are. |
 | **Folder sync** | Bidirectionally or one-way synchronizes folder pairs (e.g. computer ↔ Proton Drive, computer → external disk) with `rsync`. |
-| **Phone sync** | Copies new files from your Android phone to a staging folder, from where they reach the cloud and your computer. Has a 10-minute grace period so photos you delete immediately are never backed up. |
+| **Phone sync** | Copies new files from your Android phone to a staging folder, from where they reach the cloud and your computer. New files are copied immediately by default (`min_age_minutes: 0`); raise it to 5-10 if you want a grace period so photos you delete right away are never backed up. |
 | **Deduplication** | Optionally finds and removes duplicate real files by content hash. |
 | **Auto Git** | Optionally runs `git init` in development folders that don't have one yet. |
 
@@ -300,6 +300,13 @@ Phone (Termux)                         Computer                        Cloud
 Deleting a photo on the phone during the grace period means it is never
 copied. Deleting it later removes it from staging on the next cleanup.
 
+**Changing the grace period:** `min_age_minutes: 0` (the default) copies
+files immediately. If you'd rather have a window to delete junk before it
+gets backed up, run `./organize config` on the phone and set the
+"Grace period (minutes)" to 5-10 — or edit `phone_sync_config.yaml`
+directly. Restart the daemon afterwards (`./organize stop`, then
+`./organize start`).
+
 ---
 
 ## Everyday commands — computer
@@ -489,7 +496,7 @@ highlights:
 |-----|---------|
 | `source_directories` | Folders on the phone to monitor |
 | `target_directory` | Staging folder (`/storage/emulated/0/file_organizer_staging`) |
-| `min_age_minutes` | Grace period before a new file is copied |
+| `min_age_minutes` | Grace period before a new file is copied (minutes). Default 0 = copy immediately. Set 5-10 to give yourself time to delete unwanted photos before they're backed up. Change it with `./organize config` (the "Grace period" prompt) or edit `phone_sync_config.yaml` |
 | `scan_interval_seconds` | How often to check for new files |
 | `include_extensions` / `exclude_extensions` | Extension filters |
 | `exclude_patterns` / `exclude_folder_names` | Never-copy lists (merged with defaults) |
