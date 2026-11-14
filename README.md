@@ -472,8 +472,9 @@ Answer like this:
 - **drives**: your real paths — MAIN_DRIVE = your home, PROTON_DRIVE = your
   Proton Drive folder, and so on. EXTERNAL_DRIVE may be left as a
   placeholder (missing drives are reported and skipped).
-- **Folder sync: ON** — this is what copies to Proton Drive. Keep your
-  normal sync pairs (dev, Documents, Pictures, misc, pol).
+- **Folder sync: ON** — this is what copies to Proton Drive. The
+  scripted checks assume three MAIN ↔ PROTON pairs exist: `Documents`,
+  `Pictures` and `misc` (add them if your normal set differs).
 - **Duplicate detection: OFF**. Semantic categories: your choice.
 - **Router: ON** (with Downloads and Desktop as watch folders) — the
   Downloads part of this plan relies on it moving files out of ~/Downloads.
@@ -489,11 +490,11 @@ Sanity check: `./organize test` should plan without errors and without
 ### 2. Test files on the computer
 
 ```bash
-# A tiny project in ~/dev — it must reach Proton Drive, its .git must NOT
-mkdir -p ~/dev/sync_test_project/.git
-echo 'print("alpha")'  > ~/dev/sync_test_project/a.py
-echo 'print("beta")'   > ~/dev/sync_test_project/b.py
-echo 'local git data'  > ~/dev/sync_test_project/.git/config
+# A tiny project in ~/misc — it must reach Proton Drive, its .git must NOT
+mkdir -p ~/misc/sync_test_project/.git
+echo 'print("alpha")'  > ~/misc/sync_test_project/a.py
+echo 'print("beta")'   > ~/misc/sync_test_project/b.py
+echo 'local git data'  > ~/misc/sync_test_project/.git/config
 
 # One small file in each now-empty major folder
 echo "pictures test"  > ~/Pictures/20261111_pictures_test.txt
@@ -504,9 +505,9 @@ echo "downloads test" > ~/Downloads/20261111_downloads_test.txt
 ```
 
 What to expect: Documents, Pictures and misc are synced to Proton Drive;
-the Downloads file is MOVED out by the router to one of its buckets
-(~/pol, ~/dev, ~/Documents…); Music stays local (its one-way pair copies
-FROM Proton Drive).
+the Downloads file is MOVED out by the router into one of YOUR router's
+target folders (whatever you configured); Music stays local (its one-way
+pair copies FROM Proton Drive).
 
 ### 3. Test files on the phone
 
@@ -577,13 +578,14 @@ python3 src/test/verify-test-results.py
 ```
 
 Prints PASS/FAIL per check: phone files pulled (and held ones not),
-major-folder files in place, the router move, `~/dev/sync_test_project`
+major-folder files in place, the router move, `~/misc/sync_test_project`
 mirrored to Proton Drive with `.git` excluded, Proton mirrors of the phone
-files, and organized/ soft links (intact, reaching into ~/pol and ~/dev).
+files, and organized/ soft links (intact, pointing at your real files).
 
 ⚠️ Then eyeball: open Proton Drive and check Documents/, Pictures/,
-dev/sync_test_project (a.py, b.py, NO .git), misc/DCIM/Camera/
-20261111_celtic.png; open organized/ and follow a few links.
+misc/ (sync_test_project with a.py + b.py and NO .git),
+misc/DCIM/Camera/20261111_celtic.png; open organized/ and follow a few
+links back to your files.
 
 ### 8. Tear-down (computer)
 

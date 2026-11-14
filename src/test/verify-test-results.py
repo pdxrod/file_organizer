@@ -5,10 +5,13 @@ Checks everything a script can see from the computer:
 
   - the phone's ready files were pulled into the computer's folders
   - the held (app-generated) files were NOT pulled
-  - the ~/dev test project reached Proton Drive, with .git excluded
+  - the ~/misc test project reached Proton Drive, with .git excluded
   - the router moved the ~/Downloads test file out of ~/Downloads
   - the major-folder test files are still in place
-  - organized/ soft links are intact and reach into ~/pol and ~/dev
+  - organized/ soft links are intact and point at your real files
+
+Nothing here is tied to one person's setup: every path comes from
+config.yaml (drives, phone_pull.local_stage, router targets, output_base).
 
 Prints PASS/FAIL/INFO per check, then the manual checks only you can do
 (Proton Drive app, phone staging folder). Exits non-zero when a hard
@@ -61,29 +64,56 @@ def report(kind: str, message: str) -> None:
 
 
 def parse_config(path: Path) -> dict:
-    """Minimal de-dented-YAML reader: drives: and phone_pull: maps plus
+    """Minimal de-dented-YAML reader: drives:, phone_pull:, router: and
     top-level scalar keys. Enough to resolve the paths this script checks."""
-    cfg = {"drives": {}, "phone_pull": {}, "top": {}}
+    cfg = {"drives": {}, "phone_pull": {}, "top": {}, "router": {}}
     try:
         lines = path.read_text().splitlines()
     except OSError as exc:
         report("FAIL", f"cannot read config {path}: {exc}")
         return cfg
     section = None
+    subsection = None
     for raw in lines:
         stripped = raw.strip()
         if not stripped or stripped.startswith("#"):
             continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        # router watch_folders list items ("- MAIN_DRIVE/Downloads") have no colon
+        if (
+            section == "router"
+            and indent == 4
+            and subsection == "watch_folders"
+            and stripped.startswith("-")
+        ):
+            cfg["router"]["watch_folders"].append(
+                stripped.lstrip("-").strip()
+            )
+            continue
         if ":" not in stripped:
             continue
-        indent = len(raw) - len(raw.lstrip(" "))
         key, _, val = stripped.partition(":")
         val = val.strip().strip("'\"").strip()
         if indent == 0:
             cfg["top"][key] = val
             section = key
+            subsection = None
         elif section in ("drives", "phone_pull") and indent == 2:
             cfg[section][key] = val
+        elif section == "router":
+            if indent == 2 and val:
+                cfg["router"][key] = val
+            elif indent == 2 and not val:
+                subsection = key
+                if key == "watch_folders":
+                    cfg["router"].setdefault("watch_folders", [])
+                elif key == "target_folders":
+                    cfg["router"].setdefault("target_folders", {})
+            elif indent == 4 and subsection == "target_folders":
+                sub_key, _, sub_val = stripped.partition(":")
+                if sub_val.strip():
+                    cfg["router"]["target_folders"][sub_key.strip()] = \
+                        sub_val.strip().strip("'\"")
     return cfg
 
 
@@ -183,14 +213,33 @@ def main() -> None:
                 "created afterwards?)",
             )
 
-    # 3. Router should have moved the Downloads test file out.
+    # 3. Router should have moved the Downloads test file out (only when
+    # this config's router actually watches Downloads — otherwise skip).
+    router = cfg["router"]
+    router_on = str(router.get("enabled", "")).lower() in (
+        "true", "yes", "on", "1",
+    )
+    dl_dir_real = os.path.realpath(main_drive / "Downloads")
+    watch_real = [
+        os.path.realpath(resolve(w, cfg))
+        for w in router.get("watch_folders", [])
+    ]
     dl = main_drive / "Downloads" / DOWNLOADS_FILE
-    if not dl.exists():
-        moved = find(
-            [DOWNLOADS_FILE],
-            [main_drive / "pol", main_drive / "dev"],
-            depth=4,
+    if not router_on or dl_dir_real not in watch_real:
+        report(
+            "INFO",
+            "router is not enabled or does not watch ~/Downloads in this "
+            "config — skipping the Downloads move check"
+            + ("" if dl.exists() else f" (note: {DOWNLOADS_FILE} is not in "
+               "~/Downloads)"),
         )
+    elif not dl.exists():
+        targets = [
+            resolve(v, cfg)
+            for v in router.get("target_folders", {}).values()
+            if v
+        ] or [main_drive]
+        moved = find([DOWNLOADS_FILE], targets, depth=4)
         if moved[DOWNLOADS_FILE]:
             report(
                 "PASS",
@@ -200,9 +249,9 @@ def main() -> None:
         else:
             report(
                 "FAIL",
-                f"{DOWNLOADS_FILE} left ~/Downloads but was not found under "
-                "~/pol or ~/dev (search depth 4) — look by hand if your "
-                "router buckets deeper",
+                f"{DOWNLOADS_FILE} left ~/Downloads but was not found in "
+                "the router's target folders (search depth 4) — look by "
+                "hand if your router buckets deeper",
             )
     else:
         report(
@@ -212,16 +261,16 @@ def main() -> None:
             "Downloads not a watch folder?)",
         )
 
-    # 4. dev test project: local files, Proton mirror, .git excluded.
-    dev_proj = main_drive / "dev" / args.dev_folder
+    # 4. test project: local files, Proton mirror, .git excluded.
+    dev_proj = main_drive / "misc" / args.dev_folder
     for fname in DEV_FILES:
         path = dev_proj / fname
         if path.is_file():
-            report("PASS", f"dev project file exists: {path}")
+            report("PASS", f"test project file exists: {path}")
         else:
-            report("FAIL", f"dev project file missing: {path}")
+            report("FAIL", f"test project file missing: {path}")
     if proton_drive:
-        p_dev = proton_drive / "dev" / args.dev_folder
+        p_dev = proton_drive / "misc" / args.dev_folder
         for fname in DEV_FILES:
             path = p_dev / fname
             if path.is_file():
@@ -229,8 +278,8 @@ def main() -> None:
             else:
                 report(
                     "FAIL",
-                    f"Proton mirror missing: {path} (is MAIN_DRIVE/dev <-> "
-                    "PROTON_DRIVE/dev a sync pair in your config?)",
+                    f"Proton mirror missing: {path} (is MAIN_DRIVE/misc <-> "
+                    "PROTON_DRIVE/misc a sync pair in your config?)",
                 )
         if (p_dev / ".git").exists():
             report("FAIL", f".git was copied to Proton Drive: {p_dev / '.git'}")
@@ -278,12 +327,12 @@ def main() -> None:
 
     # 6. organized/ soft links.
     if organized.is_dir():
-        total = broken = pol = dev = 0
+        total = broken = into_main = 0
         examples = []
+        samples = []
         # realpath both sides: config paths may go through symlinks
         # (e.g. /tmp -> /private/tmp on macOS) while link targets do not.
-        pol_base = os.path.realpath(main_drive / "pol")
-        dev_base = os.path.realpath(main_drive / "dev")
+        main_real = os.path.realpath(main_drive)
         for dirpath, dirnames, filenames in os.walk(organized):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
             for fname in filenames:
@@ -297,20 +346,29 @@ def main() -> None:
                         examples.append(str(link))
                     continue
                 target = os.path.realpath(link)
-                if target.startswith(pol_base):
-                    pol += 1
-                elif target.startswith(dev_base):
-                    dev += 1
+                if target.startswith(main_real + os.sep):
+                    into_main += 1
+                if len(samples) < 5:
+                    samples.append(target)
         report("PASS" if total else "FAIL",
                f"organized/ contains {total} soft link(s)")
         if broken:
             report("FAIL", f"{broken} broken soft link(s), e.g. {examples[0]}")
         else:
             report("PASS", "no broken soft links")
-        report("PASS" if pol else "FAIL",
-               f"organized/ links into ~/pol: {pol}")
-        report("PASS" if dev else "FAIL",
-               f"organized/ links into ~/dev: {dev}")
+        if into_main:
+            report(
+                "PASS",
+                f"organized/ links point at your real files under "
+                f"MAIN_DRIVE: {into_main}",
+            )
+            report("INFO", "sample link targets: " + " ; ".join(samples))
+        else:
+            report(
+                "FAIL",
+                "no organized/ links point under MAIN_DRIVE — check your "
+                "source_folders / organize_folders",
+            )
     else:
         report("FAIL", f"organized folder missing: {organized}")
 
@@ -324,9 +382,10 @@ def main() -> None:
     print("Manual checks (only you can do these):")
     print("  - On the PHONE: ls file_organizer_staging/DCIM/Screenshots")
     print("    should show ONLY 2026114_foo_baz.jpg (no 777_X, no 666_X).")
-    print("  - Open Proton Drive: Documents/, Pictures/, dev/sync_test_project/")
-    print("    (a.py + b.py, NO .git), misc/DCIM/Camera/20261111_celtic.png.")
-    print("  - Open organized/ and follow a few links into ~/pol and ~/dev.")
+    print("  - Open Proton Drive: Documents/, Pictures/, misc/ (with")
+    print("    sync_test_project: a.py + b.py, NO .git) and")
+    print("    misc/DCIM/Camera/20261111_celtic.png.")
+    print("  - Open organized/ and follow a few links to your real files.")
 
     if _failures:
         print(f"\n{_failures} check(s) FAILED.")
