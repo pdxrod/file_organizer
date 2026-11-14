@@ -276,8 +276,8 @@ Phone (Termux)                         Computer                        Cloud
 │ Documents ────────────┤   │         ▼                 │   │                  │
 │ Download ─────────────┤   │ organized (soft links)    │   │                  │
 └───────────────────────┘   └───────────────────────────┘   └──────────────────┘
-│ ◄─ 10-minute grace ──►│  files younger than min_age_minutes are never copied,
-                         │  so photos you delete right away are never backed up
+│ ◄── grace period ───►│  files younger than min_age_minutes are never copied,
+                         │  default 0 = immediate (set 5-10 to skip deleted photos)
 ```
 
 1. `phone_sync` scans the folders you configured, skips junk, waits out the

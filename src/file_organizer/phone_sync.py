@@ -693,7 +693,7 @@ def _default_config() -> dict:
             "/storage/emulated/0/Download",
         ],
         "target_directory": "/storage/emulated/0/file_organizer_staging",
-        "min_age_minutes": 10,
+        "min_age_minutes": 0,
         "scan_interval_seconds": 60,
         "idle_backoff_factor": 2,
         "idle_backoff_max_multiplier": 8,
@@ -1320,7 +1320,7 @@ class PhoneSync:
         # (item 7).
         self._validate_template_paths()
 
-        self.min_age = self.config.get("min_age_minutes", 10) * 60
+        self.min_age = self.config.get("min_age_minutes", 0) * 60
         self.scan_interval = self.config.get("scan_interval_seconds", 60)
         self.max_size_mb = self.config.get("max_file_size_mb", 500)
         # Item 10: collapse foo (1).png rename families in the source dirs.

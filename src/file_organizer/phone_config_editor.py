@@ -60,7 +60,7 @@ DEFAULTS: Dict[str, Any] = {
     "cloud_sync_subfolder": "file_organizer",
     "cloud_drive_paths": [],
     "min_free_space_mb": 200,
-    "min_age_minutes": 10,
+    "min_age_minutes": 0,
     "collapse_rename_families": False,
     "hold_app_generated_names": True,
     "normalise_leading_dates": True,

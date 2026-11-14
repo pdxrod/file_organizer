@@ -70,7 +70,7 @@ I may not be able to have a full-on file_organizer funning on my phones, but I'd
 Problem	Solution
 Under-backup: .txt, .png, screenshots in DCIM, Documents, etc. never get backed up by Proton Drive	
 phone_daemon.py monitors any folders you configure — not just camera photos. It finds all file types.
-Over-eager backup: photos backed up immediately, then you delete them and have to clean up multiple places	min_age_minutes: 10 — files must survive a 10-minute grace period before being copied. Delete unwanted photos in that window and they're never backed up.
+Over-eager backup: photos backed up immediately, then you delete them and have to clean up multiple places	min_age_minutes: 0 — files are copied immediately (the default). Set 5-10 if you want a grace window in which deleted photos are never backed up.
 
 What DeepSeek created:
 phone_daemon.py (755 lines) — The core daemon:
