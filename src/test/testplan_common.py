@@ -129,19 +129,35 @@ def resolve(ref: str, cfg: dict) -> Path:
     return path
 
 
-def count_files(folder: Path) -> int:
-    """Number of files under a folder (metadata-only walk)."""
-    n = 0
-    for _dirpath, _dirnames, filenames in os.walk(folder):
-        n += len(filenames)
-    return n
+def human_size(n: int) -> str:
+    """1234567 -> '1.2 MB' (for the --list display)."""
+    value = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            if unit == "B":
+                return f"{int(value)} B"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{int(n)} B"
+
+
+def folder_size(folder: Path) -> int:
+    """Total size in bytes of all files under a folder (metadata-only walk)."""
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(folder):
+        for name in filenames:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, name))
+            except OSError:
+                pass
+    return total
 
 
 def pair_candidates(cfg: dict):
     """(sync_candidates, one_way_candidates).
 
     Each candidate is {"index": 0-based position in config.yaml's list,
-    "folders": [Path, Path], "count": file count used for the default
+    "folders": [Path, Path], "size": total bytes used for the default
     pick}. sync pairs need two existing, distinct folders. one-way pairs
     need an existing source and a LOCAL target (never sweep a cloud or
     external target).
@@ -156,7 +172,7 @@ def pair_candidates(cfg: dict):
             sync_cands.append({
                 "index": i,
                 "folders": [a, b],
-                "count": count_files(a) + count_files(b),
+                "size": folder_size(a) + folder_size(b),
             })
     ow_cands = []
     for i, pair in enumerate(cfg.get("one_way_pairs", [])):
@@ -172,7 +188,7 @@ def pair_candidates(cfg: dict):
         ow_cands.append({
             "index": i,
             "folders": [src, dst],
-            "count": count_files(src),
+            "size": folder_size(src) + folder_size(dst),
         })
     return sync_cands, ow_cands
 
@@ -180,7 +196,8 @@ def pair_candidates(cfg: dict):
 def select_pairs(cfg: dict, sync_index=None, one_way_index=None):
     """Pick the test pairs. sync_index / one_way_index are 0-based indices
     into config.yaml's sync_pairs / one_way_pairs arrays (None = smallest
-    eligible pair). Returns (sync_cand or None, ow_cand or None, messages).
+    eligible pair by total file size). Returns (sync_cand or None,
+    ow_cand or None, messages).
     """
     sync_cands, ow_cands = pair_candidates(cfg)
     messages = []
@@ -196,7 +213,7 @@ def select_pairs(cfg: dict, sync_index=None, one_way_index=None):
             )
     else:
         if sync_cands:
-            chosen_sync = min(sync_cands, key=lambda c: c["count"])
+            chosen_sync = min(sync_cands, key=lambda c: c["size"])
         else:
             messages.append(
                 "no eligible sync_pair found (need 2 existing folders)"
@@ -212,7 +229,7 @@ def select_pairs(cfg: dict, sync_index=None, one_way_index=None):
             )
     else:
         if ow_cands:
-            chosen_ow = min(ow_cands, key=lambda c: c["count"])
+            chosen_ow = min(ow_cands, key=lambda c: c["size"])
         else:
             messages.append(
                 "no eligible one_way_pair with a local target — the "
@@ -229,13 +246,15 @@ def format_candidates(cfg: dict) -> str:
         lines.append("  (none eligible)")
     for c in sync_cands:
         a, b = c["folders"]
-        lines.append(f"  {c['index'] + 1}. {a}  <->  {b}   ({c['count']} files)")
+        lines.append(f"  {c['index'] + 1}. {a}  <->  {b}   "
+                     f"({human_size(c['size'])})")
     lines.append("one_way_pairs (source exists, target is local):")
     if not ow_cands:
         lines.append("  (none eligible)")
     for c in ow_cands:
         src, dst = c["folders"]
-        lines.append(f"  {c['index'] + 1}. {src}  ->  {dst}   ({c['count']} files)")
+        lines.append(f"  {c['index'] + 1}. {src}  ->  {dst}   "
+                     f"({human_size(c['size'])})")
     return "\n".join(lines)
 
 

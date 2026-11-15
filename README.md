@@ -499,8 +499,10 @@ others, 1-based numbers from that list):
   with the pair `PROTON_DRIVE/Music → MAIN_DRIVE/Music`, an emptied
   ~/Music gets repopulated from Proton Drive.
 
-The default picks are the smallest eligible pairs, so the sweep is fast
-and nothing important travels far (everything comes back in step 8).
+The default picks are the smallest eligible pairs by TOTAL FILE SIZE
+(not file count — a folder with a few huge files loses to one with many
+tiny files), so the sweep is fast and nothing important travels far
+(everything comes back in step 8).
 Nothing on Proton Drive is ever emptied: the one-way pair only loses its
 local target's contents, and the sync pair's cloud side holds only the
 tiny test files during the run.

@@ -5,10 +5,12 @@ sync-pair folders.
 
 Which pairs? Chosen from YOUR config.yaml:
 
-  - one sync_pairs entry where both folders exist (default: the smallest,
-    so the sweep is fast and safe — override with --sync-pair N)
+  - one sync_pairs entry where both folders exist (default: the smallest
+    by total file size, so the sweep is fast and safe — override with
+    --sync-pair N)
   - one one_way_pairs entry whose source exists and whose target is a
-    LOCAL folder (default: smallest source — override with --one-way-pair N)
+    LOCAL folder (default: smallest by total file size — override with
+    --one-way-pair N)
 
 The one-way pair's SOURCE is never touched: its files are what repopulate
 the emptied target when organize runs. Everything is recorded in a
