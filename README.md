@@ -468,12 +468,14 @@ rm -rf organized                            # start with an empty organized/ fol
 (`--list` shows the candidates; `--sync-pair N` / `--one-way-pair N` pick
 others, 1-based numbers from that list):
 
-- one **sync_pair**: BOTH sides are swept to a temp backup, then two test
-  files (`20261111_side_a_test.txt` on side A, `20261111_side_b_test.txt`
-  on side B) and a tiny project (`sync_test_project/` with a.py, b.py and
-  a .git folder) are created on side A. After `organize auto`, both sides
-  must contain BOTH test files, and the project must have reached the
-  other side WITHOUT .git.
+- one **sync_pair** — the **bidirectional test**: BOTH sides are swept to
+  a temp backup, then two test files (`20261111_side_a_test.txt` on side
+  A, `20261111_side_b_test.txt` on side B) and a tiny project
+  (`sync_test_project/` with a.py, b.py and a .git folder) are created on
+  side A. After `organize auto` the two-way sync must have copied BOTH
+  directions: `…_side_a_test.txt` reaches side B AND
+  `…_side_b_test.txt` reaches side A, and the project must have reached
+  the other side WITHOUT .git.
 - one **one_way_pair** (source exists, target is a local folder): only the
   TARGET side is swept — its source is left untouched. After
   `organize auto` the target must have been refilled from the source; e.g.
