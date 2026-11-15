@@ -688,9 +688,26 @@ def _default_config() -> dict:
     return {
         "source_directories": [
             "/storage/emulated/0/DCIM",
-            "/storage/emulated/0/Pictures",
             "/storage/emulated/0/Documents",
             "/storage/emulated/0/Download",
+            # App folders under Pictures, listed EXPLICITLY so unlisted
+            # Pictures subfolders (e.g. a banking app's) are never
+            # scanned. Missing folders are skipped silently.
+            "/storage/emulated/0/Pictures/WhatsApp",
+            "/storage/emulated/0/Pictures/LINE",
+            "/storage/emulated/0/Pictures/Messenger",
+            "/storage/emulated/0/Pictures/Twitter",
+            "/storage/emulated/0/Pictures/X",
+            "/storage/emulated/0/Pictures/PhotosEditor",
+            "/storage/emulated/0/Pictures/Instagram",
+            "/storage/emulated/0/Pictures/Facebook",
+            "/storage/emulated/0/Pictures/Snapchat",
+            "/storage/emulated/0/Pictures/Telegram",
+            "/storage/emulated/0/Pictures/Signal",
+            "/storage/emulated/0/Pictures/Reddit",
+            "/storage/emulated/0/Pictures/TikTok",
+            "/storage/emulated/0/Pictures/Discord",
+            "/storage/emulated/0/Pictures/PicsArt",
         ],
         "target_directory": "/storage/emulated/0/file_organizer_staging",
         "min_age_minutes": 0,

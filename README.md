@@ -682,7 +682,7 @@ highlights:
 
 | Key | Purpose |
 |-----|---------|
-| `source_directories` | Folders on the phone to monitor |
+| `source_directories` | Folders on the phone to monitor. Default: DCIM, Documents, Download, and the common picture-app folders under Pictures (WhatsApp, LINE, Messenger, Twitter, X, PhotosEditor, Instagram, Facebook, Snapchat, Telegram, Signal, Reddit, TikTok, Discord, PicsArt) — listed explicitly so an unlisted Pictures subfolder like a banking app's is never scanned |
 | `target_directory` | Staging folder (`/storage/emulated/0/file_organizer_staging`) |
 | `min_age_minutes` | Grace period before a new file is copied (minutes). Default 0 = copy immediately. Set 5-10 to give yourself time to delete unwanted photos before they're backed up. Change it with `./organize config` (the "Grace period" prompt) or edit `phone_sync_config.yaml` |
 | `scan_interval_seconds` | How often to check for new files |
