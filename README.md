@@ -320,7 +320,8 @@ directly. Restart the daemon afterwards (`./organize stop`, then
 | `start` | Start in the background (production mode, continuous) |
 | `stop` / `restart` / `status` | Control the background process |
 | `log` | Tail `.file_organizer.log` (in the file_organizer folder) |
-| `test` | Single **dry-run** cycle — nothing real is changed |
+| `test` | **Guided end-to-end test** — one command walks the whole phone → computer → cloud pipeline, telling you what to do next and waiting for Enter between steps |
+| `sanity` | Single **dry-run** cycle — nothing real is changed |
 | `test-real` (aliases `scan`, `auto`) | Single production cycle |
 | `sync` | Folder synchronization only |
 | `dedupe` | Deduplication only |
@@ -384,7 +385,8 @@ server prints how to free it or pick another port.
 | `start` / `stop` / `restart` / `status` | Control phone sync |
 | `log` | Tail the log |
 | `stats` | Show the sync database statistics |
-| `test` | Single **dry-run** scan — no files copied |
+| `test` | Guided end-to-end test — phone half: creates the test files, walks the renames, runs the scan, sends you back to the computer |
+| `sanity` | Single **dry-run** scan — no files copied |
 | `scan` (alias `auto`) | Single production scan |
 | `find-cloud-drives` | Locate your cloud drive folders (Proton Drive, Google Drive, Dropbox, …) |
 | `config` | Guided editor for phone_sync_config.yaml — same conversation as on the computer (Enter keeps, `e` edits, `x` quits without saving, `s` saves and quits) |
@@ -433,15 +435,19 @@ on the phone checks the setting and prints the same steps.
 
 ## Test mode
 
-`./organize test` runs a full **dry-run** cycle against the folders in your
-`config.yaml` — it scans, plans the link tree and the syncs, and changes
-nothing, so you can see exactly what the program would do before you let it
-near your real files. `./organize create-test` additionally builds a small
-sample environment with files under `src/test/` (sample documents, pictures,
-a git/venv project) that you can point a config at to try the program out.
+`./organize sanity` runs a full **dry-run** cycle against the folders in
+your `config.yaml` — it scans, plans the link tree and the syncs, and
+changes nothing, so you can see exactly what the program would do before
+you let it near your real files. (On the phone, `./organize sanity` is the
+same dry-run scan.) `./organize create-test` additionally builds a small
+sample environment with files under `src/test/` (sample documents,
+pictures, a git/venv project) that you can point a config at to try the
+program out.
 
-The phone equivalent is `./organize test` on the phone (dry-run scan of the
-real folders — it copies nothing).
+`./organize test` (on both devices) is different: the **guided end-to-end
+test** — one command that walks the whole phone → computer → cloud
+pipeline, always telling you what to do next and waiting for Enter.
+Details in the next section.
 
 A scripted walkthrough of the whole phone → computer → cloud pipeline is
 below: **End-to-end test plan**.
@@ -450,10 +456,21 @@ below: **End-to-end test plan**.
 
 ## End-to-end test plan — phone → computer → Proton Drive
 
-A repeatable walkthrough that starts from a clean slate and exercises the
-whole pipeline: phone scan → staging folder → USB pull → organize (soft
-links) → sync to Proton Drive. Steps marked ⚠️ are the ones you do by hand;
-everything else is a script.
+One command runs the whole thing: **`./organize test`**.
+
+- On the COMPUTER it stops the daemon, sweeps one sync pair (both sides)
+  and one one-way pair (local target) into a temp backup, drops the test
+  files, empties organized/, hands over to the phone, runs
+  `./organize auto`, verifies the results, and puts your files back.
+- On the PHONE (run it there when the computer tells you to) it creates
+  the phone test files, walks you through the renames, runs the production
+  scan, and sends you back to the computer.
+- Every step is announced first and waits for Enter, so you always know
+  what is happening and what to do next.
+
+The steps below are what the runner does behind the scenes — useful as a
+reference, and for running the pieces by hand with the scripts in
+`src/test/` if you ever want to.
 
 ### 0. Preparation (computer, in the file_organizer folder)
 

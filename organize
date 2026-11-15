@@ -68,7 +68,7 @@ def detect_platform(argv=None):
 # ── subcommand mapping (pure — unit tested) ────────────────────────────────
 
 COMPUTER_COMMANDS = {
-    "test": ["--scan-once"],                 # dry-run scan (safe)
+    "sanity": ["--scan-once"],               # dry-run scan (safe)
     "test-real": ["--REAL", "--scan-once"],  # production one-shot
     "scan": ["--REAL", "--scan-once"],       # alias of test-real
     "auto": ["--REAL", "--scan-once"],       # production scan — just works
@@ -98,7 +98,7 @@ COMPUTER_PASSTHROUGH = (
 )
 
 PHONE_COMMANDS = {
-    "test": ["--scan-once", "--dry-run"],    # dry-run scan (safe)
+    "sanity": ["--scan-once", "--dry-run"],  # dry-run scan (safe)
     "dry-run": ["--scan-once", "--dry-run"],
     "scan": ["--scan-once"],                 # production one-shot
     "scan-once": ["--scan-once"],
@@ -186,6 +186,10 @@ def map_command(platform, argv):
     if key in lifecycle:
         mapped_rest = [normalize_flag(a, passthrough) for a in rest]
         return [key] + mapped_rest, key
+    if key == "test":
+        # 'organize test' — the guided end-to-end test runner (both
+        # platforms). The old dry-run scan is now 'organize sanity'.
+        return [key], "test"
     if platform == "computer" and key.lstrip("-").lower() in PHONE_ONLY_COMMANDS:
         # A phone-only subcommand on a computer (rename, stats,
         # make-config, …) must be explained in main(), never passed to
@@ -781,15 +785,17 @@ def usage(platform):
         "",
         f"auto on this {'phone' if platform == 'phone' else 'computer'} — {auto_does}",
         "",
-        "New here? Run './organize test' once first (dry-run, changes",
-        "nothing), or './organize setup' for a guided first run.",
+        "New here? Run './organize sanity' once first (dry-run, changes",
+        "nothing), './organize setup' for a guided first run, or",
+        "'./organize test' for the guided end-to-end test.",
         "",
     ]
     if platform == "computer":
         lines += [
             "All commands for THIS device (computer):",
             "  ./organize auto          ★ production scan — just works",
-            "  ./organize test          dry-run scan — safe, changes nothing",
+            "  ./organize test          ★ guided end-to-end test (with the phone)",
+            "  ./organize sanity        dry-run scan — safe, changes nothing",
             "  ./organize test-real     one production scan (alias: scan)",
             "  ./organize start         run in the background, repeatedly",
             "  ./organize stop          stop the background program",
@@ -833,7 +839,7 @@ def usage(platform):
             "",
             "On a phone (run these instead):",
             "  ./organize auto    ★ production scan — just works",
-            "  ./organize test    dry-run scan     ./organize scan    production scan",
+            "  ./organize test    ★ guided end-to-end test     ./organize sanity   dry-run scan",
             "  ./organize start   run in the background    ./organize stop",
             "  ./organize rename  rename held files, one by one (d deletes, x stops)",
             "",
@@ -844,7 +850,8 @@ def usage(platform):
         lines += [
             "All commands for THIS device (phone):",
             "  ./organize auto          ★ production scan — just works",
-            "  ./organize test          dry-run scan — safe, copies nothing",
+            "  ./organize test          ★ guided end-to-end test (with the computer)",
+            "  ./organize sanity        dry-run scan — safe, copies nothing",
             "  ./organize scan          one production scan (alias: scan-once)",
             "  ./organize start         run in the background",
             "  ./organize stop          stop the background program",
@@ -870,7 +877,7 @@ def usage(platform):
             "     prompt on this phone (tick 'Always allow from this computer').",
             "",
             "On a computer (run there instead):",
-            "  ./organize auto    ★ production scan     ./organize test    dry-run scan",
+            "  ./organize auto    ★ production scan     ./organize sanity    dry-run scan",
             "",
             "Computer commands typed here (test-real, sync, route, config, …)",
             "explain themselves — no 'unrecognized argument' errors.",
@@ -1067,6 +1074,13 @@ def main(argv=None):
     if handled == "config":
         return (phone_config_edit() if platform == "phone"
                 else computer_config_edit())
+    if handled == "test":
+        _insert_src_path()
+        from file_organizer.test_plan import (
+            run_computer_test,
+            run_phone_test,
+        )
+        return run_phone_test() if platform == "phone" else run_computer_test()
     if handled == "start":
         (computer_start if platform == "computer" else phone_start)(log)
         return 0

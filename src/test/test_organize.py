@@ -66,8 +66,13 @@ class PlatformDetectionTests(unittest.TestCase):
 
 
 class SubcommandMappingTests(unittest.TestCase):
-    def test_computer_test_is_dry_run(self):
+    def test_computer_test_is_guided_runner(self):
         mapped, handled = organize.map_command("computer", ["test"])
+        self.assertEqual(mapped, ["test"])
+        self.assertEqual(handled, "test")
+
+    def test_computer_sanity_is_dry_run(self):
+        mapped, handled = organize.map_command("computer", ["sanity"])
         self.assertEqual(mapped, ["--scan-once"])
         self.assertIsNone(handled)
 
@@ -114,9 +119,15 @@ class SubcommandMappingTests(unittest.TestCase):
         self.assertEqual(mapped, ["--scan-once"])
         self.assertIsNone(handled)
 
-    def test_phone_test_is_dry_run(self):
-        mapped, _ = organize.map_command("phone", ["test"])
+    def test_phone_test_is_guided_runner(self):
+        mapped, handled = organize.map_command("phone", ["test"])
+        self.assertEqual(mapped, ["test"])
+        self.assertEqual(handled, "test")
+
+    def test_phone_sanity_is_dry_run(self):
+        mapped, handled = organize.map_command("phone", ["sanity"])
         self.assertEqual(mapped, ["--scan-once", "--dry-run"])
+        self.assertIsNone(handled)
 
     def test_phone_lifecycle_commands_handled_here(self):
         # start/stop/status delegate to phone_sync's own flags; only
@@ -435,7 +446,8 @@ class WrongDeviceTests(unittest.TestCase):
             self.assertIsNone(handled, platform)
 
     def test_commands_that_exist_on_both_still_work(self):
-        for cmd in ("test", "scan", "auto", "start", "stop", "status",
+        for cmd in ("test", "sanity", "scan", "auto", "start", "stop",
+                    "status",
                     "restart", "log", "setup"):
             for platform in ("phone", "computer"):
                 _, handled = organize.map_command(platform, [cmd])
