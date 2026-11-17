@@ -50,6 +50,10 @@ def parse_config(path: Path) -> dict:
     """Minimal de-dented-YAML reader: drives:, phone_pull:, router:,
     sync_pairs:, one_way_pairs: and top-level scalar keys.
 
+    Accepts both list styles: PyYAML's indentationless style (the guided
+    editor writes it — a list dash sits at the same column as its key)
+    and the deeper-indented hand-edited style.
+
     Raises ValueError when the file cannot be read.
     """
     cfg = {"drives": {}, "phone_pull": {}, "top": {}, "router": {}}
@@ -64,15 +68,18 @@ def parse_config(path: Path) -> dict:
         if not stripped or stripped.startswith("#"):
             continue
         indent = len(raw) - len(raw.lstrip(" "))
-        # List items without a colon: router watch_folders entries and the
-        # folder paths inside sync_pairs / one_way_pairs.
+        # List items without a colon: router watch_folders/route_roots
+        # entries and the folder paths inside sync_pairs / one_way_pairs.
+        # PyYAML writes list dashes at the same column as their key
+        # (indentationless style); hand-edited files indent them deeper.
         if (
             section == "router"
-            and indent == 4
-            and subsection == "watch_folders"
+            and indent in (2, 4)
+            and subsection in ("watch_folders", "route_roots")
             and stripped.startswith("-")
+            and ":" not in stripped
         ):
-            cfg["router"]["watch_folders"].append(
+            cfg["router"][subsection].append(
                 stripped.lstrip("-").strip()
             )
             continue
@@ -88,6 +95,17 @@ def parse_config(path: Path) -> dict:
             continue
         key, _, val = stripped.partition(":")
         val = val.strip().strip("'\"").strip()
+        # "- folders:" starts a new pair. PyYAML writes it at column 0
+        # (indentationless style); hand-edited files indent it. Check
+        # before the indent==0 branch claims it as a section name.
+        if (
+            section in ("sync_pairs", "one_way_pairs")
+            and stripped.startswith("-")
+            and not val
+        ):
+            cfg.setdefault(section, []).append([])
+            subsection = "folders"
+            continue
         if indent == 0:
             cfg["top"][key] = val
             section = key
@@ -99,8 +117,8 @@ def parse_config(path: Path) -> dict:
                 cfg["router"][key] = val
             elif indent == 2 and not val:
                 subsection = key
-                if key == "watch_folders":
-                    cfg["router"].setdefault("watch_folders", [])
+                if key in ("watch_folders", "route_roots"):
+                    cfg["router"].setdefault(key, [])
                 elif key == "target_folders":
                     cfg["router"].setdefault("target_folders", {})
             elif indent == 4 and subsection == "target_folders":
@@ -108,11 +126,6 @@ def parse_config(path: Path) -> dict:
                 if sub_val.strip():
                     cfg["router"]["target_folders"][sub_key.strip()] = \
                         sub_val.strip().strip("'\"")
-        elif section in ("sync_pairs", "one_way_pairs"):
-            if stripped.startswith("-") and not val:
-                # "- folders:" starts a new pair
-                cfg.setdefault(section, []).append([])
-                subsection = "folders"
     return cfg
 
 
