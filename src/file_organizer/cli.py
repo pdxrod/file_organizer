@@ -694,7 +694,7 @@ def main(argv=None):
 
     # Daemon mode
     if real_mode and not args.scan_once:
-        logger.info("Entering daemon mode (Ctrl+C to stop)...")
+        logger.info("Entering daemon mode (Ctrl+C to stop, or './organize stop')")
         interval = config.raw_config.get("scan_interval", 3600)
         backoff_factor = int(config.raw_config.get("idle_backoff_factor", 2) or 2)
         backoff_max = int(

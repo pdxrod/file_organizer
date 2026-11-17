@@ -122,8 +122,8 @@ def ask(question: str, input_fn, output_fn=None, default: Any = "",
             if allow_blank:
                 return default
             if output_fn:
-                output_fn("  (please type something, x to quit, s to save "
-                          "and quit, or Ctrl+C)")
+                output_fn("  (please type something — x quits without saving,\n"
+                          "   s saves and quits)")
             continue
         if validate:
             err = validate(value)

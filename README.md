@@ -50,7 +50,7 @@ which commands to use.
 ./organize restart      # stop, wait, start again
 ./organize status       # is it running?
 ./organize version      # print the version number
-./organize log          # follow the log file (Ctrl+C to stop)
+./organize log          # follow the log file (q to stop)
 ./organize setup        # first-time setup (config + will-it-work report)
 
 # Computer

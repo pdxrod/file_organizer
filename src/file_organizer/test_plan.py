@@ -39,17 +39,21 @@ DOWNLOAD_TEST_FILE = "20261111_downloads_test.txt"
 
 
 def _pause(message: str) -> None:
-    """Print the message and wait for Enter (EOF keeps going)."""
+    """Print the message and wait for Enter or x (EOF keeps going)."""
     print()
     print(message)
     print()
     try:
-        input("Press Enter to continue... ")
+        answer = input("Press Enter to continue, or x to cancel... ")
     except EOFError:
         print("(no interactive input available — continuing)")
+        return
     except KeyboardInterrupt:
         print("\nStopped.")
         raise SystemExit(130)
+    if answer.strip().lower() == "x":
+        print("Stopped.")
+        raise SystemExit(0)
 
 
 def _run(cmd, check: bool = False) -> int:
@@ -104,8 +108,8 @@ def run_computer_test() -> int:
     print()
     _pause(
         "This test moves real files to a temp backup first — nothing is\n"
-        "deleted, and nothing on Proton Drive is emptied. Cancel with\n"
-        "Ctrl+C at any time."
+        "deleted, and nothing on Proton Drive is emptied. Type x at any\n"
+        "pause to cancel."
     )
 
     config_path = tc.default_config_path()

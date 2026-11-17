@@ -7,6 +7,7 @@ pure parts: platform detection, subcommand mapping, and usage text.
 
 import importlib.util
 from importlib.machinery import SourceFileLoader
+import io
 import os
 import shutil
 import sys
@@ -26,6 +27,15 @@ _loader = SourceFileLoader("organize", str(_organize_path))
 _spec = importlib.util.spec_from_loader("organize", _loader)
 organize = importlib.util.module_from_spec(_spec)
 _loader.exec_module(organize)
+
+# The guided test runner is a plain module inside the package; load it by
+# path so its _pause prompt can be exercised directly.
+_testplan_path = SRC / "file_organizer" / "test_plan.py"
+_tp_loader = SourceFileLoader("file_organizer_testplan", str(_testplan_path))
+_tp_spec = importlib.util.spec_from_loader("file_organizer_testplan",
+                                           _tp_loader)
+test_plan = importlib.util.module_from_spec(_tp_spec)
+_tp_loader.exec_module(test_plan)
 
 
 class PlatformDetectionTests(unittest.TestCase):
@@ -682,6 +692,97 @@ class WebInterpreterTests(unittest.TestCase):
              mock.patch.object(shutil, "which",
                                return_value=sys.executable):
             self.assertIsNone(organize.web_python())
+
+
+class TailLogQuitTests(unittest.TestCase):
+    """'organize log' must offer a typed quit (q) when interactive.
+
+    Ctrl+C remains a fallback, but the advertised way to stop is typing
+    q and pressing Enter, so users who don't know Ctrl+C can still exit.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "organize.log"
+        self.path.write_text("recent line\n")
+        self.lines = []
+
+    def _log(self, msg=""):
+        self.lines.append(str(msg))
+
+    def test_q_stops_interactive_follow(self):
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+             mock.patch.object(organize, "_stdin_ready", return_value=True), \
+             mock.patch.object(sys.stdin, "read", return_value="q"), \
+             mock.patch("time.sleep"), \
+             mock.patch("sys.stdout", io.StringIO()):
+            organize.tail_log(self.path, self._log)  # returns, not loops
+        self.assertTrue(any("type q" in m for m in self.lines))
+
+    def test_uppercase_q_also_stops(self):
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+             mock.patch.object(organize, "_stdin_ready", return_value=True), \
+             mock.patch.object(sys.stdin, "read", return_value="Q"), \
+             mock.patch("time.sleep"), \
+             mock.patch("sys.stdout", io.StringIO()):
+            organize.tail_log(self.path, self._log)
+
+    def test_other_keys_keep_following(self):
+        # A non-q key must not stop the follow; Ctrl+C still interrupts.
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+             mock.patch.object(organize, "_stdin_ready", return_value=True), \
+             mock.patch.object(sys.stdin, "read", return_value="a"), \
+             mock.patch("time.sleep", side_effect=KeyboardInterrupt), \
+             mock.patch("sys.stdout", io.StringIO()):
+            organize.tail_log(self.path, self._log)  # exits via interrupt
+
+    def test_non_interactive_never_reads_stdin(self):
+        ready = mock.Mock()
+        with mock.patch.object(sys.stdin, "isatty", return_value=False), \
+             mock.patch.object(organize, "_stdin_ready", ready), \
+             mock.patch("time.sleep", side_effect=KeyboardInterrupt), \
+             mock.patch("sys.stdout", io.StringIO()):
+            organize.tail_log(self.path, self._log)
+        ready.assert_not_called()
+
+
+class TestPlanPauseTests(unittest.TestCase):
+    """'organize test' pauses: typing x cancels, Enter continues."""
+
+    def test_x_cancels_cleanly(self):
+        out = io.StringIO()
+        with mock.patch("builtins.input", return_value="x"), \
+             mock.patch("sys.stdout", out):
+            with self.assertRaises(SystemExit) as ctx:
+                test_plan._pause("Ready?")
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn("Stopped", out.getvalue())
+
+    def test_x_is_case_and_space_insensitive(self):
+        with mock.patch("builtins.input", return_value="  X  "), \
+             mock.patch("sys.stdout", io.StringIO()):
+            with self.assertRaises(SystemExit):
+                test_plan._pause("Ready?")
+
+    def test_enter_continues(self):
+        with mock.patch("builtins.input", return_value=""), \
+             mock.patch("sys.stdout", io.StringIO()):
+            test_plan._pause("Ready?")  # no exception
+
+    def test_ctrl_c_still_cancels(self):
+        with mock.patch("builtins.input", side_effect=KeyboardInterrupt), \
+             mock.patch("sys.stdout", io.StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                test_plan._pause("Ready?")
+        self.assertEqual(ctx.exception.code, 130)
+
+    def test_eof_continues(self):
+        out = io.StringIO()
+        with mock.patch("builtins.input", side_effect=EOFError), \
+             mock.patch("sys.stdout", out):
+            test_plan._pause("Ready?")  # no exception
+        self.assertIn("continuing", out.getvalue())
 
 
 if __name__ == "__main__":

@@ -512,18 +512,39 @@ def phone_status(log):
     run_phone_cli(PHONE_COMMANDS["status"])
 
 
+def _stdin_ready():
+    """True when a typed key is already waiting (POSIX tty / Windows console)."""
+    try:
+        import select
+        readable, _, _ = select.select([sys.stdin], [], [], 0)
+        return bool(readable)
+    except (OSError, ValueError):
+        try:
+            import msvcrt  # Windows console
+            return bool(msvcrt.kbhit())
+        except (ImportError, OSError):
+            return False
+
+
 def tail_log(path, log):
-    """Print the last few lines of a log then follow it (Ctrl+C to stop)."""
+    """Print the last few lines of a log then follow it (q to stop)."""
     p = Path(path)
     if not p.exists():
         log(f"Log file not found: {path}")
         return
+    interactive = sys.stdin.isatty()
     try:
         with open(p, "r", errors="replace") as f:
             f.seek(0, 2)
             f.seek(max(0, f.tell() - 4000))
             sys.stdout.write(f.read())
+        if interactive:
+            log("")
+            log("Following the log — type q and press Enter to stop.")
         while True:
+            if interactive and _stdin_ready():
+                if sys.stdin.read(1) in ("q", "Q"):
+                    break
             with open(p, "r", errors="replace") as f:
                 f.seek(0, 2)
                 chunk = f.read()
@@ -532,7 +553,8 @@ def tail_log(path, log):
                 sys.stdout.flush()
             time.sleep(0.5)
     except KeyboardInterrupt:
-        log("")
+        pass
+    log("")
 
 
 def computer_setup(log):
@@ -802,7 +824,7 @@ def usage(platform):
             "  ./organize restart       stop, wait, start again",
             "  ./organize status        is it running?",
             "  ./organize version       print the version number",
-            "  ./organize log           follow the log file (Ctrl+C to stop)",
+            "  ./organize log           follow the log file (q to stop)",
             "  ./organize sync          sync folders only",
             "  ./organize dedupe        remove duplicate files only",
             "  ./organize cleanup       remove broken/stale symlinks",
@@ -858,7 +880,7 @@ def usage(platform):
             "  ./organize restart       stop, wait, start again",
             "  ./organize status        is it running?",
             "  ./organize version       print the version number",
-            "  ./organize log           follow the log file (Ctrl+C to stop)",
+            "  ./organize log           follow the log file (q to stop)",
             "  ./organize stats         sync database statistics",
             "  ./organize find-cloud-drives  locate your cloud drive folders",
             "  ./organize config        guided editor for phone_sync_config.yaml",
