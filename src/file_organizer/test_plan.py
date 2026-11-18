@@ -132,7 +132,6 @@ def run_computer_test() -> int:
 
     # 1. Stop the daemon so nothing runs against the swept folders.
     _run_organize("stop")
-    print("(If the status said no daemon was running, that is fine.)")
 
     # 2. Undo any previous run, then sweep + create the test files.
     _pause("Ready to sweep the test folders?")
