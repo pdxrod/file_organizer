@@ -164,23 +164,9 @@ def run_computer_test() -> int:
     _pause(
         "PHONE TIME.\n"
         "\n"
-        "  1. Plug the phone into USB and make sure USB debugging is ON\n"
-        "     (Settings -> Developer options -> USB debugging).\n"
-        "  2. On the phone in Termux:\n"
-        "       cd <the file_organizer folder>\n"
-        "       git pull\n"
-        "       ./organize test\n"
-        "     The phone creates the test files, walks you through the\n"
-        "     renames, runs its production scan, and then tells you to\n"
-        "     come back here.\n"
-        "\n"
-        "  Timing note: this computer only pulls staged files older than\n"
-        "  phone_pull.min_age_minutes (5). If the next step pulls 0 files,\n"
-        "  wait 5 minutes (or set that value to 0 in config.yaml) and run\n"
-        "  './organize auto' again.\n"
-        "\n"
-        "  (The phone can also just be on the same WiFi with wireless\n"
-        "  ADB — './organize list' shows what this computer can see.)"
+        "  On the phone, run './organize test', answer the questions and\n"
+        "  hit Enter a few times. Then come back to this computer and\n"
+        "  press Enter here."
     )
 
     # 6. Production run on the computer: pull first, then organize, router
