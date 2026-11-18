@@ -5,7 +5,9 @@ Reads the manifest written by backup-major-folders.py and moves every
 backed-up entry back into its original folder. Anything already present in
 the target (e.g. test files created during the plan, or files the sync
 brought back from the one-way source) is left alone and reported as
-skipped. The manifest is removed once everything is restored.
+skipped. If anything is skipped, the manifest is KEPT (and a new sweep
+refuses to run) until the conflicts are resolved and this script is run
+again successfully.
 
 Cross-platform: works wherever the backup script ran (the manifest stores
 absolute original paths).
@@ -38,6 +40,7 @@ def main() -> None:
         tc.MANIFEST_PATH.unlink(missing_ok=True)
         return
 
+    skipped_any = False
     for entry in folders:
         original = Path(entry["original"])
         backup = Path(entry["backup"])
@@ -53,6 +56,7 @@ def main() -> None:
                 print(f"  SKIP  {original.name}/{item.name} — already in "
                       f"{original}")
                 skipped += 1
+                skipped_any = True
                 continue
             shutil.move(str(item), str(target))
             restored += 1
@@ -60,6 +64,17 @@ def main() -> None:
             backup.rmdir()
         print(f"{original}: restored {restored} item(s)"
               + (f", skipped {skipped}" if skipped else ""))
+
+    if skipped_any:
+        print()
+        print("WARNING: some items could not be restored because a")
+        print("same-named item already exists at the target. They are still")
+        print(f"in the backup: {tc.BACKUP_ROOT}")
+        print()
+        print("Compare and merge them by hand, then run this script again.")
+        print("The manifest is kept until then, so a new sweep cannot start")
+        print("and pile more data onto this backup.")
+        return
 
     tc.MANIFEST_PATH.unlink(missing_ok=True)
     leftovers = [p for p in (tc.BACKUP_ROOT / "folders").iterdir()] \

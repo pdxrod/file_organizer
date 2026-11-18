@@ -82,6 +82,21 @@ def main() -> None:
         print("if you are sure you want to discard it.")
         sys.exit(1)
 
+    # A sweep can also be left behind WITHOUT a manifest (e.g. a restore
+    # that skipped same-named items, or an interrupted sweep). Refuse to
+    # sweep onto it — moving into those leftovers would corrupt both.
+    # Empty dirs are harmless (a finished restore leaves them behind).
+    leftovers = [
+        p.name for p in (tc.BACKUP_ROOT / "folders").iterdir()
+        if any(p.iterdir())
+    ] if (tc.BACKUP_ROOT / "folders").is_dir() else []
+    if leftovers:
+        print("ERROR: leftover sweep data found without a manifest:")
+        print(f"  {tc.BACKUP_ROOT / 'folders'}  ({', '.join(leftovers)})")
+        print("Restore it with restore-major-folders.py if it is your data,")
+        print("or remove it by hand if you are sure it is not needed.")
+        sys.exit(1)
+
     # Folders to sweep: both sides of the sync pair + the one-way target.
     # Identical paths are swept once.
     to_sweep = []
@@ -113,7 +128,14 @@ def main() -> None:
         dest.mkdir(parents=True, exist_ok=True)
         moved = 0
         for entry in folder.iterdir():
-            shutil.move(str(entry), str(dest / entry.name))
+            dest_entry = dest / entry.name
+            if dest_entry.exists():
+                print(f"ERROR: {dest_entry} already exists — refusing to")
+                print("move anything more. Nothing has been lost: run")
+                print("restore-major-folders.py to put back what has been")
+                print("moved so far.")
+                sys.exit(1)
+            shutil.move(str(entry), str(dest_entry))
             moved += 1
         manifest["folders"].append({
             "role": role,
