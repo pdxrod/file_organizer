@@ -4,10 +4,111 @@ import os
 import subprocess
 import logging
 import time
+import fnmatch
+import re
+import stat
+import json
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Cache of "is this rsync binary GNU rsync?" probes (see _probe_gnu).
+_GNU_PROBE_CACHE: dict[str, bool] = {}
+
+
+class _ExcludeMatcher:
+    """rsync-style exclusion matching for the pattern shapes file_organizer
+    uses. Mirrors GNU rsync's filter rules closely enough for the quick
+    check to be safe:
+
+      - "name"            matches that component name at any depth
+      - "*.pyc"           component glob at any depth
+      - "/name/"          the top-level DIRECTORY name only (anchored)
+      - "**/name"         same as the bare name (any depth)
+      - "a/b"             matches when the path's last two components
+                          are "a/b" (unanchored suffix match)
+
+    Anything else (anchored file patterns, dir-only trailing-slash
+    patterns, exotic ** shapes) marks the matcher invalid and the quick
+    check declines to decide, so rsync runs as usual.
+    """
+
+    def __init__(self, patterns: list[str]) -> None:
+        self.basename: list[str] = []       # matched against each component
+        self.suffix: list[list[str]] = []   # component lists matched at end
+        self.root_dirs: set[str] = set()    # "/name/" anchored top-level dirs
+        self.valid = True
+        for pat in patterns or []:
+            pat = str(pat)
+            if not pat:
+                continue
+            if pat.startswith("/"):
+                if pat.endswith("/") and "/" not in pat[1:-1]:
+                    self.root_dirs.add(pat[1:-1])
+                else:
+                    self.valid = False
+                    return
+            elif pat.endswith("/"):
+                self.valid = False
+                return
+            elif "**" in pat:
+                if pat.startswith("**/") and "/" not in pat[3:] \
+                        and "**" not in pat[3:]:
+                    self.basename.append(pat[3:])
+                else:
+                    self.valid = False
+                    return
+            elif "/" in pat:
+                self.suffix.append(pat.split("/"))
+            else:
+                self.basename.append(pat)
+        # Precompile (fnmatchcase semantics: case-sensitive globs).
+        def _translated(pat: str) -> str:
+            # fnmatch.translate() always ends with \Z; strip it so
+            # components can be joined ("*" must not cross a "/").
+            t = fnmatch.translate(pat)
+            return t[:-2] if t.endswith("\\Z") else t
+
+        self._basename_re = [
+            re.compile(fnmatch.translate(p)) for p in self.basename
+        ]
+        self._suffix_re = [
+            (comps, re.compile("/".join(_translated(c) for c in comps) + "\\Z"))
+            for comps in self.suffix
+        ]
+
+    def matches(self, relpath: str, is_dir: bool) -> bool:
+        """True when relpath (posix, relative to the pair root) matches."""
+        parts = relpath.split("/")
+        if is_dir and parts[0] in self.root_dirs:
+            return True
+        for name in parts:
+            for rx in self._basename_re:
+                if rx.match(name):
+                    return True
+        for comps, rx in self._suffix_re:
+            if len(parts) >= len(comps):
+                tail = "/".join(parts[-len(comps):])
+                if rx.match(tail):
+                    return True
+        return False
+
+
+def _probe_gnu(binary: str) -> bool:
+    """Does this rsync binary print GNU rsync's version banner?"""
+    if binary in _GNU_PROBE_CACHE:
+        return _GNU_PROBE_CACHE[binary]
+    try:
+        out = subprocess.run(
+            [binary, "--version"], capture_output=True, timeout=5,
+        ).stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.TimeoutExpired):
+        _GNU_PROBE_CACHE[binary] = False
+        return False
+    is_gnu = "rsync  version" in out and "openrsync" not in out
+    _GNU_PROBE_CACHE[binary] = is_gnu
+    return is_gnu
 
 
 class SyncEngine:
@@ -45,6 +146,29 @@ class SyncEngine:
         # chunker and as --exclude /name/ in every rsync run.
         self._exclude_folder_names: list[str] = \
             config.raw_config.get("sync_exclude_folder_names", []) or []
+        # Quick check: before each rsync direction, compare the two trees
+        # with a fast Python walk (no rsync scan) and skip the direction
+        # when the target already has everything from the source. Never
+        # changes what rsync does — it only skips work.
+        self._quick_check: bool = bool(
+            config.raw_config.get("sync_quick_check", True)
+        )
+        # Which rsync binary to run (see _resolve_rsync_binary). macOS's
+        # /usr/bin/rsync is openrsync; GNU rsync from Homebrew is preferred
+        # when present.
+        self._rsync_bin: str = self._resolve_rsync_binary()
+        self._rsync_is_gnu: bool = _probe_gnu(self._rsync_bin)
+        # Failed cloud syncs are remembered for this many seconds before
+        # being tried again (0 = never remember, always retry).
+        self._failure_cooldown: int = int(
+            config.raw_config.get("sync_failure_cooldown_minutes", 360) or 0
+        ) * 60
+        raw_state = config.raw_config.get("sync_failure_state_path") or ""
+        self._failure_state_path: Path = (
+            Path(os.path.expanduser(raw_state)) if raw_state
+            else Path.home() / ".file_organizer_sync_failures.json"
+        )
+        self._failures: dict = self._load_failures()
         # Cross-device sync coordination (see _shared_lock_dir).
         self._lock_enabled: bool = bool(
             config.raw_config.get("sync_lock_enabled", True)
@@ -67,6 +191,19 @@ class SyncEngine:
         "CloudStorage", "GoogleDrive", "Google Drive",
         "Dropbox", "OneDrive", "iCloud", "Mobile Documents",
     )
+
+    # Cloud-app folder markers: a sync failure involving one of these is
+    # remembered (see sync_failure_cooldown_minutes) so a stuck cloud file
+    # is not retried every cycle. Removable volumes (/Volumes/) are NOT
+    # listed — they keep the old retry-every-cycle behaviour.
+    CLOUD_MARKERS = (
+        "CloudStorage", "GoogleDrive", "Google Drive",
+        "Dropbox", "OneDrive", "iCloud", "Mobile Documents",
+    )
+
+    def _is_cloud_path(self, path: Path) -> bool:
+        text = str(path)
+        return any(m in text for m in self.CLOUD_MARKERS)
 
     def _shared_lock_dir(self, folder_a: Path, folder_b: Path) -> "Optional[Path]":
         """The pair folder both machines can see, or None for local-only pairs.
@@ -156,19 +293,61 @@ class SyncEngine:
         except OSError:
             pass
 
+    def _resolve_rsync_binary(self) -> str:
+        """Pick the rsync binary: config override, else GNU rsync from
+        Homebrew when installed, else plain "rsync".
+
+        openrsync (macOS /usr/bin/rsync) silently ignores the long-form
+        --whole-file spelling and mmap-reads every file's content during
+        its delta scan, which force-downloads each cloud placeholder —
+        measured at 10+ minutes for a 9k-file Proton folder that GNU
+        rsync / -W walks in ~1s.
+        """
+        override = (self.config.raw_config.get("rsync_binary") or "").strip()
+        if override:
+            logger.info("Using rsync binary from config: %s", override)
+            return override
+        for candidate in (
+            "/opt/homebrew/bin/rsync",
+            "/usr/local/bin/rsync",
+            "/usr/local/opt/rsync/bin/rsync",
+        ):
+            if not (os.path.isfile(candidate)
+                    and os.access(candidate, os.X_OK)):
+                continue
+            try:
+                out = subprocess.run(
+                    [candidate, "--version"],
+                    capture_output=True, timeout=5,
+                ).stdout.decode("utf-8", "replace")
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if "rsync  version" in out and "openrsync" not in out:
+                logger.info("Using GNU rsync: %s", candidate)
+                return candidate
+        return "rsync"
+
     def _build_rsync_args(self, source: Path, target: Path, delete: bool = False,
                           exclude_subdirs=None) -> list[str]:
         """Build rsync argument list."""
-        args = ["rsync", "-av", "--progress"]
+        args = [self._rsync_bin, "-av", "--progress"]
 
         # One line per transferred/updated item — used to detect whether a
         # sync actually did anything (idle backoff, item 14).
         args.append("--itemize-changes")
 
-        # Item 11 fix: whole-file transfer by default so cloud placeholder
-        # files are never mmap'ed/read on the receiving side. Delta mode is
-        # opt-in via rsync_whole_file: false.
-        args.append("--whole-file" if self._whole_file else "--no-whole-file")
+        # Whole-file transfer by default so cloud placeholder files are
+        # never mmap'ed/read. Use the SHORT -W spelling on purpose:
+        # openrsync silently ignores the long --whole-file form and
+        # mmap-reads every file's content during its delta scan, which
+        # force-downloads each Proton placeholder (hours per pair). -W is
+        # honoured by BOTH openrsync and GNU rsync.
+        if self._whole_file:
+            args.append("-W")
+        elif self._rsync_is_gnu:
+            # --no-whole-file is GNU-only. openrsync defaults to delta,
+            # which is exactly what whole_file: false asks for.
+            args.append("--no-whole-file")
 
         # Stall guard: fail fast when a cloud read hangs (item 11).
         if self._io_timeout > 0:
@@ -210,17 +389,102 @@ class SyncEngine:
 
         return args
 
+    def _load_failures(self) -> dict:
+        """Read the failed-sync memory (best effort — a missing or broken
+        state file just means nothing is remembered)."""
+        try:
+            data = json.loads(self._failure_state_path.read_text())
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_failures(self) -> None:
+        """Write the failed-sync memory, pruning entries that are older
+        than four cooldowns."""
+        now = time.time()
+        keep = {
+            k: v for k, v in self._failures.items()
+            if isinstance(v, dict)
+            and now - v.get("failed_at", 0) < self._failure_cooldown * 4
+        }
+        self._failures = keep
+        try:
+            self._failure_state_path.write_text(
+                json.dumps(keep, indent=2, sort_keys=True)
+            )
+        except OSError as e:
+            logger.warning(
+                "Could not save sync failure state %s: %s",
+                self._failure_state_path, e,
+            )
+
+    def _failure_cooldown_until(self, key: str) -> float:
+        """Timestamp until which this source→target unit is remembered
+        as failed (0.0 = not remembered)."""
+        if self._failure_cooldown <= 0:
+            return 0.0
+        rec = self._failures.get(key)
+        if not isinstance(rec, dict):
+            return 0.0
+        try:
+            return float(rec.get("failed_at", 0)) + self._failure_cooldown
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _remember_failure(self, key: str, source: Path,
+                          target: Path) -> None:
+        """Remember a failed cloud sync so it is not retried every cycle.
+        Local pairs are never remembered (a transient local error should
+        keep retrying)."""
+        if self._failure_cooldown <= 0:
+            return
+        if not (self._is_cloud_path(source) or self._is_cloud_path(target)):
+            return
+        self._failures[key] = {
+            "failed_at": int(time.time()),
+            "source": str(source),
+            "target": str(target),
+        }
+        logger.info(
+            "Remembering failed sync %s → %s — will not retry for "
+            "%d minutes",
+            source, target, self._failure_cooldown // 60,
+        )
+        self._save_failures()
+
+    def _forget_failure(self, key: str) -> None:
+        if key in self._failures:
+            del self._failures[key]
+            self._save_failures()
+
     def _run_rsync(self, source: Path, target: Path, delete: bool = False,
                     exclude_subdirs=None) -> bool:
-        """Run rsync from source to target. Returns True on success."""
+        """Run rsync from source to target. Returns True on success.
+
+        A failed CLOUD sync is remembered (sync_failure_cooldown_minutes)
+        and skipped on later runs until the cooldown expires, instead of
+        retrying the same stuck placeholder every cycle.
+        """
         args = self._build_rsync_args(source, target, delete, exclude_subdirs)
 
         # Ensure target directory exists
         target.mkdir(parents=True, exist_ok=True)
 
+        key = f"{source}|{target}"
+        until = self._failure_cooldown_until(key)
+        now = time.time()
+        if until > now:
+            logger.info(
+                "Skipping %s → %s — rsync failed recently (retrying in "
+                "%.0f min)",
+                source, target, (until - now) / 60,
+            )
+            return True
+
         logger.info("Syncing: %s → %s", source, target)
         logger.debug("rsync args: %s", " ".join(args))
 
+        ok = False
         try:
             result = subprocess.run(
                 args,
@@ -232,19 +496,22 @@ class SyncEngine:
                 self.last_change_count += changed
                 logger.debug("Sync complete: %s → %s (%d changes)",
                              source, target, changed)
-                return True
+                ok = True
             else:
                 stderr_text = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
                 logger.error("rsync failed (%d): %s", result.returncode, stderr_text[:500])
-                return False
         except subprocess.TimeoutExpired:
             logger.error("rsync timed out after %ds: %s → %s", self._timeout, source, target)
-            return False
         except KeyboardInterrupt:
             raise
         except FileNotFoundError:
             logger.error("rsync not found — please install rsync")
-            return False
+
+        if ok:
+            self._forget_failure(key)
+        else:
+            self._remember_failure(key, source, target)
+        return ok
 
     def _sync_subdirs(self, source: Path) -> list:
         """Direct subfolder names eligible for sync, excluding folders the
@@ -307,6 +574,95 @@ class SyncEngine:
                 count += 1
         return count
 
+    def _walk_index(self, root: Path) -> "Optional[dict]":
+        """Index one side of a pair for the quick check.
+
+        Returns {relpath: entry} where relpath is posix-relative:
+          file    ("f", mode, size, mtime_sec)
+          symlink ("L", target, mtime_sec)
+          dir     ("d",)   — presence only, dir mtimes are NOT compared
+                            (cloud mounts don't preserve them)
+        Exclusions are applied exactly like the rsync --exclude list
+        (patterns that can't be matched exactly make the matcher invalid).
+        Special files (fifos etc.) are ignored — rsync skips them too
+        without --specials.
+
+        Returns None when the index can't be trusted (invalid patterns,
+        I/O errors) — the caller then runs rsync as usual.
+        """
+        matcher = _ExcludeMatcher(
+            list(self._exclude_patterns)
+            + [f"/{n}/" for n in self._exclude_folder_names]
+        )
+        if not matcher.valid:
+            return None
+        if not os.path.isdir(str(root)):
+            return None
+        index: dict = {}
+        try:
+            for dirpath, dirnames, filenames in os.walk(
+                str(root), followlinks=False
+            ):
+                dirpath_p = Path(dirpath)
+                kept: list[str] = []
+                for name in dirnames:
+                    rel = os.path.relpath(
+                        os.path.join(dirpath, name), str(root)
+                    )
+                    if matcher.matches(rel, is_dir=True):
+                        continue
+                    p = dirpath_p / name
+                    try:
+                        st = os.lstat(str(p))
+                    except OSError:
+                        return None
+                    if stat.S_ISLNK(st.st_mode):
+                        try:
+                            target = os.readlink(str(p))
+                        except OSError:
+                            return None
+                        index[rel] = ("L", target, int(st.st_mtime))
+                    else:
+                        kept.append(name)
+                        index[rel] = ("d",)
+                dirnames[:] = kept
+                for name in filenames:
+                    p = dirpath_p / name
+                    rel = os.path.relpath(str(p), str(root))
+                    try:
+                        st = os.lstat(str(p))
+                    except OSError:
+                        return None
+                    if stat.S_ISLNK(st.st_mode):
+                        try:
+                            target = os.readlink(str(p))
+                        except OSError:
+                            return None
+                        index[rel] = ("L", target, int(st.st_mtime))
+                        continue
+                    if not (stat.S_ISREG(st.st_mode)
+                            or stat.S_ISDIR(st.st_mode)):
+                        continue  # special files: rsync skips them too
+                    if matcher.matches(rel, is_dir=False):
+                        continue
+                    index[rel] = (
+                        "f", stat.S_IMODE(st.st_mode),
+                        st.st_size, int(st.st_mtime),
+                    )
+        except OSError:
+            return None
+        return index
+
+    @staticmethod
+    def _needs_sync(source_index: dict, target_index: dict) -> bool:
+        """True when the target is missing a source entry or has a
+        different one — i.e. the source side has something newer/missing
+        that a sync would copy."""
+        for rel, entry in source_index.items():
+            if target_index.get(rel) != entry:
+                return True
+        return False
+
     def sync_bidirectional(self, folder_a: Path, folder_b: Path) -> dict:
         """Bidirectional sync: copy new/changed files in both directions."""
         result = {"a_to_b": False, "b_to_a": False}
@@ -348,6 +704,27 @@ class SyncEngine:
                 logger.warning("Skipping sync pair — missing: %s", missing)
                 continue
 
+            skip_a_to_b = skip_b_to_a = False
+            if self._quick_check:
+                idx_a = self._walk_index(folder_a)
+                idx_b = self._walk_index(folder_b)
+                if idx_a is not None and idx_b is not None:
+                    skip_a_to_b = not self._needs_sync(idx_a, idx_b)
+                    skip_b_to_a = not self._needs_sync(idx_b, idx_a)
+
+            if skip_a_to_b and skip_b_to_a:
+                logger.info(
+                    "Quick check: %s and %s are in sync — skipped",
+                    folder_a, folder_b,
+                )
+                summary["bidirectional"].append({
+                    "a": str(folder_a),
+                    "b": str(folder_b),
+                    "result": {"a_to_b": True, "b_to_a": True},
+                    "skipped": True,
+                })
+                continue
+
             lock_dir = self._shared_lock_dir(folder_a, folder_b) \
                 if self._lock_enabled else None
             lock_held = False
@@ -361,7 +738,21 @@ class SyncEngine:
                     continue
             try:
                 logger.info("Bidirectional sync: %s ↔ %s", folder_a, folder_b)
-                res = self.sync_bidirectional(folder_a, folder_b)
+                res = {"a_to_b": True, "b_to_a": True}
+                if skip_a_to_b:
+                    logger.info(
+                        "Quick check: nothing newer in %s — skipped "
+                        "%s → %s", folder_a, folder_a, folder_b,
+                    )
+                else:
+                    res["a_to_b"] = self._run_rsync_many(folder_a, folder_b)
+                if skip_b_to_a:
+                    logger.info(
+                        "Quick check: nothing newer in %s — skipped "
+                        "%s → %s", folder_b, folder_b, folder_a,
+                    )
+                else:
+                    res["b_to_a"] = self._run_rsync_many(folder_b, folder_a)
                 summary["bidirectional"].append({
                     "a": str(folder_a),
                     "b": str(folder_b),
@@ -390,6 +781,25 @@ class SyncEngine:
                 target.mkdir(parents=True, exist_ok=True)
             except (PermissionError, OSError) as e:
                 logger.warning("Skipping - cannot create target %s: %s", target, e)
+                continue
+
+            skip = False
+            if self._quick_check:
+                idx_src = self._walk_index(source)
+                idx_tgt = self._walk_index(target)
+                if idx_src is not None and idx_tgt is not None:
+                    skip = not self._needs_sync(idx_src, idx_tgt)
+            if skip:
+                logger.info(
+                    "Quick check: nothing newer in %s — skipped %s → %s",
+                    source, source, target,
+                )
+                summary["one_way"].append({
+                    "source": str(source),
+                    "target": str(target),
+                    "ok": True,
+                    "skipped": True,
+                })
                 continue
 
             lock_dir = self._shared_lock_dir(source, target) \

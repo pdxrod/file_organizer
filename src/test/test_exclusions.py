@@ -391,26 +391,37 @@ class SyncChangeCountTests(unittest.TestCase):
     def test_whole_file_is_default(self):
         engine = self._engine_with({"exclude_patterns": []})
         args = engine._build_rsync_args(Path("/a"), Path("/b"))
-        self.assertIn("--whole-file", args)
+        # -W (not the long form): openrsync silently ignores --whole-file
+        # and mmap-reads cloud placeholders; -W works on both rsyncs.
+        self.assertIn("-W", args)
+        self.assertNotIn("--whole-file", args)
         self.assertNotIn("--no-whole-file", args)
         self.assertIn("--timeout=300", args)
 
     def test_legacy_rsync_disable_mmap_means_whole_file(self):
         # The old key used to add --no-whole-file (delta), which hung on
-        # Proton placeholders. It must now mean whole-file.
+        # Proton placeholders. It must now mean whole-file (-W).
         engine = self._engine_with({
             "exclude_patterns": [],
             "rsync_disable_mmap": True,
         })
         args = engine._build_rsync_args(Path("/a"), Path("/b"))
-        self.assertIn("--whole-file", args)
+        self.assertIn("-W", args)
         self.assertNotIn("--no-whole-file", args)
 
     def test_whole_file_can_be_disabled(self):
+        # --no-whole-file is a GNU-only flag; with a non-GNU rsync
+        # (openrsync) the flag is omitted because delta is already its
+        # default.
         engine = self._engine_with({
             "exclude_patterns": [],
             "rsync_whole_file": False,
         })
+        args = engine._build_rsync_args(Path("/a"), Path("/b"))
+        self.assertNotIn("-W", args)
+        self.assertNotIn("--whole-file", args)
+        # With a real GNU rsync the delta mode is spelled out explicitly.
+        engine._rsync_is_gnu = True
         args = engine._build_rsync_args(Path("/a"), Path("/b"))
         self.assertIn("--no-whole-file", args)
 

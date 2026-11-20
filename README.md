@@ -570,8 +570,8 @@ app-generated ones (`Screenshot_20261114_666_X.jpg`,
 - For `IMG_20261114_153021.jpg`: press **Enter alone** (keep it).
 - `x` stops the walk if you need to.
 
-Keeping two of them held is the point: they prove held files are not
-copied, while the renamed one now copies.
+Leaving two of them held is the test: held files stay on the phone,
+and only the renamed one is copied.
 
 ### 5. Phone production scan
 
@@ -674,6 +674,9 @@ highlights:
 | `enable_folder_sync`, `enable_duplicate_detection`, `auto_git` | Feature switches (safe defaults off where dangerous) |
 | `dedupe_download_copies` | Auto-on: delete `foo_1`, `foo (1)`, `foo-1`, `foo (1) (1)` copies when an identical plain-named file exists, and rename trailing ` (N)` counters to `_N` before the extension (`foo.m4a (1)` → `foo_1.m4a`, different files kept) |
 | `rsync_whole_file` / `rsync_io_timeout_seconds` | Whole-file transfers + stall guard for cloud drives (item 11) |
+| `sync_quick_check` | Skip a sync direction when a fast walk shows the target already has every source file (same size/mode/mtime) |
+| `rsync_binary` | Optional path to a GNU rsync binary (empty = auto-detect Homebrew rsync) |
+| `sync_failure_cooldown_minutes` | A failed cloud sync is remembered and not retried for this long (0 = always retry) |
 | `sync_lock_enabled` / `sync_lock_stale_minutes` | One-machine-at-a-time sync: the second machine skips a pair another device is syncing (stale locks are taken over) |
 | `sync_chunk_subfolders` | Pairs with more subfolders than this are synced one subfolder at a time |
 | `phone_pull` | Where phone files land and where push mode reads from |

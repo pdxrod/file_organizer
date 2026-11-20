@@ -95,6 +95,20 @@ DEFAULTS: Dict[str, Any] = {
     # Item 11: whole-file transfers by default — the mmap-heavy delta
     # algorithm hangs reading Proton Drive placeholder files.
     "rsync_whole_file": True,
+    # Quick check: before each rsync direction the engine compares the two
+    # trees with a fast Python walk (size + mtime + mode) and skips the
+    # direction when the target already has everything from the source.
+    # It never changes what rsync copies — it only skips work.
+    "sync_quick_check": True,
+    # Optional absolute path to an rsync binary. Empty = auto: GNU rsync
+    # from Homebrew when installed, else plain "rsync" (macOS openrsync).
+    "rsync_binary": "",
+    # Cloud syncs that fail (e.g. a Proton placeholder that stalls on
+    # mmap) are remembered and not retried until this many minutes pass,
+    # instead of failing again every cycle. 0 = always retry.
+    "sync_failure_cooldown_minutes": 360,
+    # Where the failed-sync memory lives (JSON). ~ = home directory.
+    "sync_failure_state_path": "~/.file_organizer_sync_failures.json",
     # Item 11: per-I/O stall guard (rsync --timeout, seconds).
     "rsync_io_timeout_seconds": 300,
     "rsync_additional_args": [],

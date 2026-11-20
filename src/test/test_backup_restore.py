@@ -4,8 +4,9 @@ Guards the failure mode that corrupted the user's data on 19 Nov: a sweep
 crashed midway, the next restore skipped same-named items (leaving them in
 the backup without a manifest), and the next sweep piled new items onto
 those leftovers. backup-major-folders.py must refuse to run while any
-backup data exists, and restore-major-folders.py must keep the manifest
-when it couldn't restore everything.
+backup data exists, and restore-major-folders.py now ALWAYS drains the
+backup: missing items move back, identical duplicates are dropped, and
+conflicts are renamed beside the originals instead of blocking the plan.
 """
 
 import importlib.util
@@ -157,7 +158,7 @@ class SweepSafetyTests(unittest.TestCase):
         self.assertTrue((original / "gone.txt").exists())
         self.assertFalse(tc.MANIFEST_PATH.exists())
 
-    def test_restore_skips_conflicts_and_keeps_manifest(self):
+    def test_restore_renames_conflicts_and_finishes(self):
         original = self.root / "docs"
         original.mkdir()
         (original / "same.txt").write_text("newer")
@@ -170,26 +171,65 @@ class SweepSafetyTests(unittest.TestCase):
                          "backup": str(backup_dir)}]
         }))
         restore.main()
-        # The conflicting item stays in the backup; the manifest stays so a
-        # new sweep cannot pile onto the leftovers.
-        self.assertTrue((backup_dir / "same.txt").exists())
+        # Nothing was overwritten: the target keeps its copy and the
+        # backup's copy was renamed beside it.
+        self.assertEqual((original / "same.txt").read_text(), "newer")
+        self.assertEqual(
+            (original / ("same.txt" + restore.CONFLICT_SUFFIX)).read_text(),
+            "older",
+        )
         self.assertTrue((original / "gone.txt").exists())
-        self.assertTrue(tc.MANIFEST_PATH.exists())
+        # The backup is fully drained, so the plan is NOT stuck and the
+        # next sweep may start.
+        self.assertFalse(tc.MANIFEST_PATH.exists())
+        self.assertFalse(backup_dir.exists())
 
-        # After the conflict is resolved by hand, the next restore finishes
-        # and removes the manifest.
-        (original / "same.txt").unlink()
+    def test_restore_drops_identical_duplicates(self):
+        import os
+        original = self.root / "docs"
+        original.mkdir()
+        (original / "same.txt").write_text("x")
+        backup_dir = self.broot / "folders" / "0"
+        backup_dir.mkdir(parents=True)
+        (backup_dir / "same.txt").write_text("x")
+        t = 1700000000
+        os.utime(str(original / "same.txt"), (t, t))
+        os.utime(str(backup_dir / "same.txt"), (t, t))
+        tc.MANIFEST_PATH.write_text(json.dumps({
+            "folders": [{"original": str(original),
+                         "backup": str(backup_dir)}]
+        }))
         restore.main()
         self.assertTrue((original / "same.txt").exists())
         self.assertFalse(tc.MANIFEST_PATH.exists())
+        self.assertFalse(backup_dir.exists())
 
-    def test_backup_refuses_after_restore_skipped_items(self):
-        # The full failure chain: restore skips a same-named item, then a
-        # new sweep must refuse instead of moving new data onto the
-        # leftovers.
+    def test_restore_merges_dirs_without_overwriting(self):
+        original = self.root / "docs"
+        (original / "sub").mkdir(parents=True)
+        (original / "sub" / "a.txt").write_text("1")
+        backup_dir = self.broot / "folders" / "0"
+        (backup_dir / "sub").mkdir(parents=True)
+        (backup_dir / "sub" / "a.txt").write_text("1")  # identical
+        (backup_dir / "sub" / "b.txt").write_text("2")  # only in backup
+        tc.MANIFEST_PATH.write_text(json.dumps({
+            "folders": [{"original": str(original),
+                         "backup": str(backup_dir)}]
+        }))
+        restore.main()
+        self.assertEqual((original / "sub" / "a.txt").read_text(), "1")
+        self.assertEqual((original / "sub" / "b.txt").read_text(), "2")
+        self.assertFalse(tc.MANIFEST_PATH.exists())
+        self.assertFalse(backup_dir.exists())
+
+    def test_backup_refuses_while_backup_data_exists(self):
+        # The original failure chain: restore leaves same-named items in
+        # the backup (no longer happens with the rename-on-conflict
+        # restore, but a manually interrupted restore can still leave
+        # data behind) — a new sweep must refuse to pile new items onto
+        # those leftovers.
         original = self.root / "docs"
         original.mkdir()
-        (original / "same.txt").write_text("newer")
         backup_dir = self.broot / "folders" / "0"
         backup_dir.mkdir(parents=True)
         (backup_dir / "same.txt").write_text("older")
@@ -197,7 +237,6 @@ class SweepSafetyTests(unittest.TestCase):
             "folders": [{"original": str(original),
                          "backup": str(backup_dir)}]
         }))
-        restore.main()
         (self.root / "main" / "pol").mkdir(parents=True)
         (self.root / "proton" / "pol").mkdir(parents=True)
         cfg = self._config([("MAIN_DRIVE/pol", "PROTON_DRIVE/pol")])

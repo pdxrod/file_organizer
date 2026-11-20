@@ -283,6 +283,19 @@ computer:
   # algorithm hangs reading Proton Drive placeholder files, so keep this
   # on for cloud pairs; set false only for real network filesystems.
   rsync_whole_file: true
+  # Item 19 — quick check: compare the two trees with a fast Python walk
+  # and skip a sync direction when the target already has everything.
+  # Only ever skips work; set false to always run rsync.
+  sync_quick_check: true
+  # Item 19 — optional path to a real (GNU) rsync. Empty = auto-detect
+  # Homebrew rsync, else the system rsync (openrsync on macOS).
+  rsync_binary: ""
+  # Item 20 — a cloud sync that fails (e.g. a stuck Proton placeholder)
+  # is remembered and not retried until this many minutes pass, instead
+  # of failing again every cycle. 0 = always retry.
+  sync_failure_cooldown_minutes: 360
+  # Item 20 — where the failed-sync memory lives (~ = home directory).
+  sync_failure_state_path: "~/.file_organizer_sync_failures.json"
   # Item 11 — rsync --timeout stall guard: a stuck cloud read fails after
   # this many seconds instead of hanging the whole sync hour. 0 = off.
   rsync_io_timeout_seconds: 300

@@ -134,10 +134,16 @@ def run_computer_test() -> int:
     _run_organize("stop")
 
     # 2. Undo any previous run, then sweep + create the test files.
-    _pause("Ready to sweep the test folders?")
+    _pause(
+        "Next, the test folders are moved into a temporary backup and\n"
+        "test files take their place. Nothing is deleted — your files\n"
+        "come back at the end of the test.\n"
+        "\n"
+        "Ready?"
+    )
     _run_python("src/test/restore-major-folders.py")
     if _run_python("src/test/backup-major-folders.py", check=True) != 0:
-        print("\nThe sweep failed — see the message above. Typical fixes:")
+        print("\nThe backup step failed — see the message above. Typical fixes:")
         print("  - a previous backup still exists: run")
         print("    'python3 src/test/restore-major-folders.py' first")
         print("  - list the candidate pairs:")
@@ -236,21 +242,26 @@ def run_phone_test() -> int:
         return 1
 
     _pause(
-        "Now the rename walk. You will be prompted for each held file:\n"
-        "  - Screenshot_20261114_666_X.jpg  -> type the new name:\n"
-        "       2026114_foo_baz.jpg\n"
-        "  - Screenshot_20261114_777_X.jpg  -> press Enter alone (keep)\n"
-        "  - IMG_20261114_153021.jpg        -> press Enter alone (keep)\n"
-        "  - 'x' stops the walk at any time.\n"
+        "Next: the renames. For each held file:\n"
         "\n"
-        "Keeping two of them held is the point: it proves held files\n"
-        "are not copied, while the renamed one now copies."
+        "  Screenshot_20261114_666_X.jpg\n"
+        "     type the new name: 2026114_foo_baz.jpg\n"
+        "  Screenshot_20261114_777_X.jpg\n"
+        "     press Enter alone to keep it\n"
+        "  IMG_20261114_153021.jpg\n"
+        "     press Enter alone to keep it\n"
+        "  x at any prompt stops the walk\n"
+        "\n"
+        "Leaving two of them held is the test:\n"
+        "held files stay on the phone, and only the\n"
+        "renamed one is copied."
     )
     phone_sync.rename_held_interactive(sync)
 
     _pause(
-        "Now the production scan — the ready files are copied into\n"
-        "file_organizer_staging/ (the held ones stay on the phone)."
+        "Now the real scan:\n"
+        "  ready files copy to file_organizer_staging/\n"
+        "  held files stay on the phone"
     )
     stats = sync.run_once(dry_run=False)
     print()
