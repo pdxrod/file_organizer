@@ -265,9 +265,10 @@ def run_phone_test() -> int:
     phone_sync.rename_held_interactive(sync)
 
     _pause(
-        "Now the real scan:\n"
-        "  ready files copy to file_organizer_staging/\n"
-        "  held files stay on the phone"
+        "Now the files you renamed are copied into\n"
+        "file_organizer_staging/ on the phone, ready\n"
+        "for the computer to collect. App-created\n"
+        "files stay on the phone."
     )
     stats = sync.run_once(dry_run=False)
     print()
