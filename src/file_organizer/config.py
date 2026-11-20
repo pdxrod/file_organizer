@@ -481,7 +481,7 @@ class Config:
                       file=sys.stderr)
             markers = "', '".join(placeholder_markers)
             print(
-                "    Set your real folders with './organize setup', or "
+                "    Set your real folders with './organize config', or "
                 f"edit config.yaml and replace '{markers}' with your "
                 "own paths.",
                 file=sys.stderr,

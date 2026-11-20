@@ -518,7 +518,7 @@ def main(argv=None):
         if not router.enabled:
             print("\nFile routing is turned off (router.enabled: false in "
                   "config.yaml).\n"
-                  "Run './organize setup' or set 'enabled: true' to turn "
+                  "Run './organize config' or set 'enabled: true' to turn "
                   "it on —\nuntil then the plan above is empty.")
         return
 
@@ -553,7 +553,7 @@ def main(argv=None):
                 "until you turn it on.\n"
                 "\n"
                 "To turn it on:\n"
-                "  • run './organize setup', or\n"
+                "  • run './organize config', or\n"
                 "  • edit config.yaml — under 'router:' set 'enabled: "
                 "true'\n"
                 "    (and check route_roots, watch_folders and "

@@ -582,11 +582,16 @@ def computer_setup(log):
 def phone_setup(log):
     run_phone_cli(PHONE_COMMANDS["find-cloud-drives"])
     cfg_path = Path(phone_config_path())
-    if not cfg_path.exists():
-        run_phone_cli(PHONE_COMMANDS["make-config"])
+    _insert_src_path()
+    from file_organizer.phone_config_editor import needs_phone_editor
+    if needs_phone_editor(str(cfg_path)):
+        # Missing or broken config: the same guided editor as
+        # './organize config' — not a silent template copy.
+        phone_config_edit()
     log("")
     log("Next steps:")
-    log(f"  1. Edit {cfg_path} (nano on Termux).")
+    log("  1. Change any setting: ./organize config (guided).")
+    log(f"     - Or edit {cfg_path} (nano on Termux).")
     log("     - On Android: target_directory = /storage/emulated/0/file_organizer_staging")
     log("     - Never use TAB characters in YAML — spaces only.")
     log("  2. Dry-run test:   ./organize test")
@@ -883,10 +888,10 @@ def usage(platform):
             "  ./organize log           follow the log file (q to stop)",
             "  ./organize stats         sync database statistics",
             "  ./organize find-cloud-drives  locate your cloud drive folders",
-            "  ./organize config        guided editor for phone_sync_config.yaml",
-            "  ./organize make-config   create phone_sync_config.yaml (no questions)",
+            "  ./organize setup         first run: find cloud drives + guided setup",
+            "  ./organize config        create or edit settings (guided editor)",
+            "  ./organize make-config   create the config from the template (no questions)",
             "  ./organize rename        rename held files, one by one (d deletes, x stops)",
-            "  ./organize setup         first-time setup wizard",
             "",
             "Flags (phone): scan-once, dry-run, background, find-cloud-drives,",
             "  stats, status, stop, make-config, rename-held, config FILE, verbose",
