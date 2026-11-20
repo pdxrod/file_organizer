@@ -252,9 +252,15 @@ def run_phone_test() -> int:
         "     press Enter alone to keep it\n"
         "  x at any prompt stops the walk\n"
         "\n"
-        "Leaving two of them held is the test:\n"
-        "held files stay on the phone, and only the\n"
-        "renamed one is copied."
+        "Screenshot_20261114_777_X.jpg and\n"
+        "IMG_20261114_153021.jpg are not copied —\n"
+        "they stay on the phone. You renamed\n"
+        "Screenshot_20261114_666_X.jpg to\n"
+        "2026114_foo_baz.jpg, so it will be copied.\n"
+        "\n"
+        "Files that look renamed are copied; files an\n"
+        "app created and left as they are stay on the\n"
+        "phone."
     )
     phone_sync.rename_held_interactive(sync)
 

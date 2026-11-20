@@ -570,8 +570,11 @@ app-generated ones (`Screenshot_20261114_666_X.jpg`,
 - For `IMG_20261114_153021.jpg`: press **Enter alone** (keep it).
 - `x` stops the walk if you need to.
 
-Leaving two of them held is the test: held files stay on the phone,
-and only the renamed one is copied.
+`Screenshot_20261114_777_X.jpg` and `IMG_20261114_153021.jpg` are not
+copied — they stay on the phone. `Screenshot_20261114_666_X.jpg` was
+renamed to `2026114_foo_baz.jpg`, so it is copied. Files that look
+renamed are copied; files an app created and left as they are stay on
+the phone.
 
 ### 5. Phone production scan
 
