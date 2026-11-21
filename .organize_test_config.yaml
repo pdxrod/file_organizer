@@ -199,7 +199,7 @@ phone_pull:
   min_age_minutes: 0
   state_file: ''
   phone_source_dirs:
-  - file_organizer_staging
+  - file_organizer_test_staging
   phone_push_dir: file_organizer_staging
   include_extensions: []
   exclude_extensions:

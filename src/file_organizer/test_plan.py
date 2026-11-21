@@ -88,16 +88,26 @@ def _run_organize(*args: str, check: bool = False,
                 check=check, quiet=quiet)
 
 
-def _router_watches_downloads(cfg) -> bool:
+def _downloads_folder(cfg) -> Path:
+    """The downloads folder the router watches (matched by name), or the
+    platform's default Downloads folder — created when missing. Nothing
+    here is hard-coded to one operating system."""
+    for w in cfg["router"].get("watch_folders", []):
+        p = tc.resolve(w, cfg)
+        if p.name.lower() in ("downloads", "download"):
+            return p
+    return Path.home() / "Downloads"
+
+
+def _router_watches_downloads(cfg, dl: Path) -> bool:
     router = cfg["router"]
     on = str(router.get("enabled", "")).lower() in (
         "true", "yes", "on", "1",
     )
-    main = Path(cfg["drives"].get("MAIN_DRIVE", str(Path.home())))
     watched = [
         tc.real(tc.resolve(w, cfg)) for w in router.get("watch_folders", [])
     ]
-    return on and tc.real(main / "Downloads") in watched
+    return on and tc.real(dl) in watched
 
 
 def _small(path: Path, name: str) -> None:
@@ -205,14 +215,19 @@ def run_computer_test() -> int:
         print(f"\nERROR: could not build the test settings: {exc}")
         return 1
 
-    # 4. Router test file (only when this config's router watches
-    # ~/Downloads).
-    dl_path = main / "Downloads" / DOWNLOAD_TEST_FILE
-    if _router_watches_downloads(cfg):
+    # 4. Router test file (only when this config's router watches the
+    # downloads folder — found by name, not by a hard-coded path).
+    dl = _downloads_folder(cfg)
+    try:
+        dl.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    dl_path = dl / DOWNLOAD_TEST_FILE
+    if _router_watches_downloads(cfg, dl):
         _small(dl_path, "router")
-        print("\nCreated a test file in ~/Downloads — the router should move it out.")
+        print(f"\nCreated a test file in {dl} — the router should move it out.")
     else:
-        print("\nRouter does not watch ~/Downloads in this config — skipping that part.")
+        print(f"\nRouter does not watch {dl} in this config — skipping that part.")
 
     # 5. Hand over to the phone.
     _pause(
@@ -276,10 +291,15 @@ def run_phone_test() -> int:
         print("created from the template), then './organize test' again.")
         return 1
 
-    sync = phone_sync.PhoneSync(str(cfg_path))  # real config only checked
+    sync = phone_sync.PhoneSync(str(cfg_path))  # real config: read settings
+    # The phone's storage root comes from the real config's source folders —
+    # no hard-coded Android paths.
+    base = Path(sync.source_dirs[0]).parent if sync.source_dirs \
+        else Path("/storage/emulated/0")
 
     _pause("Ready to create the test files on this phone?")
-    if _run_python("src/test/create-files-on-phone.py", check=True) != 0:
+    if _run_python("src/test/create-files-on-phone.py", "--root",
+                   str(base), check=True) != 0:
         print("\nCould not create the test files — see above. (Termux")
         print("storage permission missing? Run 'termux-setup-storage'.)")
         return 1
@@ -287,8 +307,8 @@ def run_phone_test() -> int:
     # The test must NOT run the real production scan (that would stage
     # hundreds of your real photos). It uses its own throwaway source
     # and staging folders, so only the six test files ever move.
-    test_src = "/storage/emulated/0/file_organizer_test"
-    test_stage = "/storage/emulated/0/file_organizer_test_staging"
+    test_src = str(base / "file_organizer_test")
+    test_stage = str(base / "file_organizer_test_staging")
     test_cfg = REPO / ".organize_phone_test_config.yaml"
     test_db = REPO / ".organize_phone_test.db"
     shutil.rmtree(test_stage, ignore_errors=True)

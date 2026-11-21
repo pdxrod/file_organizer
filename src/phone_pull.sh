@@ -559,6 +559,10 @@ do_pull() {
         stat_size_flag="-c %s"
     fi
 
+    # The file list goes into a plain temp file first: the old
+    # `done < <(find ...)` process substitution deadlocks on macOS bash
+    # 3.2 — the find child blocks on a full pipe while the loop spins.
+    find "$TEMP_STAGE" -type f -print0 > "$TEMP_STAGE/.pull_list" 2>/dev/null
     while IFS= read -r -d '' temp_file; do
         local fname rel_path phone_path
         fname=$(basename "$temp_file")
@@ -666,7 +670,8 @@ do_pull() {
         else
             err "Failed to move: $fname"
         fi
-    done < <(find "$TEMP_STAGE" -type f -print0 2>/dev/null)
+    done < "$TEMP_STAGE/.pull_list"
+    rm -f "$TEMP_STAGE/.pull_list"
 
     # ── Phase 3: Clean up temp staging ──
     rm -rf "$TEMP_STAGE"
@@ -702,6 +707,7 @@ do_push() {
     local total_pushed=0
 
     # Walk files in remote stage and push newer ones
+    find "$REMOTE_STAGE" -type f -print0 > "$REMOTE_STAGE/.push_list" 2>/dev/null
     while IFS= read -r -d '' local_file; do
         local rel_path="${local_file#$REMOTE_STAGE/}"
         # The user's rule: 'foo.m4a (1)' → 'foo_1.m4a' (extension intact),
@@ -768,7 +774,8 @@ do_push() {
         else
             err "Failed to push: $local_file"
         fi
-    done < <(find "$REMOTE_STAGE" -type f -print0 2>/dev/null)
+    done < "$REMOTE_STAGE/.push_list"
+    rm -f "$REMOTE_STAGE/.push_list"
 
     info "Push complete: pushed=$total_pushed files"
     return 0

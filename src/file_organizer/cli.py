@@ -55,9 +55,11 @@ def run_auto_phone_pull(config: Config) -> bool:
     timeout = int(config.raw_config.get("sync_timeout_minutes", 60) or 60) * 60
     logger.info("Auto phone pull: checking for a connected phone...")
     try:
+        # Output streams straight to the terminal/log — the user can see
+        # the pull's progress instead of a silent multi-minute wait.
         result = subprocess.run(
             ["bash", str(script), "--quiet"],
-            capture_output=True, text=True, timeout=timeout,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         logger.warning("Auto phone pull: timed out after %ds", timeout)
@@ -66,23 +68,11 @@ def run_auto_phone_pull(config: Config) -> bool:
         logger.warning("Auto phone pull: could not run phone_pull.sh: %s", e)
         return False
 
-    out = (result.stdout or "").strip()
-    err = (result.stderr or "").strip()
     if result.returncode == 0:
-        if out:
-            for line in out.splitlines():
-                logger.info("Auto phone pull: %s", line)
+        logger.info("Auto phone pull finished.")
         return True
-    # No phone attached (or adb missing) is a normal state, not an error —
-    # but a phone that CANNOT be used (USB debugging off / prompt not
-    # accepted) must stand out so the user knows what to do.
-    if err:
-        for line in err.splitlines():
-            lowered = line.lower()
-            if "unauthorized" in lowered or "usb debugging" in lowered:
-                logger.warning("Auto phone pull: %s", line)
-            else:
-                logger.info("Auto phone pull: %s", line)
+    logger.warning("Auto phone pull reported a problem (exit %d).",
+                   result.returncode)
     return False
 
 

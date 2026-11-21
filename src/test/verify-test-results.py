@@ -210,16 +210,24 @@ def main() -> None:
     router_on = str(router.get("enabled", "")).lower() in (
         "true", "yes", "on", "1",
     )
-    dl_dir_real = tc.real(main_drive / "Downloads")
+    # The downloads folder is found by name in the router's watch
+    # folders (no hard-coded paths), falling back to MAIN_DRIVE/Downloads.
+    dl_folder = main_drive / "Downloads"
+    for w in router.get("watch_folders", []):
+        p = tc.resolve(w, cfg)
+        if p.name.lower() in ("downloads", "download"):
+            dl_folder = p
+            break
+    dl_dir_real = tc.real(dl_folder)
     watch_real = [
         tc.real(tc.resolve(w, cfg)) for w in router.get("watch_folders", [])
     ]
-    dl = main_drive / "Downloads" / DOWNLOADS_FILE
+    dl = dl_folder / DOWNLOADS_FILE
     if not router_on or dl_dir_real not in watch_real:
         report(
             "INFO",
-            "router is not enabled or does not watch ~/Downloads in this "
-            "config — skipping the Downloads move check",
+            "router is not enabled or does not watch the downloads folder "
+            "in this config — skipping the Downloads move check",
         )
     elif not dl.exists():
         targets = [
@@ -234,13 +242,13 @@ def main() -> None:
         else:
             report(
                 "FAIL",
-                f"{DOWNLOADS_FILE} left ~/Downloads but was not found in "
+                f"{DOWNLOADS_FILE} left {dl_folder} but was not found in "
                 "the router's target folders",
             )
     else:
         report(
             "FAIL",
-            f"{DOWNLOADS_FILE} is still in ~/Downloads — the router did "
+            f"{DOWNLOADS_FILE} is still in {dl_folder} — the router did "
             "not move it",
         )
 
