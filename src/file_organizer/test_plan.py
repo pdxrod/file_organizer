@@ -206,8 +206,10 @@ def run_computer_test() -> int:
     _pause(
         "PHONE TIME.\n"
         "\n"
-        "  On the phone, run './organize test' and follow its prompts.\n"
-        "  Then come back to this computer and press Enter here."
+        "  On the phone, open Termux, cd to the\n"
+        "  file_organizer folder, and run './organize test'.\n"
+        "  Follow its prompts, then come back to this\n"
+        "  computer and press Enter here."
     )
 
     # 6. One full cycle against the small test folders (subcommand first —

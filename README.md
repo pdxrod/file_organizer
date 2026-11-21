@@ -479,6 +479,8 @@ With a handful of small files, `./organize test` checks that:
 
 ### The phone half (run it when the computer says "PHONE TIME")
 
+On the phone, open Termux and `cd` into the `file_organizer` folder:
+
 ```bash
 git pull
 ./organize test
