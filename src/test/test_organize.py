@@ -416,7 +416,7 @@ class WrongDeviceTests(unittest.TestCase):
 
     COMPUTER_ONLY = [
         "test-real", "sync", "dedupe", "cleanup", "clean", "git-preview",
-        "git-init", "collapse-renames", "create-test",
+        "git-init", "collapse-renames",
         "route", "route-real", "route-status", "route-undo",
         "sort", "sort-real", "sort-status", "sort-undo",
         "gui", "web", "pull", "push", "list",

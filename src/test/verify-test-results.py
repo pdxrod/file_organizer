@@ -9,7 +9,7 @@ Checks everything a script can see from the computer:
   - the phone's ready files were pulled into the computer's folders,
     and the held (app-generated) files were NOT pulled
   - the router moved the ~/Downloads test file out of ~/Downloads
-  - the remote Proton folder really was read and written
+  - the second folder (cloud or external) really was read and written
 
 The pairs and paths all come from the temporary test config the plan
 built (drives, sync_pairs, one_way_pairs, phone_pull, router) — the real
@@ -83,15 +83,11 @@ def main() -> None:
         sys.exit(1)
 
     main_drive = Path(cfg["drives"].get("MAIN_DRIVE", str(HOME)))
-    proton_raw = cfg["drives"].get("PROTON_DRIVE", "")
-    proton_drive = Path(proton_raw) if proton_raw else None
-    external_raw = cfg["drives"].get("EXTERNAL_DRIVE", "")
     local_stage = tc.resolve(
         cfg["phone_pull"].get("local_stage", "MAIN_DRIVE/misc"), cfg
     )
 
     report("INFO", f"MAIN_DRIVE    = {main_drive}")
-    report("INFO", f"PROTON_DRIVE  = {proton_drive}")
     report("INFO", f"phone pull stage = {local_stage}")
     report("INFO", "")
 
@@ -248,16 +244,24 @@ def main() -> None:
             "not move it",
         )
 
-    # 5. Remote read/write: the Proton folder must exist (the plan wrote
-    # and read the small test folders on it).
-    if proton_drive and proton_drive.is_dir():
-        report("PASS", f"Proton Drive folder present and used: "
-               f"{proton_drive}")
-    else:
-        report("FAIL", f"Proton Drive folder missing: {proton_drive}")
+    # 5. Remote read/write: the plan wrote small test files to the second
+    # side of the pair — when a cloud or external folder was used, that
+    # side lives outside MAIN_DRIVE.
+    if sync_pairs:
+        second_side = tc.resolve(sync_pairs[0][1], cfg)
+        if second_side.is_dir():
+            where = ("outside MAIN_DRIVE"
+                     if not tc.is_under(second_side, main_drive)
+                     else "local (no cloud or external folder in the config)")
+            report("PASS", f"second folder exists and was written: "
+                   f"{second_side} ({where})")
+        else:
+            report("FAIL", f"second folder missing after the run: "
+                   f"{second_side}")
 
     # 6. External drive: informational (a starter path is expected to be
     # missing).
+    external_raw = cfg["drives"].get("EXTERNAL_DRIVE", "")
     if external_raw:
         external = Path(external_raw)
         if external.is_dir():
@@ -277,8 +281,9 @@ def main() -> None:
     print("  - On the PHONE: ls file_organizer_staging/DCIM/Screenshots")
     print("    should show your renamed file and NONE of the held ones")
     print("    (no 777_X, no 666_X).")
-    print("  - Open Proton Drive and eyeball the file_organizer_test")
-    print("    folders there (they are removed when the test finishes).")
+    print("  - Open the second folder (cloud or external) and eyeball")
+    print("    the file_organizer_test folders there (they are removed")
+    print("    when the test finishes).")
 
     if _failures:
         print(f"\n{_failures} check(s) FAILED.")

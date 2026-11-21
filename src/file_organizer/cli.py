@@ -412,7 +412,6 @@ def main(argv=None):
                         help="Collapse 'foo (1).png' families and delete "
                              "identical '_N' duplicates — shows a plan, "
                              "applies only with --REAL")
-    parser.add_argument("--create-test", action="store_true", help="Create test environment")
     parser.add_argument("--route", action="store_true",
                         help="Route files into pol/dev/dev-ml/Pictures/Music/"
                              "Documents/misc by name AND content (dry-run "
@@ -482,11 +481,6 @@ def main(argv=None):
     # it is always visible, even in dry-run mode.
     out_dir = ensure_output_dir(config)
     logger.info("Organized folder: %s", out_dir)
-
-    if args.create_test:
-        from file_organizer.test_env import create_test_environment
-        create_test_environment(config)
-        return
 
     if args.collapse_renames:
         # Item 10: plan first, apply only with --REAL.

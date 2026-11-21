@@ -78,7 +78,6 @@ COMPUTER_COMMANDS = {
     "git-preview": ["--git-preview"],
     "git-init": ["--git-init"],
     "collapse-renames": ["--collapse-renames"],
-    "create-test": ["--create-test"],
     "route": ["--route"],                     # plan files by name+content
     "route-real": ["--REAL", "--route"],      # …and actually move them
     "route-status": ["--route-status"],
@@ -92,7 +91,7 @@ COMPUTER_COMMANDS = {
 # Computer flags that pass straight through to the file_organizer CLI.
 COMPUTER_PASSTHROUGH = (
     "--REAL", "--scan-once", "--sync-only", "--dedupe-only",
-    "--git-preview", "--git-init", "--cleanup", "--create-test",
+    "--git-preview", "--git-init", "--cleanup",
     "--route", "--route-status", "--route-undo",
     "-v", "--verbose", "--config", "-h", "--help",
 )
@@ -837,7 +836,6 @@ def usage(platform):
             "  ./organize git-preview   which folders would get 'git init'",
             "  ./organize git-init      run auto-git for real",
             "  ./organize collapse-renames  plan 'foo (1).png' family collapse",
-            "  ./organize create-test   build a small test environment",
             "  ./organize route         PLAN where files go (by name + content)",
             "  ./organize route-real    do it — actually move files into place",
             "  ./organize route-status  show the plan / decisions so far",
@@ -1027,9 +1025,6 @@ def computer_only_message(command: str) -> str:
             "Rename families are collapsed on the computer — run\n"
             "'./organize collapse-renames' there. (On this phone, rename\n"
             "held files one by one with './organize rename'.)",
-        "create-test":
-            "The test environment is built on the computer — run\n"
-            "'./organize create-test' there.",
         "gui":
             "The desktop app runs on the computer — './organize gui' there.",
         "web":

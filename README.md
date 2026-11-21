@@ -71,7 +71,6 @@ which commands to use.
 ./organize route-real   # actually move files into place
 ./organize route-status # show the plan / decisions so far
 ./organize route-undo   # put the last moved files back
-./organize create-test  # build a small test environment
 ./organize gui          # desktop app
 ./organize web          # web UI
 ./organize pull         # pull phone staging over USB (adb)
@@ -324,7 +323,6 @@ cleanup.
 | `route-status` / `route-undo` | Show routing decisions / put the last moves back |
 | `gui` / `web` | Desktop GUI / web UI |
 | `pull` / `push` / `list` | Phone ↔ computer over USB (adb) |
-| `create-test` | Create a sample test environment |
 | `config` | Guided editor: change config.yaml section by section, no text editor. Enter keeps a value, `e` edits (a drive's name AND folder), `x` quits without saving, `s` saves and quits. Runs automatically when you run plain `./organize` with a missing or invalid config.yaml |
 | `setup` | First-time setup (config + will-it-work report) |
 | `version` | Print the version number |
@@ -430,10 +428,7 @@ on the phone checks the setting and prints the same steps.
 your `config.yaml` — it scans, plans the link tree and the syncs, and
 changes nothing, so you can see exactly what the program would do before
 you let it near your real files. (On the phone, `./organize sanity` is the
-same dry-run scan.) `./organize create-test` additionally builds a small
-sample environment with files under `src/test/` (sample documents,
-pictures, a git/venv project) that you can point a config at to try the
-program out.
+same dry-run scan.)
 
 `./organize test` (on both devices) is different: the **guided end-to-end
 test** — one command that walks the whole phone → computer → cloud
@@ -445,21 +440,21 @@ below: **End-to-end test plan**.
 
 ---
 
-## End-to-end test plan — phone → computer → Proton Drive
+## End-to-end test plan — phone → computer → cloud
 
 One command runs the whole thing: **`./organize test`**.
 
 - On the COMPUTER it stops the daemon, creates a few SMALL test files in
-  throwaway folders on this computer and on Proton Drive (a folder named
-  `file_organizer_test/`), hands over to the phone, runs one full cycle
-  against those folders only, checks the results, and clears the test
-  files away. Your own files are never moved or deleted, and your big
-  folders (Music, dev, ...) are never touched — the whole run takes
-  minutes.
+  throwaway folders on this computer and on a second folder (a cloud or
+  external folder when one is configured), hands over to the phone, runs
+  one full cycle against those folders only, checks the results, and
+  clears the test files away. Your own files are never moved or deleted,
+  and your big folders (Music, dev, ...) are never touched — the whole
+  run takes minutes.
 - On the PHONE (run it there when the computer says "PHONE TIME") it
   creates the phone test files, walks you through the renames, copies the
-  ready files into the staging folder, and sends you back to the
-  computer.
+  files which are ready into the staging folder, and sends you back to
+  the computer.
 - Every step is announced first and waits for Enter, so you always know
   what is happening and what to do next.
 
@@ -473,9 +468,9 @@ With a handful of small files, `./organize test` checks that:
 - the phone's staged files are pulled, and held (app-generated) files
   are NOT;
 - the router moves a test file out of `~/Downloads`;
-- the Proton Drive folder can really be read and written; a missing
-  external drive (a starter path like `/Volumes/YourExternalDrive`) is
-  simply reported as missing.
+- the second folder (cloud or external) can really be read and written;
+  a missing external drive (a starter path like
+  `/Volumes/YourExternalDrive`) is simply reported as missing.
 
 ### The phone half (run it when the computer says "PHONE TIME")
 
