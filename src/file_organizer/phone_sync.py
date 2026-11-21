@@ -1365,12 +1365,13 @@ class PhoneSync:
         # (item 7).
         self._validate_template_paths()
 
-        self.min_age = self.config.get("min_age_minutes", 0) * 60
+        # The grace period (min_age_minutes) was removed: new files are
+        # always copied immediately, so a fresh file is never left behind.
+        self.min_age = 0
         self.scan_interval = self.config.get("scan_interval_seconds", 60)
         self.max_size_mb = self.config.get("max_file_size_mb", 500)
         # Item 10: collapse foo (1).png rename families in the source dirs.
-        # Off by default — it deletes the losing siblings. The collapse
-        # respects min_age (grace period) so fresh files are never touched.
+        # Off by default — it deletes the losing siblings.
         self.collapse_rename_families = bool(
             self.config.get("collapse_rename_families", False)
         )
@@ -1805,7 +1806,6 @@ class PhoneSync:
         logger.info("=== Phone Sync scan (%s) ===", mode)
         logger.info("Source dirs: %s", self.source_dirs)
         logger.info("Target dir:  %s", self.target_dir)
-        logger.info("Min age:     %d minutes", self.min_age // 60)
         logger.info("DB entries:  %d synced files", self.db.stats()["total_files"])
 
         stats = self.scan_and_sync(dry_run=dry_run)

@@ -633,17 +633,9 @@ phone:
   # space (MB) — it never fills the phone up. 0 = off.
   min_free_space_mb: 200
 
-  # ── Grace period (minutes) ─────────────────────────────────────────────────
-  # Files must be at least this old before the daemon will copy them.
-  # 0 (the default) copies immediately. Set 5-10 if you want time to
-  # delete unwanted photos BEFORE they get backed up — solving the
-  # cloud "too eager" backup problem.
-  min_age_minutes: 0
-
   # Item 10 — collapse 'foo (1).png' rename families on the phone BEFORE
   # copying: the newest member becomes foo.png, the others are DELETED.
-  # Off by default because it deletes files. Families whose newest file is
-  # younger than min_age_minutes are left alone. Preview with
+  # Off by default because it deletes files. Preview with
   # './organize test' (dry-run log shows the planned renames/deletes).
   collapse_rename_families: false
 

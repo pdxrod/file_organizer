@@ -641,13 +641,16 @@ class PhoneCollapseTests(unittest.TestCase):
         finally:
             sync.db.close()
 
-    def test_min_age_protects_fresh_families(self):
+    def test_fresh_families_collapse_immediately(self):
+        # The grace period was removed: even a fresh family collapses in
+        # the same scan (the min_age_minutes config value is ignored).
         p1, p2 = self._family(fresh=True)
         sync = self._sync("true", min_age=10)
         try:
             stats = sync.scan_and_sync(dry_run=False)
-            self.assertEqual(stats["collapsed"], 0)
-            self.assertTrue(p1.exists() and p2.exists())
+            self.assertGreaterEqual(stats["collapsed"], 1)
+            self.assertFalse(p1.exists())
+            self.assertTrue((self.src / "foo.png").exists())
         finally:
             sync.db.close()
 

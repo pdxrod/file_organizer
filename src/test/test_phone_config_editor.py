@@ -97,7 +97,6 @@ class PhoneConfigEditorTests(unittest.TestCase):
             "n",                              # cloud sync: turn OFF
             "",                               # cloud drive paths: done
             "",                               # free-space guard
-            "",                               # grace period
             "",                               # collapse families: keep
             "",                               # hold app-generated: keep
             "",                               # normalise dates: keep

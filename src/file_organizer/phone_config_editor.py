@@ -3,7 +3,7 @@
 Same conversation as the computer editor (Enter keeps, 'e' edits, 'x'
 quits without saving, 's' saves and quits, Ctrl+C/EOF cancel cleanly),
 but for the phone daemon's settings — source folders, the staging
-folder, cloud sync, the free-space guard, the grace period, rename
+folder, cloud sync, the free-space guard, rename rules, scan timing,
 rules, scan timing, filters and exclusions.
 
 One important difference from the computer editor: this one must work
@@ -412,13 +412,6 @@ def run_phone_editor(config_path: str, template_path: Optional[str] = None,
             "than this — it never fills the phone up. 0 = off.",
             input_fn, output_fn, minimum=0,
         )
-        _ask_number(
-            cfg, "min_age_minutes", "Grace period (minutes)",
-            "Files younger than this are left alone — time to delete\n"
-            "unwanted photos BEFORE they get copied. 0 = copy\n"
-            "immediately (the default).",
-            input_fn, output_fn, minimum=0,
-        )
         _toggle(
             cfg, "collapse_rename_families", "Collapse rename families",
             "Turns 'foo (1).png' download-copy families into one file,\n"
@@ -517,7 +510,7 @@ def run_phone_editor(config_path: str, template_path: Optional[str] = None,
         _section(output_fn, "Review", "These are the settings you chose:")
         for key in (
             "target_directory", "sync_cloud_drives", "min_free_space_mb",
-            "min_age_minutes", "collapse_rename_families",
+            "collapse_rename_families",
             "hold_app_generated_names", "normalise_leading_dates",
             "scan_interval_seconds", "max_file_size_mb",
             "delete_after_copy",

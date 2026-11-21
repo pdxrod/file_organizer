@@ -3,17 +3,19 @@
 
 Two halves, one on each device:
 
-  ./organize test          on the COMPUTER — stops the daemon, sweeps one
-                           sync pair (both sides) and one one-way pair
-                           (local target) into a temp backup, drops the
-                           test files, empties organized/, hands over to
-                           the phone, runs ./organize auto, verifies the
-                           results, and puts your files back.
+  ./organize test          on the COMPUTER — stops the daemon, creates a
+                           few SMALL test files in throwaway folders on
+                           this computer and on Proton Drive, hands over
+                           to the phone, runs one full cycle against
+                           those folders, checks the results, and clears
+                           the test files away. Your own files are never
+                           moved or deleted, and the big folders are
+                           never touched.
 
   ./organize test          on the PHONE — creates the phone test files,
-                           walks the user through the renames, runs the
-                           production scan, and sends the user back to
-                           the computer.
+                           walks the user through the renames, copies the
+                           ready files into the staging folder, and sends
+                           the user back to the computer.
 
 Every step is announced first and waits for Enter, so the user always
 knows what is happening and what to do next.
@@ -37,6 +39,11 @@ import testplan_common as tc  # noqa: E402
 
 DOWNLOAD_TEST_FILE = "20261111_downloads_test.txt"
 
+# Throwaway folders the computer half uses — created under MAIN_DRIVE and
+# PROTON_DRIVE for the test, deleted again at the end. They must be small
+# so a full test run takes minutes, not hours.
+TEST_FOLDER = "file_organizer_test"
+
 
 def _pause(message: str) -> None:
     """Print the message and wait for Enter or x (EOF keeps going)."""
@@ -56,23 +63,28 @@ def _pause(message: str) -> None:
         raise SystemExit(0)
 
 
-def _run(cmd, check: bool = False) -> int:
+def _run(cmd, check: bool = False, quiet: bool = False) -> int:
     """Run a subprocess with live output; return its exit code."""
-    print()
-    print("> " + " ".join(str(c) for c in cmd))
-    print()
+    if not quiet:
+        print()
+        print("> " + " ".join(str(c) for c in cmd))
+        print()
     code = subprocess.call([str(c) for c in cmd])
     if check and code != 0:
         print(f"\nThat command failed (exit {code}).")
     return code
 
 
-def _run_python(script_rel: str, *args: str, check: bool = False) -> int:
-    return _run([sys.executable, str(REPO / script_rel), *args], check=check)
+def _run_python(script_rel: str, *args: str, check: bool = False,
+                quiet: bool = False) -> int:
+    return _run([sys.executable, str(REPO / script_rel), *args],
+                check=check, quiet=quiet)
 
 
-def _run_organize(*args: str, check: bool = False) -> int:
-    return _run([sys.executable, str(REPO / "organize"), *args], check=check)
+def _run_organize(*args: str, check: bool = False,
+                  quiet: bool = False) -> int:
+    return _run([sys.executable, str(REPO / "organize"), *args],
+                check=check, quiet=quiet)
 
 
 def _router_watches_downloads(cfg) -> bool:
@@ -87,6 +99,13 @@ def _router_watches_downloads(cfg) -> bool:
     return on and tc.real(main / "Downloads") in watched
 
 
+def _small(path: Path, name: str) -> None:
+    """Write a tiny file (over the router's 1 KB minimum, so the router
+    really moves the Downloads test file)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"file_organizer test file: {name}\n" * 50)
+
+
 # ── computer half ──────────────────────────────────────────────────────────
 
 def run_computer_test() -> int:
@@ -95,22 +114,15 @@ def run_computer_test() -> int:
     print("  organize test — guided end-to-end test (computer side)")
     print("=" * 64)
     print()
-    print("This walks the whole pipeline: phone scan -> staging folder ->")
-    print("USB pull -> organize (soft links) -> sync pairs -> cloud.")
+    print("This test checks, with a few small files, that this computer")
+    print("can:")
+    print("  - sync files between it and your Proton Drive folder")
+    print("  - pull the phone's staged files")
+    print("  - route a file out of ~/Downloads")
     print()
-    print("Along the way it will:")
-    print("  - stop the daemon")
-    print("  - sweep ONE sync pair (both sides) and ONE one-way pair")
-    print("    (local target) into a temp backup, then drop test files")
-    print("  - empty organized/ (soft links only — real files untouched)")
-    print("  - hand over to the phone, then run ./organize auto here")
-    print("  - check the results and put your files back")
-    print()
-    _pause(
-        "This test moves real files to a temp backup first — nothing is\n"
-        "deleted, and nothing on Proton Drive is emptied. Type x at any\n"
-        "pause to cancel."
-    )
+    print("Your own files are never moved or deleted, and none of your")
+    print("big folders are touched.")
+    _pause("Press Enter to run it, or x to cancel.")
 
     config_path = tc.default_config_path()
     if not config_path.exists():
@@ -123,84 +135,111 @@ def run_computer_test() -> int:
         print(f"\nERROR: {exc}")
         return 1
 
-    out_raw = cfg["top"].get("output_base", "organized") or "organized"
-    organized = (
-        REPO / "organized"
-        if out_raw in ("organized", "~/organized")
-        else Path(os.path.expanduser(out_raw))
-    )
+    main = Path(cfg["drives"].get("MAIN_DRIVE", str(Path.home())))
+    proton_raw = cfg["drives"].get("PROTON_DRIVE", "")
+    proton = Path(proton_raw) if proton_raw else None
+    if proton and proton.is_dir():
+        print(f"\nProton Drive folder found: {proton}")
+    elif proton:
+        print(f"\nProton Drive folder NOT found: {proton}")
+        print("The cloud parts of the test cannot run. Plug it in or")
+        print("check the drive path in the config, then try again.")
+        return 1
+    external_raw = cfg["drives"].get("EXTERNAL_DRIVE", "")
+    if external_raw:
+        external = Path(external_raw)
+        if external.is_dir():
+            print(f"External drive found: {external}")
+        else:
+            print(f"External drive not found (expected for a starter")
+            print(f"path): {external}")
 
-    # 1. Stop the daemon so nothing runs against the swept folders.
-    _run_organize("stop")
+    # 1. Stop the daemon so it does not run alongside the test.
+    _run_organize("stop", quiet=True)
 
-    # 2. Undo any previous run, then sweep + create the test files.
-    _pause(
-        "Next, the test folders are moved into a temporary backup and\n"
-        "test files take their place. Nothing is deleted — your files\n"
-        "come back at the end of the test.\n"
-        "\n"
-        "Ready?"
-    )
-    _run_python("src/test/restore-major-folders.py")
-    if _run_python("src/test/backup-major-folders.py", check=True) != 0:
-        print("\nThe backup step failed — see the message above. Typical fixes:")
-        print("  - a previous backup still exists: run")
-        print("    'python3 src/test/restore-major-folders.py' first")
-        print("  - list the candidate pairs:")
-        print("    'python3 src/test/backup-major-folders.py --list'")
+    # 2. Create the small test folders and files.
+    sync_a = main / TEST_FOLDER / "sync"
+    sync_b = proton / TEST_FOLDER / "sync"
+    ow_src = proton / TEST_FOLDER / "oneway"
+    ow_dst = main / TEST_FOLDER / "oneway"
+    for folder in (main / TEST_FOLDER, proton / TEST_FOLDER):
+        shutil.rmtree(folder, ignore_errors=True)
+    _small(sync_a / tc.SIDE_A_FILE, "side A")
+    _small(sync_b / tc.SIDE_B_FILE, "side B")
+    for fname in tc.PROJECT_FILES:
+        _small(sync_a / tc.PROJECT / fname, fname)
+    (sync_a / tc.PROJECT / ".git").mkdir(parents=True)
+    (sync_a / tc.PROJECT / ".git" / "config").write_text("x")
+    for name in ("oneway_1.txt", "oneway_2.txt"):
+        _small(ow_src / name, name)
+    print(f"\nCreated a few small test files in {main / TEST_FOLDER}")
+    print(f"and {proton / TEST_FOLDER}.")
+
+    # 3. A temporary config that swaps the real pairs for the small test
+    # folders. The real config.yaml is never touched.
+    test_cfg = REPO / ".organize_test_config.yaml"
+    try:
+        from file_organizer.config import Config
+        import yaml
+        real_cfg = Config(str(config_path))
+        raw = dict(real_cfg.raw_config)
+        raw["sync_pairs"] = [{"folders": [str(sync_a), str(sync_b)]}]
+        raw["one_way_pairs"] = [{"folders": [str(ow_src), str(ow_dst)]}]
+        raw["phone_pull"]["min_age_minutes"] = 0  # fresh files copy at once
+        test_cfg.write_text(yaml.safe_dump(raw, sort_keys=False))
+    except Exception as exc:
+        print(f"\nERROR: could not build the test settings: {exc}")
         return 1
 
-    # 3. Router test file (only when this config's router watches
+    # 4. Router test file (only when this config's router watches
     # ~/Downloads).
+    dl_path = main / "Downloads" / DOWNLOAD_TEST_FILE
     if _router_watches_downloads(cfg):
-        main = Path(cfg["drives"].get("MAIN_DRIVE", str(Path.home())))
-        path = main / "Downloads" / DOWNLOAD_TEST_FILE
-        path.write_text("file_organizer router test\n")
-        print(f"\nCreated router test file: {path}")
+        _small(dl_path, "router")
+        print(f"\nCreated a test file in ~/Downloads — the router should")
+        print("move it out.")
     else:
-        print("\nRouter does not watch ~/Downloads in this config — "
-              "skipping that part.")
-
-    # 4. Clean organized/.
-    if organized.is_dir():
-        shutil.rmtree(organized)
-    print(f"Emptied {organized} (soft links only — real files untouched).")
+        print("\nRouter does not watch ~/Downloads in this config —")
+        print("skipping that part.")
 
     # 5. Hand over to the phone.
     _pause(
         "PHONE TIME.\n"
         "\n"
-        "  On the phone, run './organize test', answer the questions and\n"
-        "  hit Enter a few times. Then come back to this computer and\n"
-        "  press Enter here."
+        "  On the phone, run './organize test' and follow its prompts.\n"
+        "  Then come back to this computer and press Enter here."
     )
 
-    # 6. Production run on the computer: pull first, then organize, router
-    # and sync.
-    if _run_organize("auto", check=True) != 0:
-        print("'organize auto' reported a problem — the verifier below")
-        print("will still show what did and did not happen.")
+    # 6. One full cycle against the small test folders.
+    if _run_organize("--config", str(test_cfg), "auto", check=True,
+                     quiet=True) != 0:
+        print("The run reported a problem — the checks below will show")
+        print("what did and did not happen.")
 
     # 7. Verify.
-    code = _run_python("src/test/verify-test-results.py")
+    code = _run_python("src/test/verify-test-results.py",
+                       "--config", str(test_cfg), quiet=True)
     if code == 0:
         print("\nALL SCRIPTED CHECKS PASSED.")
     else:
         print("\n" + "-" * 64)
         print("Some checks FAILED — see the list above. Common causes:")
         print("  - the phone steps were skipped or the rename did not happen")
-        print("  - files younger than phone_pull.min_age_minutes (wait 5")
-        print("    minutes and re-run './organize auto')")
-        print("  - a sync pair or router setting differs from the plan")
+        print("  - the phone was not plugged in for the pull")
 
-    # 8. Put the swept files back.
-    _pause("Now put your files back? (runs restore-major-folders.py)")
-    _run_python("src/test/restore-major-folders.py")
+    # 8. Clear the test files away.
+    for folder in (main / TEST_FOLDER, proton / TEST_FOLDER):
+        shutil.rmtree(folder, ignore_errors=True)
+    dl_path.unlink(missing_ok=True)
+    test_cfg.unlink(missing_ok=True)
 
     print()
-    print("Done. Your config.yaml was never touched. Files the test")
-    print("copied around stay where they are — delete them by hand if")
-    print("you don't want them.")
+    print("Done. Your config.yaml was never touched.")
+    print()
+    print("In everyday use:")
+    print("  - './organize auto' runs one full cycle, like the run this")
+    print("    test just did")
+    print("  - './organize start' runs it in the background on a schedule")
     return code
 
 
@@ -215,8 +254,8 @@ def run_phone_test() -> int:
     print("=" * 64)
     print()
     print("This half creates test files on the phone, walks you through")
-    print("the renames, and runs the production scan that stages files")
-    print("for the computer to pull.")
+    print("the renames, and copies the ready files into the staging")
+    print("folder for the computer to collect.")
 
     cfg_path = REPO / "phone_sync_config.yaml"
     if not cfg_path.exists():
@@ -226,14 +265,6 @@ def run_phone_test() -> int:
         return 1
 
     sync = phone_sync.PhoneSync(str(cfg_path))
-    if sync.min_age != 0:
-        minutes = sync.min_age // 60
-        print(f"\nYour grace period is {minutes} minute(s) — fresh files")
-        print("will NOT be copied until they are that old, so the test")
-        print("would fail.")
-        print("Fix it first: './organize config' -> 'Grace period (minutes)'")
-        print("-> 0 -> save. Then run './organize test' again.")
-        return 1
 
     _pause("Ready to create the test files on this phone?")
     if _run_python("src/test/create-files-on-phone.py", check=True) != 0:

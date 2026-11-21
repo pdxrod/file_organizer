@@ -20,7 +20,7 @@ your computer, cloud drives, and Android phone.
 |------------|--------------|
 | **Organize** | Scans folders and builds a tree of **soft links** under the `organized` folder — inside the `file_organizer` folder by default, anywhere you like via `output_base` — grouped by type, year, and content categories. Original files stay where they are. |
 | **Folder sync** | Bidirectionally or one-way synchronizes folder pairs (e.g. computer ↔ Proton Drive, computer → external disk) with `rsync`. |
-| **Phone sync** | Copies new files from your Android phone to a staging folder, from where they reach the cloud and your computer. New files are copied immediately by default (`min_age_minutes: 0`); raise it to 5-10 if you want a grace period so photos you delete right away are never backed up. |
+| **Phone sync** | Copies new files from your Android phone to a staging folder, from where they reach the cloud and your computer. New files are always copied immediately. |
 | **Deduplication** | Optionally finds and removes duplicate real files by content hash. |
 | **Auto Git** | Optionally runs `git init` in development folders that don't have one yet. |
 
@@ -140,7 +140,7 @@ values there. The editor also opens automatically when you run plain
 
 On the phone, the SAME editor edits `phone_sync_config.yaml` the same
 way — source folders, the staging folder, cloud sync, the free-space
-guard, the grace period, rename rules, scan timing, filters and
+guard, rename rules, scan timing, filters and
 exclusions. It needs no PyYAML: it writes the flat YAML subset the
 phone daemon's built-in parser reads, so it works on Termux as-is.
 It also opens automatically when plain `./organize` finds the phone
@@ -276,12 +276,10 @@ Phone (Termux)                         Computer                        Cloud
 │ Documents ────────────┤   │         ▼                 │   │                  │
 │ Download ─────────────┤   │ organized (soft links)    │   │                  │
 └───────────────────────┘   └───────────────────────────┘   └──────────────────┘
-│ ◄── grace period ───►│  files younger than min_age_minutes are never copied,
-                         │  default 0 = immediate (set 5-10 to skip deleted photos)
 ```
 
-1. `phone_sync` scans the folders you configured, skips junk, waits out the
-   grace period, and copies new files into `/storage/emulated/0/file_organizer_staging`
+1. `phone_sync` scans the folders you configured, skips junk, and copies
+   new files into `/storage/emulated/0/file_organizer_staging`
    (keeping their folder structure, e.g. `DCIM/Camera/IMG_001.jpg`).
 2. On the computer, `./organize pull` fetches the staging folder over USB
    (or wireless ADB) and maps each staging subfolder to a computer folder:
@@ -297,15 +295,8 @@ Phone (Termux)                         Computer                        Cloud
    Google Drive, or an external disk.
 4. `./organize push` copies files from the cloud back to the phone.
 
-Deleting a photo on the phone during the grace period means it is never
-copied. Deleting it later removes it from staging on the next cleanup.
-
-**Changing the grace period:** `min_age_minutes: 0` (the default) copies
-files immediately. If you'd rather have a window to delete junk before it
-gets backed up, run `./organize config` on the phone and set the
-"Grace period (minutes)" to 5-10 — or edit `phone_sync_config.yaml`
-directly. Restart the daemon afterwards (`./organize stop`, then
-`./organize start`).
+Deleting a photo on the phone removes it from staging on the next
+cleanup.
 
 ---
 
@@ -458,181 +449,63 @@ below: **End-to-end test plan**.
 
 One command runs the whole thing: **`./organize test`**.
 
-- On the COMPUTER it stops the daemon, sweeps one sync pair (both sides)
-  and one one-way pair (local target) into a temp backup, drops the test
-  files, empties organized/, hands over to the phone, runs
-  `./organize auto`, verifies the results, and puts your files back.
-- On the PHONE (run it there when the computer tells you to) it creates
-  the phone test files, walks you through the renames, runs the production
-  scan, and sends you back to the computer.
+- On the COMPUTER it stops the daemon, creates a few SMALL test files in
+  throwaway folders on this computer and on Proton Drive (a folder named
+  `file_organizer_test/`), hands over to the phone, runs one full cycle
+  against those folders only, checks the results, and clears the test
+  files away. Your own files are never moved or deleted, and your big
+  folders (Music, dev, ...) are never touched — the whole run takes
+  minutes.
+- On the PHONE (run it there when the computer says "PHONE TIME") it
+  creates the phone test files, walks you through the renames, copies the
+  ready files into the staging folder, and sends you back to the
+  computer.
 - Every step is announced first and waits for Enter, so you always know
   what is happening and what to do next.
 
-The steps below are what the runner does behind the scenes — useful as a
-reference, and for running the pieces by hand with the scripts in
-`src/test/` if you ever want to.
+### What it proves
 
-### 0. Preparation (computer, in the file_organizer folder)
+With a handful of small files, `./organize test` checks that:
 
-```bash
-./organize stop                          # no daemon running during the test
-python3 src/test/restore-major-folders.py   # undo any previous run
-python3 src/test/backup-major-folders.py    # sweep the test folders (see below)
-rm -rf organized                            # start with an empty organized/ folder
-```
+- sync works BOTH ways: each side's test file reaches the other side,
+  and a tiny project crosses over WITHOUT its `.git` folder;
+- one-way sync copies its source files into the target;
+- the phone's staged files are pulled, and held (app-generated) files
+  are NOT;
+- the router moves a test file out of `~/Downloads`;
+- the Proton Drive folder can really be read and written; a missing
+  external drive (a starter path like `/Volumes/YourExternalDrive`) is
+  simply reported as missing.
 
-`backup-major-folders.py` reads YOUR config.yaml and picks two pairs
-(`--list` shows the candidates; `--sync-pair N` / `--one-way-pair N` pick
-others, 1-based numbers from that list):
-
-- one **sync_pair** — the **bidirectional test**: BOTH sides are swept to
-  a temp backup, then two test files (`20261111_side_a_test.txt` on side
-  A, `20261111_side_b_test.txt` on side B) and a tiny project
-  (`sync_test_project/` with a.py, b.py and a .git folder) are created on
-  side A. After `organize auto` the two-way sync must have copied BOTH
-  directions: `…_side_a_test.txt` reaches side B AND
-  `…_side_b_test.txt` reaches side A, and the project must have reached
-  the other side WITHOUT .git.
-- one **one_way_pair** (source exists, target is a local folder): only the
-  TARGET side is swept — its source is left untouched. After
-  `organize auto` the target must have been refilled from the source; e.g.
-  with the pair `PROTON_DRIVE/Music → MAIN_DRIVE/Music`, an emptied
-  ~/Music gets repopulated from Proton Drive.
-
-The default picks are the smallest eligible pairs by TOTAL FILE SIZE
-(not file count — a folder with a few huge files loses to one with many
-tiny files), so the sweep is fast and nothing important travels far
-(everything comes back in step 8).
-Nothing on Proton Drive is ever emptied: the one-way pair only loses its
-local target's contents, and the sync pair's cloud side holds only the
-tiny test files during the run.
-
-⚠️ Do not run `./organize auto` or `./organize start` yet — the swept
-folders must stay empty until step 6.
-
-### 1. Sanity check (computer)
-
-Your real config.yaml is used as-is — nothing needs regenerating.
-
-```bash
-./organize test     # dry run: no errors, no "janedoe" placeholders
-```
-
-Two timing knobs to know about:
-
-- the computer only pulls staged phone files older than
-  `phone_pull.min_age_minutes` (5) — wait 5+ minutes between the phone
-  run and the computer run, or set it to 0 (one line under `phone_pull:`
-  in config.yaml);
-- the phone's own grace period must be 0 so fresh files copy at once
-  (step 3).
-
-### 2. One more computer-side test file (router)
-
-If your router watches ~/Downloads (config.yaml → router → watch_folders):
-
-```bash
-echo "downloads test" > ~/Downloads/20261111_downloads_test.txt
-```
-
-`organize auto` should MOVE it out of ~/Downloads into one of your
-router's target folders. No router in your config? Skip this — the
-verifier skips it too.
-
-### 3. Test files on the phone
-
-On the phone (Termux), in the file_organizer folder:
+### The phone half (run it when the computer says "PHONE TIME")
 
 ```bash
 git pull
-python src/test/create-files-on-phone.py
+./organize test
 ```
 
 It creates six files: three ready to copy (`20261111_celtic.png`,
 `20261111_phone_notes.txt`, `20261111_phone_download.txt`) and three held
 app-generated ones (`Screenshot_20261114_666_X.jpg`,
-`Screenshot_20261114_777_X.jpg`, `IMG_20261114_153021.jpg`).
+`Screenshot_20261114_777_X.jpg`, `IMG_20261114_153021.jpg`), then walks
+you through the renames:
 
-⚠️ Make sure the phone's grace period is 0 (fresh files copy at once):
-`./organize config` → "Grace period (minutes)" → `0` (or check
-`phone_sync_config.yaml` says `min_age_minutes: 0`).
+- `Screenshot_20261114_666_X.jpg` → type `2026114_foo_baz.jpg`
+- `Screenshot_20261114_777_X.jpg` → press **Enter alone** (keep it)
+- `IMG_20261114_153021.jpg` → press **Enter alone** (keep it)
 
-### 4. Rename on the phone
+Fresh files are copied immediately — there is no grace period.
+`ls file_organizer_staging/DCIM/Screenshots` should show ONLY
+`2026114_foo_baz.jpg` (no 777_X, no 666_X).
 
-```bash
-./organize rename
-```
+### The computer half finishes
 
-- For `Screenshot_20261114_666_X.jpg` type the new name
-  `2026114_foo_baz.jpg` and press Enter (clear the date prefill if one
-  appears — type the full name).
-- For `Screenshot_20261114_777_X.jpg`: press **Enter alone** (keep it).
-- For `IMG_20261114_153021.jpg`: press **Enter alone** (keep it).
-- `x` stops the walk if you need to.
+Back on the computer (phone still plugged in, USB debugging ON), press
+Enter: one full cycle runs against the small test folders, the checks
+print PASS/FAIL, the test files are cleared away, and the report points
+at `./organize auto` and `./organize start` for everyday use.
 
-`Screenshot_20261114_777_X.jpg` and `IMG_20261114_153021.jpg` are not
-copied — they stay on the phone. `Screenshot_20261114_666_X.jpg` was
-renamed to `2026114_foo_baz.jpg`, so it is copied. Files that look
-renamed are copied; files an app created and left as they are stay on
-the phone.
-
-### 5. Phone production scan
-
-```bash
-./organize auto
-```
-
-Ready files are copied into `file_organizer_staging/` keeping their folder
-structure; the held ones are logged as "Held until renamed".
-
-⚠️ Check: `ls file_organizer_staging/DCIM/Screenshots` should show ONLY
-`2026114_foo_baz.jpg` (no `777_X`, no `666_X`).
-
-### 6. Computer production run
-
-⚠️ Phone plugged in, **USB debugging ON**, and accept the "Allow USB
-debugging?" prompt if it appears.
-
-```bash
-./organize list    # optional — shows the phone
-./organize auto
-```
-
-This pulls the staging folder FIRST (into ~/misc and matching folders),
-then organizes, runs the router, and syncs all your pairs (both-ways and
-one-way) in the same cycle. ⚠️ If it pulled 0 files, the files are
-probably younger than `phone_pull.min_age_minutes` — wait 5 minutes (or
-set it to 0, see step 1) and run `./organize auto` again.
-
-### 7. Verify
-
-```bash
-python3 src/test/verify-test-results.py
-```
-
-Prints PASS/FAIL per check: phone files pulled (and held ones not), the
-sync pair synchronised BOTH ways (both sides have each other's test
-files, and the project arrived without .git), the one-way target refilled
-from its source, the router move, and organized/ soft links (intact,
-pointing at your real files). It reads the backup manifest, so it checks
-exactly the pairs the backup script swept — no flags needed
-(`--sync-pair` / `--one-way-pair` exist only for checking a pair when no
-manifest is present).
-
-⚠️ Then eyeball: both folders of the sync pair and the one-way target
-(the script prints them), Proton Drive, and organized/ — follow a few
-links back to your files.
-
-### 8. Tear-down (computer)
-
-```bash
-python3 src/test/restore-major-folders.py
-```
-
-Everything the backup script swept goes back where it was. Anything the
-sync copied into the swept folders first stays put (e.g. the one-way
-target now also holds copies of its source's files — delete them by hand
-if you don't want them). Your config.yaml was never touched.
+Your config.yaml is never touched.
 
 ---
 
@@ -690,7 +563,6 @@ highlights:
 |-----|---------|
 | `source_directories` | Folders on the phone to monitor. Default: DCIM, Documents, Download, and the common picture-app folders under Pictures (WhatsApp, LINE, Messenger, Twitter, X, PhotosEditor, Instagram, Facebook, Snapchat, Telegram, Signal, Reddit, TikTok, Discord, PicsArt) — listed explicitly so an unlisted Pictures subfolder like a banking app's is never scanned |
 | `target_directory` | Staging folder (`/storage/emulated/0/file_organizer_staging`) |
-| `min_age_minutes` | Grace period before a new file is copied (minutes). Default 0 = copy immediately. Set 5-10 to give yourself time to delete unwanted photos before they're backed up. Change it with `./organize config` (the "Grace period" prompt) or edit `phone_sync_config.yaml` |
 | `scan_interval_seconds` | How often to check for new files |
 | `include_extensions` / `exclude_extensions` | Extension filters |
 | `exclude_patterns` / `exclude_folder_names` | Never-copy lists (merged with defaults) |
