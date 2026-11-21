@@ -287,9 +287,9 @@ def run_phone_test() -> int:
         "  Screenshot_20261114_666_X.jpg\n"
         "     clear the pre-filled date, then type the new name: 2026114_foo_baz.jpg\n"
         "  Screenshot_20261114_777_X.jpg\n"
-        "     press Enter alone to keep it\n"
+        "     press Enter to keep it\n"
         "  IMG_20261114_153021.jpg\n"
-        "     press Enter alone to keep it\n"
+        "     press Enter to keep it\n"
         "  x at any prompt stops the walk\n"
         "\n"
         "Screenshot_20261114_777_X.jpg and IMG_20261114_153021.jpg are not copied — they stay on the phone.\n"
@@ -309,8 +309,8 @@ def run_phone_test() -> int:
           f"skipped {stats.get('skipped', 0)}, "
           f"errors {stats.get('errors', 0)}")
     _pause(
-        "Phone side done. The staged files are ready for the computer to collect.\n"
+        "GO BACK TO THE COMPUTER.\n"
         "\n"
-        "Keep the phone plugged in (USB debugging ON) and go back to the computer — press Enter THERE to continue."
+        "Phone side done. The staged files are ready for the computer to collect. Keep the phone plugged in (USB debugging ON) and press Enter THERE to continue."
     )
     return 0

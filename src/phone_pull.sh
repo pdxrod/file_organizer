@@ -436,8 +436,18 @@ do_pull() {
     info "Pulling from device: $device_id"
 
     # Get device name for display
-    local device_name
-    device_name=$(adb_t "$ADB" -s "$device_id" shell "getprop ro.product.model" 2>/dev/null | tr -d '\r\n' || echo "$device_id")
+    local device_name rc
+    device_name=$(adb_t "$ADB" -s "$device_id" shell "getprop ro.product.model" 2>/dev/null | tr -d '\r\n' || true)
+    rc=${PIPESTATUS[0]}
+    if [[ $rc -eq 124 ]]; then
+        # 'adb devices' saw the phone, but shell commands are not
+        # getting through — every call would burn its full timeout.
+        # Give up fast instead of stalling for minutes.
+        warn "The phone is connected but is not answering — its USB link may be wedged."
+        warn "Unplug and replug the phone, and accept the 'Allow USB debugging?' prompt on its screen, then try again."
+        return 0
+    fi
+    [[ -z "$device_name" ]] && device_name="$device_id"
     info "Device model: $device_name"
 
     # Ensure target dir exists
@@ -449,6 +459,10 @@ do_pull() {
         local phone_dir="${ANDROID_BASE}/${src_dir}"
         local dir_exists
         dir_exists=$(adb_t "$ADB" -s "$device_id" shell "[ -d '$phone_dir' ] && echo yes || echo no" 2>/dev/null | tr -d '\r\n' || true)
+        if [[ ${PIPESTATUS[0]} -eq 124 ]]; then
+            warn "The phone stopped answering part-way through — unplug and replug it, then try again."
+            return 0
+        fi
         if [[ "$dir_exists" == "yes" ]]; then
             valid_dirs+=("$phone_dir")
         else

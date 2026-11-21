@@ -9,7 +9,7 @@ sync_pairs:
   - /Users/rod/Library/CloudStorage/ProtonDrive-rodmclaughlin@protonmail.com-folder/file_organizer_test/sync
 one_way_pairs:
 - folders:
-  - /Users/rod/Library/CloudStorage/ProtonDrive-rodmclaughlin@protonmail.com-folder/file_organizer_test/oneway
+  - /Users/rod/Library/CloudStorage/ProtonDrive-rodmclaughlin@protonmail.com-folder/file_organizer_test/oneway_src
   - /Users/rod/file_organizer_test/oneway
 source_folders:
 - /Users/rod/pol

@@ -489,8 +489,8 @@ you through the renames:
 
 - `Screenshot_20261114_666_X.jpg` → clear the pre-filled date and type
   `2026114_foo_baz.jpg`
-- `Screenshot_20261114_777_X.jpg` → press **Enter alone** (keep it)
-- `IMG_20261114_153021.jpg` → press **Enter alone** (keep it)
+- `Screenshot_20261114_777_X.jpg` → press **Enter** (keep it)
+- `IMG_20261114_153021.jpg` → press **Enter** (keep it)
 
 Fresh files are copied immediately — there is no grace period.
 `ls file_organizer_staging/DCIM/Screenshots` should show your renamed
