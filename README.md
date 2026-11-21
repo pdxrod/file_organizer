@@ -465,9 +465,9 @@ With a handful of small files, `./organize test` checks that:
 - sync works BOTH ways: each side's test file reaches the other side,
   and a tiny project crosses over WITHOUT its `.git` folder;
 - one-way sync copies its source files into the target;
-- the phone's staged files are pulled, and held (app-generated) files
+- the phone's files are pulled, and held (app-generated) files
   are NOT;
-- the router moves a test file out of `~/Downloads`;
+- the router reroutes a test file out of the downloads folder;
 - the second folder (cloud or external) can really be read and written;
   a missing external drive (a starter path like
   `/Volumes/YourExternalDrive`) is simply reported as missing.

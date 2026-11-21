@@ -524,6 +524,13 @@ do_pull() {
     # the pull forever; killing adb closes the pipe and tar exits.
     local tar_cmd="cd $ANDROID_BASE && tar cf - $tar_args 2>/dev/null"
     ADB_TIMEOUT="$ADB_STREAM_TIMEOUT" adb_t "$ADB" -s "$device_id" exec-out "$tar_cmd" 2>/dev/null | tar xf - -C "$TEMP_STAGE" 2>/dev/null || true
+    if [[ ${PIPESTATUS[0]} -eq 124 ]]; then
+        # The stream hung and the watchdog killed adb — the USB link is
+        # wedged. Stop now instead of letting the rest of the run stall.
+        warn "The phone stopped answering during the file stream — unplug and replug it, then try again."
+        rm -rf "$TEMP_STAGE"
+        return 0
+    fi
 
     local pulled_count
     pulled_count=$(find "$TEMP_STAGE" -type f 2>/dev/null | wc -l | tr -d ' ')

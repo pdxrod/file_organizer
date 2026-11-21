@@ -117,8 +117,8 @@ def run_computer_test() -> int:
     print()
     print("This test checks, with a few small files, that this computer can:")
     print("  - copy files both ways between the computer and a cloud folder")
-    print("  - pull the phone's staged files")
-    print("  - route a file out of ~/Downloads")
+    print("  - pull files from a phone")
+    print("  - reroute files from your downloads folder")
     print()
     print("Your own files are never moved or deleted, and none of your big folders are touched.")
     _pause("Press Enter to run it, or x to cancel.")
@@ -309,7 +309,7 @@ def run_phone_test() -> int:
           f"skipped {stats.get('skipped', 0)}, "
           f"errors {stats.get('errors', 0)}")
     _pause(
-        "GO BACK TO THE COMPUTER.\n"
+        "TIME TO RETURN TO THE COMPUTER.\n"
         "\n"
         "Phone side done. The staged files are ready for the computer to collect. Keep the phone plugged in (USB debugging ON) and press Enter THERE to continue."
     )

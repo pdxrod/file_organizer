@@ -6,9 +6,9 @@ Checks everything a script can see from the computer:
   - the sync pair synchronised BOTH ways (each side's test file reached
     the other side, and the test project arrived without .git)
   - the one-way pair copied its source files into its target
-  - the phone's ready files were pulled into the computer's folders,
-    and the held (app-generated) files were NOT pulled
-  - the router moved the ~/Downloads test file out of ~/Downloads
+  - files from a phone are pulled, and the held (app-generated) files
+    were NOT pulled
+  - the router reroutes a test file out of the downloads folder
   - the second folder (cloud or external) really was read and written
 
 The pairs and paths all come from the temporary test config the plan
