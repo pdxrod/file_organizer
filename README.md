@@ -490,13 +490,14 @@ app-generated ones (`Screenshot_20261114_666_X.jpg`,
 `Screenshot_20261114_777_X.jpg`, `IMG_20261114_153021.jpg`), then walks
 you through the renames:
 
-- `Screenshot_20261114_666_X.jpg` → type `2026114_foo_baz.jpg`
+- `Screenshot_20261114_666_X.jpg` → clear the pre-filled date and type
+  `2026114_foo_baz.jpg`
 - `Screenshot_20261114_777_X.jpg` → press **Enter alone** (keep it)
 - `IMG_20261114_153021.jpg` → press **Enter alone** (keep it)
 
 Fresh files are copied immediately — there is no grace period.
-`ls file_organizer_staging/DCIM/Screenshots` should show ONLY
-`2026114_foo_baz.jpg` (no 777_X, no 666_X).
+`ls file_organizer_staging/DCIM/Screenshots` should show your renamed
+file and none of the held ones (no 777_X, no 666_X).
 
 ### The computer half finishes
 

@@ -210,8 +210,9 @@ def run_computer_test() -> int:
         "  Then come back to this computer and press Enter here."
     )
 
-    # 6. One full cycle against the small test folders.
-    if _run_organize("--config", str(test_cfg), "auto", check=True,
+    # 6. One full cycle against the small test folders (subcommand first —
+    # the organizer script reads the command before any flags).
+    if _run_organize("auto", "--config", str(test_cfg), check=True,
                      quiet=True) != 0:
         print("The run reported a problem — the checks below will show")
         print("what did and did not happen.")
@@ -276,7 +277,8 @@ def run_phone_test() -> int:
         "Next: the renames. For each held file:\n"
         "\n"
         "  Screenshot_20261114_666_X.jpg\n"
-        "     type the new name: 2026114_foo_baz.jpg\n"
+        "     clear the pre-filled date, then type the\n"
+        "     new name: 2026114_foo_baz.jpg\n"
         "  Screenshot_20261114_777_X.jpg\n"
         "     press Enter alone to keep it\n"
         "  IMG_20261114_153021.jpg\n"
@@ -307,9 +309,11 @@ def run_phone_test() -> int:
           f"held {stats.get('held', 0)}, "
           f"skipped {stats.get('skipped', 0)}, "
           f"errors {stats.get('errors', 0)}")
-
-    print()
-    print("Phone side done. The staged files are ready for the computer")
-    print("to pull. Keep the phone plugged in (USB debugging ON) and go")
-    print("back to the computer — press Enter THERE to continue.")
+    _pause(
+        "Phone side done. The staged files are ready for the\n"
+        "computer to collect.\n"
+        "\n"
+        "Keep the phone plugged in (USB debugging ON) and go\n"
+        "back to the computer — press Enter THERE to continue."
+    )
     return 0

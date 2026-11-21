@@ -31,7 +31,6 @@ PHONE_PRESENT = [
     "20261111_celtic.png",          # DCIM/Camera - ready to copy
     "20261111_phone_notes.txt",     # Documents - ready to copy
     "20261111_phone_download.txt",  # Download - ready to copy
-    "2026114_foo_baz.jpg",          # renamed from Screenshot_20261114_666_X.jpg
 ]
 PHONE_ABSENT = [
     "Screenshot_20261114_666_X.jpg",  # renamed away on the phone
@@ -185,6 +184,31 @@ def main() -> None:
         else:
             report("PASS", f"held file NOT pulled (as expected): {name}")
 
+    # The renamed screenshot: the user picks the new name (the rename
+    # prompt prefills a date), so accept ANY pulled .jpg that is not one
+    # of the held names.
+    staged_jpgs = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            if os.path.relpath(dirpath, root).count(os.sep) >= 8:
+                dirnames[:] = []
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            for fname in filenames:
+                if fname.lower().endswith(".jpg") \
+                        and fname not in PHONE_ABSENT \
+                        and "Screenshots" in Path(dirpath).parts:
+                    staged_jpgs.append(str(Path(dirpath) / fname))
+    if staged_jpgs:
+        report("PASS", f"renamed phone file pulled: {staged_jpgs[0]}")
+    else:
+        report(
+            "FAIL",
+            "no renamed phone file on the computer — the renamed "
+            "screenshot was not pulled (did the phone finish its side?)",
+        )
+
     # 4. Router should have moved the Downloads test file out.
     router = cfg["router"]
     router_on = str(router.get("enabled", "")).lower() in (
@@ -251,7 +275,8 @@ def main() -> None:
     print()
     print("Manual checks (only you can do these):")
     print("  - On the PHONE: ls file_organizer_staging/DCIM/Screenshots")
-    print("    should show ONLY 2026114_foo_baz.jpg (no 777_X, no 666_X).")
+    print("    should show your renamed file and NONE of the held ones")
+    print("    (no 777_X, no 666_X).")
     print("  - Open Proton Drive and eyeball the file_organizer_test")
     print("    folders there (they are removed when the test finishes).")
 
