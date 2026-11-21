@@ -48,32 +48,19 @@ def run_auto_phone_pull(config: Config) -> bool:
     """
     if not auto_pull_enabled(config):
         return False
-    script = Path(__file__).resolve().parent.parent / "phone_pull.sh"
-    if not script.exists():
-        logger.warning("Auto phone pull: script not found (%s)", script)
-        return False
-    timeout = int(config.raw_config.get("sync_timeout_minutes", 60) or 60) * 60
     logger.info("Auto phone pull: checking for a connected phone...")
     try:
-        # Output streams straight to the terminal/log — the user can see
-        # the pull's progress instead of a silent multi-minute wait.
-        result = subprocess.run(
-            ["bash", str(script), "--quiet"],
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        logger.warning("Auto phone pull: timed out after %ds", timeout)
+        from file_organizer.phone_pull import Puller
+        ok = Puller(config.raw_config, quiet=True).pull_all()
+        if ok:
+            logger.info("Auto phone pull finished.")
+        else:
+            logger.warning("Auto phone pull reported a problem — see the "
+                           "messages above.")
+        return ok
+    except Exception as exc:  # noqa: BLE001 — never break the cycle
+        logger.warning("Auto phone pull failed: %s", exc)
         return False
-    except OSError as e:
-        logger.warning("Auto phone pull: could not run phone_pull.sh: %s", e)
-        return False
-
-    if result.returncode == 0:
-        logger.info("Auto phone pull finished.")
-        return True
-    logger.warning("Auto phone pull reported a problem (exit %d).",
-                   result.returncode)
-    return False
 
 
 def compute_idle_sleep(base: int, factor: int, max_multiplier: int, streak: int) -> int:
