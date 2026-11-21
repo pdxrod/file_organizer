@@ -267,7 +267,7 @@ def run_computer_test() -> int:
     test_cfg.unlink(missing_ok=True)
 
     print()
-    print("Done. Your config.yaml was never touched.")
+    print("Done.")
     print()
     print("In everyday use:")
     print("  - './organize auto' runs one full cycle, like the run this")

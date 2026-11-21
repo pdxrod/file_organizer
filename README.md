@@ -503,8 +503,6 @@ Enter: one full cycle runs against the small test folders, the checks
 print PASS/FAIL, the test files are cleared away, and the report points
 at `./organize auto` and `./organize start` for everyday use.
 
-Your config.yaml is never touched.
-
 ---
 
 ## What gets organized / synced — and what never does
