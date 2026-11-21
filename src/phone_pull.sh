@@ -299,7 +299,7 @@ adb_t() {
     (
         sleep "$t"
         kill -9 "$cpid" 2>/dev/null
-    ) &
+    ) >/dev/null 2>&1 &
     local wpid=$!
     wait "$cpid" 2>/dev/null
     local rc=$?
