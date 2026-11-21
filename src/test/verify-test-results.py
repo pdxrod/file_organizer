@@ -37,7 +37,7 @@ PHONE_ABSENT = [
     "Screenshot_20261114_777_X.jpg",  # held - kept on the phone
     "IMG_20261114_153021.jpg",        # held - kept on the phone
 ]
-DOWNLOADS_FILE = "20261111_downloads_test.txt"
+DOWNLOADS_PREFIX = "20261111_downloads_test_"
 
 SKIP_DIRS = {".git", ".tmp_pull", "__pycache__", ".venv", "node_modules"}
 
@@ -222,35 +222,43 @@ def main() -> None:
     watch_real = [
         tc.real(tc.resolve(w, cfg)) for w in router.get("watch_folders", [])
     ]
-    dl = dl_folder / DOWNLOADS_FILE
+    dl = dl_folder
+    left_in_dl = list(dl_folder.glob(DOWNLOADS_PREFIX + "*.txt"))
     if not router_on or dl_dir_real not in watch_real:
         report(
             "INFO",
             "router is not enabled or does not watch the downloads folder "
             "in this config — skipping the Downloads move check",
         )
-    elif not dl.exists():
+    elif left_in_dl:
+        report(
+            "FAIL",
+            f"{left_in_dl[0].name} is still in {dl_folder} — the router "
+            "did not move it",
+        )
+    else:
         targets = [
             tc.resolve(v, cfg)
             for v in router.get("target_folders", {}).values()
             if v
         ] or [main_drive]
-        moved = find([DOWNLOADS_FILE], targets, depth=4)
-        if moved[DOWNLOADS_FILE]:
-            report("PASS", "router moved the Downloads file out -> "
-                   + moved[DOWNLOADS_FILE][0])
+        moved = []
+        for target in targets:
+            for dirpath, dirnames, filenames in os.walk(target):
+                if os.path.relpath(dirpath, target).count(os.sep) >= 4:
+                    dirnames[:] = []
+                for fname in filenames:
+                    if fname.startswith(DOWNLOADS_PREFIX):
+                        moved.append(str(Path(dirpath) / fname))
+        if moved:
+            report("PASS", "router moved the downloads file out -> "
+                   + moved[0])
         else:
             report(
                 "FAIL",
-                f"{DOWNLOADS_FILE} left {dl_folder} but was not found in "
-                "the router's target folders",
+                "the downloads test file left the downloads folder but "
+                "was not found in the router's target folders",
             )
-    else:
-        report(
-            "FAIL",
-            f"{DOWNLOADS_FILE} is still in {dl_folder} — the router did "
-            "not move it",
-        )
 
     # 5. Remote read/write: the plan wrote small test files to the second
     # side of the pair — when a cloud or external folder was used, that
@@ -258,11 +266,8 @@ def main() -> None:
     if sync_pairs:
         second_side = tc.resolve(sync_pairs[0][1], cfg)
         if second_side.is_dir():
-            where = ("outside MAIN_DRIVE"
-                     if not tc.is_under(second_side, main_drive)
-                     else "local (no cloud or external folder in the config)")
             report("PASS", f"second folder exists and was written: "
-                   f"{second_side} ({where})")
+                   f"{second_side}")
         else:
             report("FAIL", f"second folder missing after the run: "
                    f"{second_side}")

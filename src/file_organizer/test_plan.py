@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent  # file_organizer/
@@ -38,7 +39,7 @@ if str(SRC) not in sys.path:
 
 import testplan_common as tc  # noqa: E402
 
-DOWNLOAD_TEST_FILE = "20261111_downloads_test.txt"
+DOWNLOAD_TEST_FILE = f"20261111_downloads_test_{int(time.time())}.txt"
 
 # Throwaway folders the computer half uses — created under MAIN_DRIVE and
 # PROTON_DRIVE for the test, deleted again at the end. They must be small
@@ -259,7 +260,10 @@ def run_computer_test() -> int:
     # 8. Clear the test files away.
     for folder in [main / TEST_FOLDER] + other_roots:
         shutil.rmtree(folder, ignore_errors=True)
-    dl_path.unlink(missing_ok=True)
+    # The router test file carries a fresh name per run (the router
+    # remembers paths it already decided on) — sweep any leftovers.
+    for leftover in dl.glob("20261111_downloads_test*.txt"):
+        leftover.unlink(missing_ok=True)
     test_cfg.unlink(missing_ok=True)
 
     print()
