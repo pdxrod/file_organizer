@@ -1156,8 +1156,8 @@ def _input_with_prefill(prompt: str, prefill: str, input_fn=input) -> str:
     and can append to it, edit it, or clear it. Where readline is
     unavailable (or input_fn is a test double), the prefill is printed
     after the prompt and prepended to the typed text instead:
-    'd' still means delete, 'x' still stops renaming, and Enter alone
-    still means keep.
+    'd' still means delete, 'x' still stops renaming, and pressing
+    Enter still means keep.
     """
     if not prefill:
         return input_fn(prompt)
@@ -1194,7 +1194,7 @@ def rename_held_interactive(
         name: BBl-Screenshot-1788321667280.jpeg new name (d for delete, x for stop):
     - Type a new name and press Enter to rename (no extension keeps the
       old one).
-    - Press Enter alone to keep the old name.
+    - Press Enter to keep the old name.
     - Type 'd' and press Enter to delete the file.
     - Type 'x' and press Enter to stop renaming; the remaining files are
       left exactly as they are.
@@ -1232,7 +1232,7 @@ def rename_held_interactive(
         return stats
     print_fn(
         f"{len(files)} held file(s). Type a new name for each and press "
-        f"Enter; press Enter alone to keep the old name; 'd' deletes it; "
+        f"Enter; press Enter to keep the old name; 'd' deletes it; "
         f"'x' stops renaming."
     )
     try:

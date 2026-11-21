@@ -278,7 +278,7 @@ def main() -> None:
 
     print()
     print("Manual checks (only you can do these):")
-    print("  - On the PHONE: ls file_organizer_staging/DCIM/Screenshots")
+    print("  - On the PHONE: ls file_organizer_test_staging/DCIM/Screenshots")
     print("    should show your renamed file and NONE of the held ones")
     print("    (no 777_X, no 666_X).")
     print("  - Open the second folder (cloud or external) and eyeball")

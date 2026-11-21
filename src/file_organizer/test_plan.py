@@ -197,6 +197,9 @@ def run_computer_test() -> int:
         raw["sync_pairs"] = [{"folders": [str(sync_a), str(sync_b)]}]
         raw["one_way_pairs"] = [{"folders": [str(ow_src), str(ow_dst)]}]
         raw["phone_pull"]["min_age_minutes"] = 0  # fresh files copy at once
+        # Pull only the test's own staging folder on the phone — never
+        # the real one (which may hold hundreds of real photos).
+        raw["phone_pull"]["phone_source_dirs"] = ["file_organizer_test_staging"]
         test_cfg.write_text(yaml.safe_dump(raw, sort_keys=False))
     except Exception as exc:
         print(f"\nERROR: could not build the test settings: {exc}")
@@ -273,13 +276,38 @@ def run_phone_test() -> int:
         print("created from the template), then './organize test' again.")
         return 1
 
-    sync = phone_sync.PhoneSync(str(cfg_path))
+    sync = phone_sync.PhoneSync(str(cfg_path))  # real config only checked
 
     _pause("Ready to create the test files on this phone?")
     if _run_python("src/test/create-files-on-phone.py", check=True) != 0:
         print("\nCould not create the test files — see above. (Termux")
         print("storage permission missing? Run 'termux-setup-storage'.)")
         return 1
+
+    # The test must NOT run the real production scan (that would stage
+    # hundreds of your real photos). It uses its own throwaway source
+    # and staging folders, so only the six test files ever move.
+    test_src = "/storage/emulated/0/file_organizer_test"
+    test_stage = "/storage/emulated/0/file_organizer_test_staging"
+    test_cfg = REPO / ".organize_phone_test_config.yaml"
+    test_db = REPO / ".organize_phone_test.db"
+    shutil.rmtree(test_stage, ignore_errors=True)
+    Path(test_stage).mkdir(parents=True, exist_ok=True)
+    test_cfg.write_text(
+        f"target_directory: \"{test_stage}\"\n"
+        "source_directories:\n"
+        f"  - \"{test_src}\"\n"
+        "hold_app_generated_names: true\n"
+        "normalise_leading_dates: true\n"
+        "collapse_rename_families: false\n"
+        "scan_interval_seconds: 60\n"
+        "max_file_size_mb: 500\n"
+        "delete_after_copy: false\n"
+        "sync_cloud_drives: false\n"
+        "cloud_drive_paths: []\n"
+        f"db_path: \"{test_db}\"\n"
+    )
+    sync = phone_sync.PhoneSync(str(test_cfg))
 
     _pause(
         "Next: the renames. For each file:\n"
@@ -300,7 +328,7 @@ def run_phone_test() -> int:
     phone_sync.rename_held_interactive(sync)
 
     _pause(
-        "Now the files which are ready are copied into file_organizer_staging/ on the phone, ready for the computer to collect. App-named files stay on the phone."
+        "Now the files which are ready are copied into file_organizer_test_staging/ on the phone, ready for the computer to collect. App-named files stay on the phone."
     )
     stats = sync.run_once(dry_run=False)
     print()
@@ -313,4 +341,8 @@ def run_phone_test() -> int:
         "\n"
         "Phone side done. The staged files are ready for the computer to collect. Keep the phone plugged in (USB debugging ON) and press Enter THERE to continue."
     )
+    # Clear the test-only files away (the phone keeps its own files).
+    for path in (test_cfg, test_db,
+                 Path(str(test_db) + "-wal"), Path(str(test_db) + "-shm")):
+        path.unlink(missing_ok=True)
     return 0

@@ -5,14 +5,15 @@ Run in Termux, inside the file_organizer folder:
 
     python src/test/create-files-on-phone.py
 
-Creates six small files under the phone's storage:
+Creates six small files under a THROWAWAY folder on the phone's
+storage (never inside your real picture folders):
 
-    DCIM/Camera/20261111_celtic.png            ready  -> gets copied
-    DCIM/Screenshots/Screenshot_20261114_666_X.jpg   held  -> rename it later
-    DCIM/Screenshots/Screenshot_20261114_777_X.jpg   held  -> keep it
-    Pictures/IMG_20261114_153021.jpg           held  -> keep it
-    Documents/20261111_phone_notes.txt         ready  -> gets copied
-    Download/20261111_phone_download.txt       ready  -> gets copied
+    file_organizer_test/DCIM/Camera/20261111_celtic.png           ready
+    file_organizer_test/DCIM/Screenshots/Screenshot_…_666_X.jpg   held  -> rename
+    file_organizer_test/DCIM/Screenshots/Screenshot_…_777_X.jpg   held  -> keep
+    file_organizer_test/Pictures/IMG_20261114_153021.jpg          held  -> keep
+    file_organizer_test/Documents/20261111_phone_notes.txt        ready
+    file_organizer_test/Download/20261111_phone_download.txt      ready
 
 "--root PATH" overrides the storage root (useful to test this script
 itself on a computer without touching a phone).
@@ -29,12 +30,12 @@ JPG = b"\xff\xd8\xff\xe0" + b"\x00" * 2048
 TXT = (b"file_organizer phone test file\n" * 200)
 
 FILES = [
-    ("DCIM/Camera/20261111_celtic.png", PNG),
-    ("DCIM/Screenshots/Screenshot_20261114_666_X.jpg", JPG),
-    ("DCIM/Screenshots/Screenshot_20261114_777_X.jpg", JPG),
-    ("Pictures/IMG_20261114_153021.jpg", JPG),
-    ("Documents/20261111_phone_notes.txt", TXT),
-    ("Download/20261111_phone_download.txt", TXT),
+    ("file_organizer_test/DCIM/Camera/20261111_celtic.png", PNG),
+    ("file_organizer_test/DCIM/Screenshots/Screenshot_20261114_666_X.jpg", JPG),
+    ("file_organizer_test/DCIM/Screenshots/Screenshot_20261114_777_X.jpg", JPG),
+    ("file_organizer_test/Pictures/IMG_20261114_153021.jpg", JPG),
+    ("file_organizer_test/Documents/20261111_phone_notes.txt", TXT),
+    ("file_organizer_test/Download/20261111_phone_download.txt", TXT),
 ]
 
 

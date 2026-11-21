@@ -493,8 +493,8 @@ you through the renames:
 - `IMG_20261114_153021.jpg` → press **Enter** (keep it)
 
 Fresh files are copied immediately — there is no grace period.
-`ls file_organizer_staging/DCIM/Screenshots` should show your renamed
-file and none of the held ones (no 777_X, no 666_X).
+`ls file_organizer_test_staging/DCIM/Screenshots` should show your
+renamed file and none of the held ones (no 777_X, no 666_X).
 
 ### The computer half finishes
 
