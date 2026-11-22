@@ -1,22 +1,30 @@
 """router.py — the deep router: works out where a file should go from its
 NAME and its CONTENTS, then moves it there.
 
-Seven buckets (the user's target layout):
+Eight buckets (the user's target layout):
     political      -> ~/pol          (politics, geopolitics, culture war…)
     ml_development -> ~/dev/ml       (AI/ML projects, papers, notes, code)
     development    -> ~/dev          (software projects and dev notes)
-    pictures       -> ~/Pictures     (non-political images AND videos)
+    pictures       -> ~/Pictures     (non-political images)
+    videos         -> ~/Videos       (non-political videos)
     music          -> ~/Music
     documents      -> ~/Documents
     misc           -> ~/misc         (anything that can't be worked out)
 
+Year subfolders: political/pictures/videos/documents files whose YEAR can
+be read from the name (20260914_…, 01-06-18-…, 'Gaza 2024_…') or the
+content (OCR'd '…2019…') land in <target>/<year>/ (e.g. ~/pol/2019,
+~/Pictures/2018, ~/Videos/2026); files with no readable year stay flat in
+the target. router.year_subfolders / year_subfolder_categories tune this.
+
 Decision cascade, cheapest first:
     1. extension fast path          (music; code -> dev family)
     2. filename keyword signals     (political / ml / development)
-    3. extracted content signals    (text files, PDFs, OCR'd media)
+    3. extracted content signals    (text files, PDFs, OCR'd media,
+                                     document-looking pictures)
     4. DeepSeek API batch           (only for text-bearing files rules
                                      couldn't decide; batched, capped)
-    5. fallback by extension        (pictures / documents / misc)
+    5. fallback by extension        (pictures / videos / documents / misc)
 
 Every decision is persisted in router_state.json so re-runs skip what is
 already decided and `route --undo` can put files back. Moves are
@@ -25,6 +33,12 @@ overwritten — the original is kept and the incoming file is moved as
 `name_1.ext` / `name_2.ext` (counter just before the extension). Names
 that end in a trailing ` (N)` after the extension (`foo.m4a (1)`, made
 by Android copies) are normalised to the plain or `_N` form on the way.
+Duplicates (same content already in the target folder) are DELETED — the
+copy in the sorted folder is the survivor, the incoming copy goes away.
+
+Every moved file also gets soft links in the organized/ folder (by
+keyword from its final name, e.g. organized/vienna/01-06-18-….jpg →
+~/Pictures/2018/01-06-18-….jpg); route-undo removes them again.
 
 Safety: dotfiles, symlinks, excluded patterns, files already inside a
 target folder, and the file_organizer checkout itself are never touched.
@@ -34,6 +48,7 @@ import fnmatch
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import time
@@ -193,6 +208,82 @@ _DOCNAME_WORDS = [
     "idcard", "registration", "confirmation", "booking", "itinerary",
 ]
 
+# Words found in OCR'd text of media that mean the picture/video is really
+# a document — a property listing, a bill, a form. One hit decides.
+_DOC_CONTENT_WORDS = [
+    "apartment", "apartments", "condominium", "condo", "realtor",
+    "real estate", "property", "properties", "listing", "listings",
+    "for sale", "for rent", "for lease", "rental", "landlord", "landlady",
+    "tenant", "tenancy", "lease", "leasehold", "mortgage", "deposit",
+    "bedroom", "bedrooms", "ensuite", "furnished", "unfurnished",
+    "floorplan", "floor plan", "square feet", "sq ft", "sqft", "sqm",
+    "price guide", "auction", "inspection", "strata", "estate agent",
+    "letting", "sublet", "shared house", "housemate", "flatmate",
+]
+
+# ── year helpers ─────────────────────────────────────────────────────
+# A year comes from (1) the filename, (2) extracted text/OCR. Files with
+# no readable year stay flat in their category target — mtime is never
+# used (a file created in 2026 can show a 2019 document, and the wrong
+# year would mislabel the folder).
+_LEADING_8DIGIT = re.compile(r"^(\d{8})(?:\D|$)")
+_LEADING_2DIGIT_YEAR = re.compile(
+    r"^(\d{1,2})[-_.](\d{1,2})[-_.](\d{2})(?:\D|$)"
+)
+_FULL_DATE = re.compile(
+    r"(?<!\d)((?:19|20)\d{2})[-_.](\d{1,2})[-_.](\d{1,2})(?!\d)"
+)
+_BARE_YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+
+
+def _valid_ymd(y: int, m: int, d: int) -> bool:
+    return 1970 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31
+
+
+def _year_from_name(name: str) -> Optional[str]:
+    """Year read from a filename, or None. Handles YYYYMMDD prefixes,
+    YYYY-MM-DD dates, bare years (Gaza 2024_…) and DD-MM-YY style
+    leading dates (01-06-18-vienna-… -> 2018)."""
+    if not isinstance(name, str) or not name:
+        return None
+    m = _LEADING_8DIGIT.match(name)
+    if m:
+        y, mo, d = int(m.group(1)[:4]), int(m.group(1)[4:6]), \
+            int(m.group(1)[6:8])
+        if _valid_ymd(y, mo, d):
+            return str(y)
+    m = _LEADING_2DIGIT_YEAR.match(name)
+    if m:
+        a, b, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if 1 <= a <= 31 and 1 <= b <= 12:
+            y = 2000 + yy if yy <= (time.localtime().tm_year % 100) \
+                else 1900 + yy
+            return str(y)
+    m = _FULL_DATE.search(name)
+    if m and _valid_ymd(int(m.group(1)), int(m.group(2)), int(m.group(3))):
+        return m.group(1)
+    m = _BARE_YEAR.search(name)
+    if m:
+        y = int(m.group(1))
+        if 1970 <= y <= 2100:
+            return str(y)
+    return None
+
+
+def _year_from_text(text: str) -> Optional[str]:
+    """Year read from extracted text/OCR, or None."""
+    if not isinstance(text, str) or not text:
+        return None
+    m = _FULL_DATE.search(text)
+    if m and _valid_ymd(int(m.group(1)), int(m.group(2)), int(m.group(3))):
+        return m.group(1)
+    m = _BARE_YEAR.search(text)
+    if m:
+        y = int(m.group(1))
+        if 1970 <= y <= 2100:
+            return str(y)
+    return None
+
 # Vision scene-classifier labels (extract.swift) that suggest a political
 # photo/video even when there is no readable text in it. Matched as
 # substrings of the lowercased label, e.g. "military_uniform 0.82".
@@ -323,6 +414,22 @@ class Router:
         }
         self._docname_re = [re.compile(rf"\b{re.escape(w)}\b", re.I)
                             for w in _DOCNAME_WORDS]
+        self._doc_content_re = [
+            re.compile(rf"\b{re.escape(w)}\b", re.I)
+            for w in _DOC_CONTENT_WORDS
+        ]
+
+        # Year subfolders (e.g. ~/Pictures/2018, ~/pol/2019): on by
+        # default for the dated buckets. The year comes from the name or
+        # the content — never mtime (a file made in 2026 can show a
+        # 2019 document, and the wrong year would mislabel the folder).
+        self.year_subfolders = bool(raw.get("year_subfolders", True))
+        year_cats = raw.get("year_subfolder_categories")
+        self.year_cats = set(
+            list(year_cats) if isinstance(year_cats, list)
+            else ["political", "pictures", "videos", "documents"]
+        )
+        self._organized_root_cache: Optional[Path] = None
 
         # State.
         state_path = raw.get("state_file") or ""
@@ -500,6 +607,10 @@ class Router:
         entry = self.state["entries"].get(key)
         if not isinstance(entry, dict):
             entry = {}
+            # Store it immediately: later phases (OCR, DeepSeek) mutate
+            # the entry in place, so an un-stored dict would be an orphan
+            # and their updates (e.g. the content year) would be lost.
+            self.state["entries"][key] = entry
         try:
             st = p.stat()
             size, mtime = st.st_size, st.st_mtime_ns
@@ -514,6 +625,16 @@ class Router:
     def _decide(self, p: Path, category: str, confidence: float,
                 source: str, reason: str, text_hits: list) -> dict:
         entry = self._entry(p)
+        # Remember a previous applied destination: when a stale entry is
+        # re-decided (e.g. into a year subfolder), the superseded copy at
+        # the old destination is removed after the move.
+        if (entry.get("dest") and entry.get("status") in (
+                "moved", "copied", "duplicate_kept")
+                and not entry.get("prev_dest")):
+            entry["prev_dest"] = entry["dest"]
+        # A truthy content year survives; otherwise (re)read the name so a
+        # re-decided file never keeps a stale/absent year.
+        entry["year"] = entry.get("year") or _year_from_name(p.name)
         entry.update({
             "category": category, "confidence": round(confidence, 3),
             "source": source, "reason": reason[:200],
@@ -528,9 +649,12 @@ class Router:
         if not isinstance(entry, dict):
             return False
         if entry.get("applied") and entry.get("status") in (
-            "moved", "copied", "duplicate_kept",
+            "moved", "copied", "duplicate_kept", "duplicate_deleted",
         ):
-            return True
+            # The file is back at its origin (restored by hand, by a sync
+            # peer, or by an old undo) — the decision is stale, so re-decide
+            # it with the current rules instead of honouring it.
+            return not Path(entry.get("origin", "")).exists()
         return False
 
     def _already_decided(self, p: Path) -> bool:
@@ -653,6 +777,10 @@ class Router:
                           text: str) -> Optional[dict]:
         """Keyword signals on extracted text; else queue for DeepSeek."""
         sample = " ".join(text.split())[: self.max_chars]
+        if sample and not entry.get("year"):
+            yr = _year_from_text(sample)
+            if yr:
+                entry["year"] = yr
         if sample:
             pol, hits = self._signal(sample, "political")
             if pol:
@@ -688,6 +816,10 @@ class Router:
             processed += 1
             data = self.extractor.extract(p)
             text = " ".join(data["text"].split())[: self.max_chars]
+            if text and not entry.get("year"):
+                yr = _year_from_text(text)
+                if yr:
+                    entry["year"] = yr
             pol, hits = self._signal(text, "political")
             if pol:
                 self._decide(p, "political", 0.85, "content",
@@ -708,9 +840,23 @@ class Router:
                 self._decide(p, "ml_development", 0.85, "content",
                              "OCR ML text: " + ", ".join(hits[:4]), hits)
                 continue
-            # Media with OCR text DeepSeek can read when enabled.
-            if (text and self.ds_media_enabled and self.ds is not None
-                    and self.ds.api_key):
+            # Document-looking media: OCR text like a property listing,
+            # form, bill or receipt means the picture/video is really a
+            # document (e.g. an apartment-listing photo -> Documents).
+            doc_hits = [w for w, rx in zip(_DOC_CONTENT_WORDS,
+                                            self._doc_content_re)
+                        if rx.search(text.lower())]
+            if doc_hits and _suffix(p.name) in IMAGE_EXTS | VIDEO_EXTS:
+                self._decide(p, "documents", 0.7, "content",
+                             "document text in media: "
+                             + ", ".join(doc_hits[:4]), doc_hits)
+                continue
+            # Media with anything for DeepSeek to read when enabled —
+            # OCR text, or at least Vision scene labels.
+            if (self.ds_media_enabled and self.ds is not None
+                    and self.ds.api_key
+                    and (text or str(data.get("meta", {})
+                                     .get("classifications", "")))):
                 self._ds_queue.append((p, entry, text, data.get("meta", {})))
                 continue
             self._decide(p, *self._fallback(p, "no signal in OCR text"), [])
@@ -743,7 +889,20 @@ class Router:
                               "text": combined})
             results = self.ds.classify_batch(items)
             for j, (p, entry, text, _meta) in enumerate(batch):
+                if text and not entry.get("year"):
+                    yr = _year_from_text(text)
+                    if yr:
+                        entry["year"] = yr
                 res = results[j] if j < len(results) else {}
+                # Media extension wins between the two media buckets:
+                # an mp4 cannot be a picture and a jpg cannot be a video,
+                # whatever the model said.
+                if res.get("category") == "pictures" and \
+                        _suffix(p.name) in VIDEO_EXTS:
+                    res = dict(res, category="videos")
+                elif res.get("category") == "videos" and \
+                        _suffix(p.name) in IMAGE_EXTS:
+                    res = dict(res, category="pictures")
                 if (res.get("category")
                         and res.get("confidence", 0) >= self.min_confidence):
                     self._decide(
@@ -767,7 +926,10 @@ class Router:
         note = f" ({reason})" if reason else ""
         if ext in MUSIC_EXTS:
             return "music", 0.6, "fallback", "audio extension" + note
-        if ext in IMAGE_EXTS or ext in VIDEO_EXTS:
+        if ext in VIDEO_EXTS:
+            return "videos", 0.6, "fallback", \
+                "video without political signal" + note
+        if ext in IMAGE_EXTS:
             return "pictures", 0.6, "fallback", \
                 "media without political signal" + note
         if ext in CODE_EXTS:
@@ -809,6 +971,7 @@ class Router:
             entry["status"] = "error"
             entry["reason"] = "no target folder configured"
             return
+        target = self._year_target(target, category, entry)
 
         # The user's rule: a trailing ' (N)' after the extension is never
         # kept — the file becomes base_N.ext ('foo.m4a (1)' →
@@ -823,9 +986,20 @@ class Router:
         if dest.exists():
             if dest.stat().st_size == p.stat().st_size and \
                     self._files_equal(dest, p):
-                logger.info("router: duplicate kept in place (same content "
-                            "as %s): %s", dest, p)
-                entry["status"] = "duplicate_kept"
+                # Same content is already sorted: delete the incoming
+                # copy — the file in the sorted folder survives.
+                try:
+                    p.unlink(missing_ok=True)
+                except OSError as e:
+                    logger.error("router: could not delete duplicate %s: %s",
+                                 p, e)
+                    entry["status"] = "error"
+                    entry["reason"] = str(e)[:200]
+                    self.stats["errors"] += 1
+                    return
+                logger.info("router: deleted duplicate (same content as %s): "
+                            "%s", dest, p)
+                entry["status"] = "duplicate_deleted"
                 entry["applied"] = True
                 entry["dest"] = str(dest)
                 self.stats["duplicates"] += 1
@@ -860,8 +1034,107 @@ class Router:
         entry["status"] = "moved" if self.action == "move" else "copied"
         self.stats["moved" if self.action == "move" else "copied"] += 1
         self.stats["by_category"][category] += 1
+        entry["links"] = self._create_links(dest)
+        # A superseded copy at the previous destination (an old flat
+        # decision re-routed into a year subfolder) is a duplicate now —
+        # delete it, keeping the newly sorted copy.
+        prev = entry.get("prev_dest") or ""
+        prev_path = Path(prev) if prev else None
+        if (prev_path and prev_path != dest and prev_path.exists()
+                and prev_path.stat().st_size == dest.stat().st_size
+                and self._files_equal(prev_path, dest)):
+            try:
+                prev_path.unlink(missing_ok=True)
+                logger.info("router: deleted superseded copy %s (now "
+                            "%s)", prev_path, dest)
+                self.stats["duplicates"] += 1
+            except OSError as e:
+                logger.warning("router: could not delete superseded copy "
+                               "%s: %s", prev_path, e)
         logger.info("router: %s -> %s (%s)", p.name, dest,
                     entry.get("reason") or entry.get("source", ""))
+
+    # ── destination helpers ──────────────────────────────────────────
+
+    def _year_target(self, target: Path, category: str, entry: dict) -> Path:
+        """The category target, plus the year subfolder when one applies."""
+        if not (self.year_subfolders and category in self.year_cats):
+            return target
+        year = entry.get("year")
+        if year:
+            return target / str(year)
+        return target
+
+    def dest_for(self, entry: dict) -> Path:
+        """Where an entry will land: category target, plus the year
+        subfolder when one applies. Used by `route` previews."""
+        category = entry.get("category", "misc")
+        target = self.targets.get(category) or Path("")
+        name = normalize_copy_counter(entry.get("name", "?"))
+        return self._year_target(target, category, entry) / name
+
+    def _organized_root(self) -> Path:
+        """The organized/ link farm root (same default as Organizer)."""
+        if self._organized_root_cache is not None:
+            return self._organized_root_cache
+        raw = self.config.raw_config.get("output_base") or ""
+        if raw in ("", "organized", "~/organized"):
+            self._organized_root_cache = find_project_root() / "organized"
+        else:
+            self._organized_root_cache = Path(
+                os.path.expanduser(self.config._resolve_path(raw))
+            )
+        return self._organized_root_cache
+
+    # Words that never become organized/ link buckets.
+    _LINK_STOPWORDS = {
+        "with", "from", "have", "this", "that", "these", "those", "what",
+        "when", "they", "their", "were", "will", "about", "into", "over",
+        "after", "before", "between", "through", "during", "above", "below",
+        "file", "files", "image", "images", "photo", "photos", "video",
+        "audio", "screenshot", "download", "original", "copy", "final",
+        "draft", "version", "screen", "document", "picture", "pictures",
+        "edited", "combined", "merged", "fixed", "added", "removed",
+        "updated", "year", "today", "month", "week", "size", "full",
+        "large", "small", "page", "email", "title", "name", "content",
+        "text", "data",
+    }
+
+    def _link_keywords(self, name: str) -> list:
+        """Keyword buckets for a file's organized/ links, from its final
+        name (e.g. 01-06-18-vienna-camping-… → vienna, camping, neue, …)."""
+        words = re.findall(r"[a-z]{4,}", _lower_stem(name))
+        seen = set()
+        out = []
+        for w in words:
+            if w in seen or w in self._LINK_STOPWORDS:
+                continue
+            seen.add(w)
+            out.append(w)
+        return out
+
+    def _create_links(self, dest: Path) -> list:
+        """Soft links in organized/<keyword>/ pointing at the file's final
+        location. Returns the created link paths (recorded in the entry so
+        route-undo can remove them again)."""
+        max_links = int(
+            self.config.raw_config.get("max_soft_links_per_file", 6) or 6
+        )
+        created = []
+        for kw in self._link_keywords(dest.name)[:max_links]:
+            link = self._organized_root() / kw / dest.name
+            try:
+                link.parent.mkdir(parents=True, exist_ok=True)
+                if link.is_symlink():
+                    link.unlink()
+                elif link.exists():
+                    continue
+                link.symlink_to(dest)
+                created.append(str(link))
+            except OSError as e:
+                logger.warning("router: could not link %s -> %s: %s",
+                               link, dest, e)
+        return created
 
     # ── public API ───────────────────────────────────────────────────
 
@@ -991,6 +1264,15 @@ class Router:
                 logger.error("router undo: %s -> %s failed: %s",
                              dest, origin, e)
                 continue
+            # Remove the organized/ links this move created.
+            for link in entry.get("links") or []:
+                lp = Path(link)
+                try:
+                    if lp.is_symlink():
+                        lp.unlink()
+                except OSError:
+                    pass
+            entry["links"] = []
             entry["status"] = "undone"
             entry["applied"] = False
             undone.append(f"{dest} -> {origin}")

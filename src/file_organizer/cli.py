@@ -160,6 +160,19 @@ def run_full_cycle(config: Config, dry_run: bool = False):
     logger.info('Links created: %s', stats)
     actions["links_created"] += stats.get("links_created", 0)
     valid_files = {sf.path for sf in scanned}
+    # Keep organized/ links that point at files the router has already
+    # moved into their category/year folders (~/Videos and ~/dev are not
+    # in source_folders, so without this the next cleanup would remove
+    # the router's own links).
+    try:
+        if config.raw_config.get("router", {}).get("enabled"):
+            from file_organizer.router import Router
+            for e in Router(config).state["entries"].values():
+                dest = e.get("dest") if e.get("applied") else ""
+                if dest and Path(dest).exists():
+                    valid_files.add(Path(dest))
+    except Exception as e:  # never break the cycle over link housekeeping
+        logger.warning("Could not load router destinations: %s", e)
     if not dry_run:
         actions["orphans_removed"] += organizer.clean_orphaned_links(valid_files)
 
@@ -390,8 +403,8 @@ def main(argv=None):
                              "identical '_N' duplicates — shows a plan, "
                              "applies only with --REAL")
     parser.add_argument("--route", action="store_true",
-                        help="Route files into pol/dev/dev-ml/Pictures/Music/"
-                             "Documents/misc by name AND content (dry-run "
+                        help="Route files into pol/dev/dev-ml/Pictures/Videos/"
+                             "Music/Documents/misc by name AND content (dry-run "
                              "unless --REAL)")
     parser.add_argument("--route-status", action="store_true",
                         help="Show what the router has decided so far")
@@ -563,9 +576,7 @@ def main(argv=None):
                 print(f"\nWould move {len(entries)} file(s):")
                 for e in sorted(entries, key=lambda e: (
                         e.get("category", ""), e.get("name", "")))[:200]:
-                    cat = e.get("category", "misc")
-                    dest = (router.targets.get(cat, Path("?"))
-                            / e.get("name", "?"))
+                    dest = router.dest_for(e)
                     print(f"  {Path(e['origin']).name} -> {dest}")
                 if len(entries) > 200:
                     print(f"  … and {len(entries) - 200} more")

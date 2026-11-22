@@ -25,8 +25,12 @@ logging.getLogger("file_organizer.router").addHandler(logging.NullHandler())
 class FakeConfig:
     """Minimal stand-in for Config: raw_config + _resolve_path passthrough."""
 
-    def __init__(self, router_raw):
-        self.raw_config = {"exclude_patterns": [], "router": router_raw}
+    def __init__(self, router_raw, extra=None):
+        self.raw_config = {
+            "exclude_patterns": [],
+            "router": router_raw,
+            **(extra or {}),
+        }
 
     def _resolve_path(self, p):
         return p if isinstance(p, str) else str(p)
@@ -62,6 +66,7 @@ class FakeDeepSeek:
 
 def make_router(tmp, **overrides):
     extractor = overrides.pop("extractor", None)
+    config_extra = overrides.pop("config_extra", None)
     raw = {
         "enabled": True,
         "action": "move",
@@ -72,6 +77,7 @@ def make_router(tmp, **overrides):
             "ml_development": str(tmp / "out" / "dev" / "ml"),
             "development": str(tmp / "out" / "dev"),
             "pictures": str(tmp / "out" / "Pictures"),
+            "videos": str(tmp / "out" / "Videos"),
             "music": str(tmp / "out" / "Music"),
             "documents": str(tmp / "out" / "Documents"),
             "misc": str(tmp / "out" / "misc"),
@@ -81,7 +87,14 @@ def make_router(tmp, **overrides):
         "state_file": str(tmp / "router_state.json"),
     }
     raw.update(overrides)
-    return Router(FakeConfig(raw), deepseek=None, extractor=extractor)
+    if config_extra is None:
+        config_extra = {
+            "output_base": str(tmp / "organized"),
+            "max_soft_links_per_file": 6,
+        }
+    return Router(
+        FakeConfig(raw, config_extra), deepseek=None, extractor=extractor
+    )
 
 
 def write(tmp, rel, content="x"):
@@ -440,13 +453,21 @@ class ApplyUndoCollisionTests(unittest.TestCase):
         self.assertTrue(saved.exists())
         self.assertEqual(saved.read_text(), "third content")
 
-    def test_identical_destination_kept_once(self):
-        write(self.tmp, "in/report.pdf", "same bytes")
+    def test_identical_destination_duplicate_deleted(self):
+        # The user's rule: duplicates are deleted — the copy already in
+        # the sorted folder survives, the incoming copy goes away.
+        src = write(self.tmp, "in/report.pdf", "same bytes")
         write(self.tmp, "out/Documents/report.pdf", "same bytes")
         r = make_router(self.tmp, extractor=StubExtractor())
         stats = r.run(apply=True)
         self.assertEqual(stats["duplicates"], 1)
-        self.assertTrue((self.tmp / "in" / "report.pdf").exists())
+        self.assertFalse(src.exists())
+        self.assertEqual(
+            (self.tmp / "out" / "Documents" / "report.pdf").read_text(),
+            "same bytes",
+        )
+        entry = r.state["entries"][str(src)]
+        self.assertEqual(entry["status"], "duplicate_deleted")
 
     def test_trailing_counter_music_is_routed_and_normalised(self):
         # '01 Unnamed Track 1.m4a (1)' is an m4a (suffix after the
@@ -636,5 +657,175 @@ class NoHardcodedTargetsTests(unittest.TestCase):
         self.assertIn("no target folder", entry["reason"])
 
 
+class SmartSortingTests(unittest.TestCase):
+    """The intelligent-sorting feature: year subfolders, a videos bucket,
+    document-looking media, duplicate deletion and organized/ links."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _apply(self, r):
+        stats = r.run(apply=True)
+        self.assertEqual(stats["errors"], 0)
+        return stats
+
+    def test_video_goes_to_videos_bucket(self):
+        # A neutral mp4 no longer lands in Pictures — it has its own home.
+        src = write(self.tmp, "in/clip.mp4", "video bytes")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        stats = self._apply(r)
+        self.assertEqual(stats["moved"], 1)
+        self.assertFalse(src.exists())
+        self.assertTrue((self.tmp / "out" / "Videos" / "clip.mp4").exists())
+
+    def test_year_subfolder_from_leading_8digit(self):
+        # 20260914_vidia707_1.jpg -> Pictures/2026.
+        write(self.tmp, "in/20260914_vidia707_1.jpg", "img")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        stats = self._apply(r)
+        dest = self.tmp / "out" / "Pictures" / "2026" / \
+            "20260914_vidia707_1.jpg"
+        self.assertTrue(dest.exists())
+        self.assertEqual(stats["moved"], 1)
+
+    def test_year_subfolder_from_2digit_date(self):
+        # 01-06-18-vienna-… -> Pictures/2018 (DD-MM-YY leading date).
+        write(self.tmp, "in/01-06-18-vienna-camping-neue-donat-schnitzels.jpg",
+              "img")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        self._apply(r)
+        dest = self.tmp / "out" / "Pictures" / "2018" / \
+            "01-06-18-vienna-camping-neue-donat-schnitzels.jpg"
+        self.assertTrue(dest.exists())
+
+    def test_bare_year_in_name(self):
+        # 'Gaza 2024_ TC and Minassian.pdf' -> pol/2024.
+        write(self.tmp, "in/Gaza 2024_ TC and Minassian.pdf", "pdf")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        self._apply(r)
+        dest = self.tmp / "out" / "pol" / "2024" / \
+            "Gaza 2024_ TC and Minassian.pdf"
+        self.assertTrue(dest.exists())
+
+    def test_content_year_and_political_from_ocr(self):
+        # No year in the name; the OCR'd content holds '2019' and a
+        # political word -> pol/2019.
+        write(self.tmp, "in/ilhan-omar-apology.png", "img")
+        r = make_router(self.tmp, extractor=StubExtractor({
+            "ilhan-omar-apology.png": {
+                "text": "congresswoman ilhan omar apologized to the senate "
+                        "in february 2019 for her remarks",
+                "meta": {},
+            },
+        }))
+        self._apply(r)
+        entry = r.state["entries"][str(self.tmp / "in" /
+                                       "ilhan-omar-apology.png")]
+        self.assertEqual(entry["category"], "political")
+        self.assertEqual(entry["year"], "2019")
+        dest = self.tmp / "out" / "pol" / "2019" / "ilhan-omar-apology.png"
+        self.assertTrue(dest.exists())
+
+    def test_document_looking_picture_goes_to_documents(self):
+        # A photo whose OCR text is a property listing is a document.
+        write(self.tmp, "in/20260914_vidia707_1.jpg", "img")
+        r = make_router(self.tmp, extractor=StubExtractor({
+            "20260914_vidia707_1.jpg": {
+                "text": "apartment for sale, three bedrooms, floor plan "
+                        "attached",
+                "meta": {},
+            },
+        }))
+        self._apply(r)
+        entry = r.state["entries"][str(self.tmp / "in" /
+                                       "20260914_vidia707_1.jpg")]
+        self.assertEqual(entry["category"], "documents")
+        dest = self.tmp / "out" / "Documents" / "2026" / \
+            "20260914_vidia707_1.jpg"
+        self.assertTrue(dest.exists())
+
+    def test_organized_links_point_at_final_location(self):
+        # organized/vienna/ holds a soft link to the sorted file.
+        write(self.tmp, "in/01-06-18-vienna-camping-neue-donat-schnitzels.jpg",
+              "img")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        self._apply(r)
+        dest = self.tmp / "out" / "Pictures" / "2018" / \
+            "01-06-18-vienna-camping-neue-donat-schnitzels.jpg"
+        link = self.tmp / "organized" / "vienna" / \
+            "01-06-18-vienna-camping-neue-donat-schnitzels.jpg"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), dest.resolve())
+        entry = r.state["entries"][str(self.tmp / "in" /
+                                       "01-06-18-vienna-camping-neue-"
+                                       "donat-schnitzels.jpg")]
+        self.assertIn(str(link), entry.get("links", []))
+
+    def test_undo_removes_links(self):
+        write(self.tmp, "in/01-06-18-vienna-camping-neue-donat-schnitzels.jpg",
+              "img")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        self._apply(r)
+        link = self.tmp / "organized" / "vienna" / \
+            "01-06-18-vienna-camping-neue-donat-schnitzels.jpg"
+        self.assertTrue(link.is_symlink())
+        undone = r.undo()
+        self.assertEqual(len(undone), 1)
+        self.assertFalse(link.exists())
+        self.assertTrue(
+            (self.tmp / "in" /
+             "01-06-18-vienna-camping-neue-donat-schnitzels.jpg").exists()
+        )
+
+    def test_video_year_subfolder(self):
+        # 20260815_bletchleypark2.mp4 -> Videos/2026.
+        write(self.tmp, "in/20260815_bletchleypark2.mp4", "video bytes")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        self._apply(r)
+        dest = self.tmp / "out" / "Videos" / "2026" / \
+            "20260815_bletchleypark2.mp4"
+        self.assertTrue(dest.exists())
+
+    def test_unknown_file_goes_to_misc_flat(self):
+        # No signals, no year, unknown type -> misc, no year folder.
+        src = write(self.tmp, "in/thing.xyz", "bytes")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        self._apply(r)
+        self.assertTrue((self.tmp / "out" / "misc" / "thing.xyz").exists())
+        self.assertFalse(src.exists())
+
+    def test_stale_applied_entry_is_redecided_and_supersedes(self):
+        # A file routed before year subfolders existed (flat destination)
+        # comes back at its origin — the next run re-decides it with the
+        # current rules (year subfolder) and removes the old flat copy.
+        name = "20260914_vidia707_1.jpg"
+        src = write(self.tmp, "in/" + name, "img")
+        old = make_router(
+            self.tmp, extractor=StubExtractor(),
+            year_subfolders=False,
+        )
+        self._apply(old)
+        flat = self.tmp / "out" / "Pictures" / name
+        self.assertTrue(flat.exists())
+        self.assertFalse(src.exists())
+
+        # The file reappears at its origin (restored by hand / sync).
+        src = write(self.tmp, "in/" + name, "img")
+        fresh = make_router(self.tmp, extractor=StubExtractor())
+        stats = fresh.run(apply=True)
+        self.assertEqual(stats["errors"], 0)
+        year_dest = self.tmp / "out" / "Pictures" / "2026" / name
+        self.assertTrue(year_dest.exists())
+        # The superseded flat copy is gone (identical content).
+        self.assertFalse(flat.exists())
+        entry = fresh.state["entries"][str(src)]
+        self.assertEqual(entry["year"], "2026")
+
+
 if __name__ == "__main__":
     unittest.main()
+

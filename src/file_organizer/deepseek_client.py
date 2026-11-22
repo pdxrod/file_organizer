@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 
-# The seven buckets the router knows about. Keep in sync with router.py.
+# The eight buckets the router knows about. Keep in sync with router.py.
 CATEGORIES = [
     "political", "ml_development", "development",
-    "pictures", "music", "documents", "misc",
+    "pictures", "videos", "music", "documents", "misc",
 ]
 
 SYSTEM_PROMPT = """You are the classification engine of a personal file organizer.
@@ -39,19 +39,25 @@ possibly empty). For each file pick exactly one category:
   training, data science, AI tools.
 - "development": software development — programs, repos, dev notes, configs,
   documentation of software projects that are NOT about ML.
-- "pictures": non-political images and videos — photos, screenshots, travel,
-  family, clips, memes that are not political.
+- "pictures": non-political images — photos, screenshots, travel,
+  family, memes that are not political.
+- "videos": non-political videos and clips — home movies, travel footage,
+  screen recordings that are not political.
 - "music": audio files.
-- "documents": general documents — letters, receipts, forms, records, reports
-  that are not political and not ML.
+- "documents": general documents — letters, receipts, forms, records, reports,
+  property/real-estate listings, that are not political and not ML.
 - "misc": none of the above, or genuinely impossible to tell.
 
 Rules:
-1. Political content wins over documents and pictures for text-bearing files.
+1. Political content wins over documents, pictures and videos for
+   text-bearing files.
 2. Software/code files go to development (or ml_development if ML-related),
    never political.
-3. Media without political content goes to pictures.
-4. When unsure, choose the single most likely category and set confidence
+3. Media without political content goes to pictures (images) or videos
+   (video files).
+4. A photo/screenshot OF a document (a form, letter, receipt, contract,
+   property listing, invoice) is documents, not pictures.
+5. When unsure, choose the single most likely category and set confidence
    below 0.6 — the organizer falls back to filename-based rules for those.
 
 Answer with JSON only, in exactly this shape:

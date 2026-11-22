@@ -319,7 +319,7 @@ cleanup.
 | `cleanup` | Remove broken/stale soft links from the `organized` folder |
 | `git-preview` / `git-init` | Preview or run auto-git |
 | `collapse-renames` | Plan the 'foo (1).png' family collapse (dry-run; add `real` to apply) |
-| `route` / `route-real` | Plan / apply smart routing into buckets by name + content |
+| `route` / `route-real` | Plan / apply smart routing into buckets by name + content, with year subfolders (e.g. `~/Pictures/2018`, `~/pol/2019`, `~/Videos/2026`), a videos bucket, duplicate deletion and `organized/<keyword>/` links |
 | `route-status` / `route-undo` | Show routing decisions / put the last moves back |
 | `gui` / `web` | Desktop GUI / web UI |
 | `pull` / `push` / `list` | Phone ↔ computer over USB (adb) |

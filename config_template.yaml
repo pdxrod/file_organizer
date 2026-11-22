@@ -410,9 +410,20 @@ computer:
       ml_development: "~/dev/ml"
       development: "~/dev"
       pictures: "~/Pictures"
+      videos: "~/Videos"
       music: "~/Music"
       documents: "~/Documents"
       misc: "~/misc"
+    # Files whose year can be read from the name or the content get a
+    # year subfolder in these buckets (e.g. ~/Pictures/2018, ~/pol/2019,
+    # ~/Videos/2026); everything else stays flat. Set year_subfolders to
+    # false to disable, or trim the list to stop specific buckets.
+    year_subfolders: true
+    year_subfolder_categories:
+      - "political"
+      - "pictures"
+      - "videos"
+      - "documents"
     # DeepSeek decides the files local rules can't. Text files only; media
     # reach it as OCR text + Vision scene labels when media_enabled.
     deepseek:
