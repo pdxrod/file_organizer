@@ -668,6 +668,12 @@ class Router:
         entry = self.state["entries"].get(str(p))
         if not isinstance(entry, dict) or not entry.get("category"):
             return False
+        # An applied decision whose file is back at its origin must be
+        # re-decided with the current rules (_already_applied only skips
+        # it when the origin is truly empty again).
+        if entry.get("applied") and entry.get("status") in (
+                "moved", "copied", "duplicate_kept", "duplicate_deleted"):
+            return False
         if strip_trailing_counter(p.name) != p.name:
             return False
         try:

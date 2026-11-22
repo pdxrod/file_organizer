@@ -813,8 +813,14 @@ class SmartSortingTests(unittest.TestCase):
         self.assertTrue(flat.exists())
         self.assertFalse(src.exists())
 
-        # The file reappears at its origin (restored by hand / sync).
+        # The file reappears at its origin (restored by hand / sync),
+        # with the SAME size and mtime the original decision saw — the
+        # staleness check must notice the file is back, not just skip it.
         src = write(self.tmp, "in/" + name, "img")
+        import json as _json, os as _os
+        st = _json.loads(old.state_path.read_text())
+        e = st["entries"][str(src)]
+        _os.utime(src, ns=(e["mtime_ns"], e["mtime_ns"]))
         fresh = make_router(self.tmp, extractor=StubExtractor())
         stats = fresh.run(apply=True)
         self.assertEqual(stats["errors"], 0)
