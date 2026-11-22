@@ -636,12 +636,29 @@ def computer_clean(log):
 
 
 def computer_pull_push_list(log, argv):
-    """ADB phone sync — delegate to src/phone_pull.sh.
+    """ADB phone sync.
 
-    argv[0] is the organize subcommand (pull/push/list); it becomes the
-    matching phone_pull.sh flag (pull is the script's default mode) and
-    the remaining args (--dry-run, --device X, -v) pass straight through.
+    'pull' runs the in-process Python puller: one adb stream and no
+    per-file subprocesses, so thousands of files move in minutes instead
+    of hours. 'push' and 'list' delegate to src/phone_pull.sh; argv[0]
+    maps to its matching flag (--push/--list) and the remaining args
+    pass straight through.
     """
+    if argv and argv[0] == "pull":
+        _insert_src_path()
+        try:
+            from file_organizer.phone_pull import Puller
+            cfg = {}
+            try:
+                from file_organizer.config import Config
+                cfg = Config(str(computer_config_path())).raw_config
+            except Exception:
+                pass  # no/partial config — Puller falls back to defaults
+            ok = Puller(cfg).pull_all()
+            return 0 if ok else 1
+        except Exception as exc:  # noqa: BLE001 — clean adb failure
+            log(f"Phone pull failed: {exc}")
+            return 1
     script = SRC / "phone_pull.sh"
     if not script.exists():
         log(f"Phone sync tool not found: {script}")
