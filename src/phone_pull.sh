@@ -70,7 +70,6 @@ defaults = {
                           'Download', 'Documents', 'Movies', 'Music'],
     'phone_push_dir': 'ProtonDrive/misc',
     'android_base': '/storage/emulated/0',
-    'min_age_minutes': 5,
     'state_file': '',  # empty = <file_organizer folder>/.phone_pull_state
     'include_extensions': [],
     'exclude_extensions': ['.tmp', '.temp', '.partial', '.crdownload', '.part', '.download', '.crypt14', '.pyc', '.log'],
@@ -107,11 +106,6 @@ elif not os.path.isabs(ts):
     ts = os.path.join(local_stage, ts)
 print('TEMP_STAGE=' + shlex.quote(ts))
 print('ANDROID_BASE=' + shlex.quote(pp.get('android_base') or defaults['android_base']))
-try:
-    min_age = int(pp.get('min_age_minutes', defaults['min_age_minutes']))
-except (TypeError, ValueError):
-    min_age = defaults['min_age_minutes']
-print('MIN_AGE_MINUTES=' + shlex.quote(str(min_age)))
 # Local state lives inside the file_organizer folder (next to config.yaml),
 # never in the user's home directory.
 _state_default = os.path.join(os.path.dirname(os.path.abspath('$CONFIG_YAML')),
@@ -149,7 +143,6 @@ eval "$(_load_config)"
 # Fallbacks if config.yaml is missing these (loader usually supplies them)
 : "${TEMP_STAGE:=${LOCAL_STAGE}/.tmp_pull}"
 : "${ANDROID_BASE:=/storage/emulated/0}"
-: "${MIN_AGE_MINUTES:=5}"
 : "${STATE_FILE:=${HOME}/.phone_pull_state}"
 : "${MAIN_DRIVE:=}"
 : "${MISC_DIR:=${LOCAL_STAGE}}"
@@ -253,8 +246,7 @@ DESCRIPTION:
   Push mode (--push): Copies files from remote_stage back to the phone.
 
   Both modes track file modification times to avoid re-copying unchanged
-  files. Files younger than MIN_AGE_MINUTES are skipped to give you time
-  to delete unwanted files before they are synced. A file that already
+  files. A file that already
   exists is NEVER overwritten: identical content is skipped, and a
   DIFFERENT file keeps the existing one and lands as name_1.ext,
   name_2.ext, … (counter just before the extension). Names ending in
@@ -269,7 +261,6 @@ CONFIGURATION:
   - adb_path:     path to the adb binary
   - temp_stage:   temp folder used during pulls (default: <local_stage>/.tmp_pull)
   - android_base: phone shared-storage root (default: /storage/emulated/0)
-  - min_age_minutes: skip files younger than this many minutes
   - state_file:   file tracking last-synced mtimes
   - include_extensions / exclude_extensions: extension filters
 EOF
@@ -397,30 +388,6 @@ get_mtime_key() {
     echo "${1}::${2}"
 }
 
-# ── Age check ────────────────────────────────────────────────────────────────
-
-is_old_enough() {
-    local device_id="$1"
-    local phone_path="$2"
-    local min_age_sec=$((MIN_AGE_MINUTES * 60))
-
-    local mtime
-    mtime=$(adb_t "$ADB" -s "$device_id" shell "stat -c %Y '$phone_path' 2>/dev/null" 2>/dev/null | tr -d '\r\n' || echo "0")
-    local now
-    now=$(adb_t "$ADB" -s "$device_id" shell "date +%s 2>/dev/null" 2>/dev/null | tr -d '\r\n' || echo "0")
-
-    if [[ "$mtime" == "0" || "$now" == "0" ]]; then
-        return 0  # can't determine age — allow it
-    fi
-
-    local age=$((now - mtime))
-    if [[ $age -lt $min_age_sec ]]; then
-        dbg "Skipping (too new, ${age}s old): $phone_path"
-        return 1
-    fi
-    return 0
-}
-
 # ── Pull mode ────────────────────────────────────────────────────────────────
 
 do_pull() {
@@ -545,10 +512,6 @@ do_pull() {
     # ── Phase 2: Map staging subfolders to computer folders (item 12b) ──
     info "Phase 2: Mapping staging subfolders to computer folders..."
 
-    local min_age_sec=$((MIN_AGE_MINUTES * 60))
-    local now_sec
-    now_sec=$(date +%s)
-
     # Detect stat flavour (BSD/macOS vs GNU/Linux)
     local stat_mtime_flag stat_size_flag
     if stat -f %m "$TEMP_STAGE" 2>/dev/null >/dev/null; then
@@ -592,16 +555,10 @@ do_pull() {
             [[ "$skip" == "true" ]] && continue
         fi
 
-        # Age check (tar preserves mtime, so local stat is fine)
+        # State check (skip if mtime hasn't changed since last pull)
         local file_mtime
         file_mtime=$(stat $stat_mtime_flag "$temp_file" 2>/dev/null || echo "0")
-        local file_age=$((now_sec - file_mtime))
-        if [[ $file_age -lt $min_age_sec ]]; then
-            dbg "Skipping (too new, ${file_age}s old): $fname"
-            continue
-        fi
 
-        # State check (skip if mtime hasn't changed since last pull)
         local state_key="${device_id}::${phone_path}"
         local last_mtime
         last_mtime=$(echo "$state" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('$state_key', 0))" 2>/dev/null || echo "0")

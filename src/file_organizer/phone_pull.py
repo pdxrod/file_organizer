@@ -17,7 +17,6 @@ Behaviour mirrors the old script's pull:
     a same-named folder under MAIN_DRIVE, then misc)
   - never overwrites: identical content is skipped, a different file
     lands as name_1.ext etc.
-  - skips files younger than phone_pull.min_age_minutes
   - tracks last-seen mtimes in a state file so unchanged files are not
     re-copied
 
@@ -73,7 +72,6 @@ class Puller:
         self.source_dirs = pp.get("phone_source_dirs") or DEFAULT_SOURCE_DIRS
         local_stage = _resolve(pp.get("local_stage") or "~/misc", drives)
         self.local_stage = Path(local_stage)
-        self.min_age_seconds = int(pp.get("min_age_minutes", 5) or 0) * 60
         self.hold = bool(pp.get("hold_app_generated_names", True))
         self.normalise = bool(pp.get("normalise_leading_dates", True))
         self.staging_map = resolve_staging_map(
@@ -268,10 +266,6 @@ class Puller:
         if self.normalise:
             dest_fname = normalise_leading_date(dest_fname)
         dest_fname = normalize_copy_counter(dest_fname)
-
-        age = time.time() - (member.mtime or 0)
-        if self.min_age_seconds and age < self.min_age_seconds:
-            return "skipped"
 
         key = f"{serial}::{self.android_base}/{name}"
         if self.state.get(key) == member.mtime:

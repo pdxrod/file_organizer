@@ -466,9 +466,6 @@ computer:
     temp_stage: ".tmp_pull"
     # Android shared-storage root on the phone (Termux: /storage/emulated/0).
     android_base: "/storage/emulated/0"
-    # Skip files younger than this many minutes (grace period to delete junk
-    # before it gets pulled).
-    min_age_minutes: 5
     # ── Item 12b: staging subfolder → computer folder mapping ──────────────
     # Pulled files KEEP their staging subfolder structure. Each subfolder is
     # mapped to a computer folder like this:

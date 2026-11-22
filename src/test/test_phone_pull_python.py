@@ -62,7 +62,6 @@ class PullerTests(unittest.TestCase):
                 "android_base": "/storage/emulated/0",
                 "phone_source_dirs": ["file_organizer_test_staging"],
                 "local_stage": str(self.main / "misc"),
-                "min_age_minutes": 0,
                 "hold_app_generated_names": True,
                 "normalise_leading_dates": True,
                 "state_file": str(self.tmp / "state.json"),

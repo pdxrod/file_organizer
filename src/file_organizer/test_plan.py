@@ -207,9 +207,6 @@ def run_computer_test() -> int:
         raw = dict(real_cfg.raw_config)
         raw["sync_pairs"] = [{"folders": [str(sync_a), str(sync_b)]}]
         raw["one_way_pairs"] = [{"folders": [str(ow_src), str(ow_dst)]}]
-        raw["phone_pull"]["min_age_minutes"] = 0  # fresh files copy at once
-        # Pull only the test's own staging folder on the phone — never
-        # the real one (which may hold hundreds of real photos).
         raw["phone_pull"]["phone_source_dirs"] = ["file_organizer_test_staging"]
         test_cfg.write_text(yaml.safe_dump(raw, sort_keys=False))
     except Exception as exc:

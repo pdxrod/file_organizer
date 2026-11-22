@@ -163,7 +163,6 @@ DEFAULTS: Dict[str, Any] = {
         "adb_path": "adb",
         "temp_stage": "",  # empty = <local_stage>/.tmp_pull
         "android_base": "/storage/emulated/0",
-        "min_age_minutes": 5,
         "state_file": "",  # empty = <file_organizer folder>/.phone_pull_state
         "phone_source_dirs": ["file_organizer_staging"],
         "phone_push_dir": "file_organizer_staging",
