@@ -311,7 +311,7 @@ computer:
   # can't kill the whole pair (each chunk gets its own timeout).
   sync_chunk_subfolders: 30
   sync_chunk_concurrency: 1
-  sync_timeout_minutes: 60
+  sync_timeout_minutes: 10
 
   # Cross-device sync coordination: before syncing a pair, a small
   # .file_organizer.sync.lock marker is written to the SHARED side of the

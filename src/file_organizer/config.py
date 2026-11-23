@@ -115,7 +115,7 @@ DEFAULTS: Dict[str, Any] = {
     "max_drive_usage_percent": 90,
     "sync_chunk_subfolders": 30,
     "sync_chunk_concurrency": 1,
-    "sync_timeout_minutes": 60,
+    "sync_timeout_minutes": 10,
     # Cross-device sync coordination: a small .file_organizer.sync.lock
     # marker in the shared side of each pair stops two machines from
     # rsyncing the same cloud/external folder at the same time. The second
