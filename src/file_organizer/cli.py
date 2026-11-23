@@ -4,7 +4,7 @@
 import os, sys, argparse, logging, signal, subprocess, time, yaml
 from pathlib import Path
 
-from file_organizer.config import Config, ConfigError, report_first_run, resolve_log_path, find_project_root, ensure_output_dir
+from file_organizer.config import Config, ConfigError, report_first_run, resolve_log_path, find_project_root, ensure_output_dir, CONFIG_VERSION
 from file_organizer.scanner import FileScanner
 from file_organizer.analyzer import ContentAnalyzer
 from file_organizer.organizer import Organizer
@@ -469,6 +469,24 @@ def main(argv=None):
             "changes config.yaml section by section for you. (Or open the\n"
             "file in TextEdit (Mac), Notepad (Windows) or nano (Termux),\n"
             "fix the problem above, then run again.)\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if config.outdated:
+        print(
+            "\nERROR: config.yaml is out of date.\n"
+            f"\n  config_version: {config.config_version} — "
+            f"this organize expects {CONFIG_VERSION}",
+            file=sys.stderr,
+        )
+        for section in config.outdated_sections:
+            print(f"  missing section: '{section}'", file=sys.stderr)
+        print(
+            "\nAdd the missing section(s) to config.yaml — copy them "
+            "from\nconfig_template.yaml (for example the 'tidy:' section "
+            "with its\nexclude_folders list) and set 'config_version: 1' "
+            "at the top of\nconfig.yaml.\n"
+            "\nExiting without changing anything.\n",
             file=sys.stderr,
         )
         sys.exit(1)

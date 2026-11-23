@@ -186,6 +186,19 @@ class ConfigError(Exception):
     """Configuration error."""
 
 
+# Bump this when a release adds config sections that older configs
+# don't have. Organize refuses to start with an out-of-date config
+# instead of silently running with the wrong settings.
+CONFIG_VERSION = 1
+
+# Sections each config version introduced. Every section listed here
+# must exist (as a mapping) in any config, old or new — a missing one
+# means the config predates the feature or was hand-damaged.
+CONFIG_REQUIRED_SECTIONS = {
+    1: ("tidy",),
+}
+
+
 # Template placeholders that mean "this config has not been personalised yet".
 # A config copied from config_template.yaml and not edited still contains
 # paths like /Users/janedoe or /Volumes/YourExternalDrive. If such a path
@@ -237,6 +250,23 @@ class Config:
                 self._raw = loaded
         else:
             self._raw = {}
+
+        # Config-age gate: organize refuses to start with an out-of-date
+        # config (see CONFIG_VERSION). Computed here so every caller can
+        # check one place.
+        self.config_version = self._raw.get("config_version")
+        if not isinstance(self.config_version, int):
+            self.config_version = 0
+        self.outdated_sections = [
+            section
+            for sections in CONFIG_REQUIRED_SECTIONS.values()
+            for section in sections
+            if not isinstance(self._raw.get(section), dict)
+        ]
+        self.outdated = (
+            self.config_version < CONFIG_VERSION
+            or bool(self.outdated_sections)
+        )
 
         # Merge with defaults (user values take precedence)
         merged = dict(DEFAULTS)
