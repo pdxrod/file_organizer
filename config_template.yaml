@@ -378,6 +378,20 @@ computer:
   #   Set false to disable.
   dedupe_download_copies: true
 
+  # ── Tidy (generic folder cleanup) ────────────────────────────────────
+  # './organize tidy' normalises folder names ('3 Lee Morgan' + '3Lee'
+  # Morgan -> 'LeeMorgan'), merges twins, flattens excessive nesting,
+  # strips leading numbers from file names and tidies audio by metadata.
+  # Folders listed below are never touched (or anything inside them) —
+  # e.g. software projects or legal files whose names are meaningful.
+  # Add 'MAIN_DRIVE/Music' here if you do NOT want your music tidied in
+  # this style; users without a ~/Music folder simply get the other
+  # folders tidied.
+  tidy:
+    exclude_folders:
+      - MAIN_DRIVE/dev
+      - MAIN_DRIVE/Documents
+
   # ── Router (smart classification by name AND content) ────────────────────
   # The router works out where a file should go from its name and contents:
   #   political      -> ~/pol       (politics, geopolitics, culture war…)
@@ -404,6 +418,16 @@ computer:
       - "MAIN_DRIVE/Desktop"
     # Classify new watch-folder files on every production cycle.
     watch_on_cycles: true
+    # Folders './organize rename-by-content' sweeps for files with
+    # auto-generated names (4665.jpg, IMG-…, Screenshot_…, DSC…). The
+    # content becomes the new name (images are OCR'd; text/PDF/office
+    # files are read directly). Empty means pictures, political and
+    # documents targets.
+    rename_folders: []
+    # Folders './organize tidy' moves dated files in (top level plus one
+    # level of non-year subfolders) into <folder>/<year>/ subfolders.
+    # Empty means political, pictures, videos and documents.
+    year_folders: []
     # Where each category goes (defaults shown; change as you like).
     target_folders:
       political: "~/pol"

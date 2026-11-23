@@ -82,6 +82,10 @@ COMPUTER_COMMANDS = {
     "route-real": ["--REAL", "--route"],      # …and actually move them
     "route-status": ["--route-status"],
     "route-undo": ["--REAL", "--route-undo"], # put the last moves back
+    "rename-by-content": ["--rename-by-content"],       # plan OCR renames
+    "rename-by-content-real": ["--REAL", "--rename-by-content"],  # apply
+    "tidy": ["--tidy"],                              # everything in one
+    "tidy-real": ["--REAL", "--tidy"],              # …and actually apply
     "sort": ["--route"],                      # plain-word alias of route
     "sort-real": ["--REAL", "--route"],       # alias of route-real
     "sort-status": ["--route-status"],        # alias of route-status
@@ -93,6 +97,8 @@ COMPUTER_PASSTHROUGH = (
     "--REAL", "--scan-once", "--sync-only", "--dedupe-only",
     "--git-preview", "--git-init", "--cleanup",
     "--route", "--route-status", "--route-undo",
+    "--rename-by-content",
+    "--tidy",
     "-v", "--verbose", "--config", "-h", "--help",
 )
 
@@ -857,6 +863,13 @@ def usage(platform):
             "  ./organize route-real    do it — actually move files into place",
             "  ./organize route-status  show the plan / decisions so far",
             "  ./organize route-undo    put the last moved files back",
+            "  ./organize rename-by-content  rename generic-named images",
+            "                              from their OCR text (plan only)",
+            "  ./organize rename-by-content-real  do it — actually rename them",
+            "  ./organize tidy           ONE command: OCR renames + year",
+            "                              subfolders + folder tidy + Music",
+            "                              mirror to Proton Drive (plan)",
+            "  ./organize tidy-real      do it — apply everything at once",
             "  (sort, sort-real, sort-status, sort-undo are the same commands)",
             "  ./organize setup         first-time setup (config + report)",
             "  ./organize config        change config.yaml section by section —",
@@ -869,7 +882,7 @@ def usage(platform):
             "Flags: --REAL means 'actually do it' — without it, commands only",
             "  plan. Others: scan-once, sync-only, dedupe-only, git-preview,",
             "  git-init, cleanup, collapse-renames, route, route-status,",
-            "  route-undo, config FILE, verbose",
+            "  route-undo, rename-by-content, tidy, config FILE, verbose",
             "",
             "USB debugging (phone → computer over USB):",
             "  1. Phone: Settings → About phone → tap 'Build number' 7 times",

@@ -97,6 +97,79 @@ _IN_PROGRESS_SUFFIXES = (
     ".crdownload", ".part", ".download", ".tmp", ".temp", ".partial",
 )
 
+# ── content rename ────────────────────────────────────────────────────
+# Stems that look auto-generated (digits only, camera counters, WhatsApp
+# media, timestamp screenshots, …). Only these are ever renamed from OCR
+# text; anything with a human-made name is left alone.
+_GENERIC_STEM_PATTERNS = [
+    re.compile(r"^\d{1,8}$"),                          # 4665
+    re.compile(r"^img[-_]\d{8,}[-_]wa\d+$", re.I),     # IMG-20240219-WA0000
+    re.compile(r"^screenshot[-_]?[0-9_-]+$", re.I),    # Screenshot_20250831…
+    re.compile(r"^dscn?\d{4,}$", re.I),                # DSC01234 / DCN…
+    re.compile(r"^received_\d+$", re.I),               # received_1061…
+    re.compile(r"^messenger_creation_[0-9a-f-]+$", re.I),
+    re.compile(r"^file_[0-9a-f]{16,}$", re.I),         # file_0000…bde4
+    re.compile(r"^photo(-|_)?\d*$", re.I),             # photo, photo-2
+    re.compile(r"^\d{1,8}\s*\(#.*#\)$"),              # 5079 (# Edit conflict … #)
+]
+
+# File types whose CONTENT can supply a better name: images via OCR,
+# text/PDF/office via plain extraction. Code files are excluded — their
+# first line is source, not a name.
+_RENAME_EXTS = (IMAGE_EXTS | TEXT_EXTS | HTML_EXTS | OFFICE_EXTS
+                | DOC_EXTS) - CODE_EXTS
+
+# Words that never START a name built from OCR text.
+_NAME_STOPWORDS = {
+    "the", "a", "an", "of", "and", "to", "in", "on", "at", "is", "are",
+    "with", "for", "from", "by", "or", "it", "as", "be",
+    "this", "that", "not", "but", "if", "so", "https", "http", "www",
+    "com", "png", "jpg", "jpeg",
+}
+
+
+def _html_title(path: Path) -> str:
+    """The <title> of a saved HTML page, or '' when absent."""
+    try:
+        head = path.read_text(encoding="utf-8", errors="ignore")[:200000]
+    except OSError:
+        return ""
+    m = re.search(r"<title[^>]*>(.*?)</title>", head, re.I | re.S)
+    if not m:
+        return ""
+    return re.sub(r"\s+", " ", m.group(1)).strip()
+
+
+def _name_from_text(text: str, max_len: int = 48) -> str:
+    """A lowercase slug from the first meaningful OCR words.
+
+    Word order is the OCR line order; the slug stops before it would
+    exceed max_len characters. Digit-only and one-letter tokens (OCR
+    noise like '17:54', 'A', '2') are dropped, and a leading stopword
+    is dropped too ('the-cat' → 'cat').
+    """
+    if not text:
+        return ""
+    words = []
+    for token in re.split(r"[^A-Za-z0-9']+", text):
+        t = token.replace("'", "").lower()
+        if not t or t.isdigit() or len(t) == 1:
+            continue
+        if not re.search(r"[a-z]", t):
+            continue
+        if not words and t in _NAME_STOPWORDS:
+            continue
+        words.append(t)
+    parts = []
+    length = 0
+    for t in words:
+        add = len(t) + (1 if parts else 0)
+        if parts and length + add > max_len:
+            break
+        parts.append(t)
+        length += add
+    return "-".join(parts)
+
 # ── keyword tiers ─────────────────────────────────────────────────────
 # STRONG words/phrases: one hit decides. WEAK: need two distinct hits.
 # Phrases with spaces are matched as substrings of the (lowercased) text;
@@ -342,6 +415,61 @@ class Router:
             for p in (raw.get("watch_folders") or [])
         ]
         self.watch_on_cycles = bool(raw.get("watch_on_cycles", True))
+
+        # Content-rename roots: the folders 'rename-by-content' sweeps
+        # for generic-named files. Defaults to the pictures, political
+        # and documents targets.
+        rename_raw = raw.get("rename_folders")
+        if rename_raw:
+            self.rename_folders = [
+                Path(config._resolve_path(p)).expanduser()
+                for p in rename_raw
+            ]
+        else:
+            self.rename_folders = [
+                self.targets.get(c)
+                for c in ("pictures", "political", "documents")
+                if self.targets.get(c)
+                and str(self.targets.get(c)) not in ("", ".")
+            ]
+
+        # Year-sort roots: 'tidy' moves dated files from these folders
+        # into <root>/<year>/. Defaults to the political, pictures,
+        # videos and documents targets.
+        yr_raw = raw.get("year_folders")
+        if yr_raw:
+            self.year_folders = [
+                Path(config._resolve_path(p)).expanduser() for p in yr_raw
+            ]
+        else:
+            self.year_folders = [
+                self.targets.get(c)
+                for c in ("political", "pictures", "videos", "documents")
+                if self.targets.get(c)
+                and str(self.targets.get(c)) not in ("", ".")
+            ]
+
+        # Tidy excludes: './organize tidy' never touches these folders
+        # (or anything inside them). They also gate the rename and
+        # year passes.
+        tidy_cfg = self.config.raw_config.get("tidy") or {}
+        excl_raw = tidy_cfg.get("exclude_folders") or []
+        self.tidy_excludes = [
+            Path(config._resolve_path(p)).expanduser().resolve()
+            for p in excl_raw
+        ]
+
+        def _tidy_excluded(root: Path) -> bool:
+            rr = root.expanduser().resolve()
+            return any(e == rr or e in rr.parents
+                       for e in self.tidy_excludes)
+
+        self.rename_folders = [
+            r for r in self.rename_folders if not _tidy_excluded(r)
+        ]
+        self.year_folders = [
+            r for r in self.year_folders if not _tidy_excluded(r)
+        ]
 
         # Precompute resolved paths so _excluded stays cheap per file.
         # Empty targets are skipped: Path("").resolve() is the CWD, which
@@ -1242,6 +1370,211 @@ class Router:
             return self._empty_stats()
         return self.run(roots=self.watch_folders, apply=apply,
                         watch_only=True)
+
+    def rename_pass(self, apply: bool = False) -> dict:
+        """Rename generic-named images from their OCR text.
+
+        Only auto-generated names (4665.jpg, IMG-…, Screenshot_…, DSC…)
+        are candidates, and only when the OCR text yields a usable slug.
+        Safe: nothing is renamed unless apply=True. Idempotent: renamed
+        files no longer match the generic patterns, so re-runs move on
+        to the next batch until the OCR budget is spent.
+        """
+        stats = {
+            "scanned": 0, "eligible": 0, "renamed": 0, "ocr_used": 0,
+            "skipped": 0, "renames": [],
+        }
+        if not self.rename_folders:
+            logger.info("router rename: no rename_folders — set "
+                        "router.rename_folders in config.yaml "
+                        "(defaults to the pictures target)")
+            return stats
+        files: list = []
+        for root in self.rename_folders:
+            if not root.exists():
+                logger.warning("router rename: root missing: %s", root)
+                continue
+            try:
+                for p in root.rglob("*"):
+                    if not p.is_file() or p.is_symlink():
+                        continue
+                    if p.name.startswith("."):
+                        continue
+                    if _suffix(p.name) not in _RENAME_EXTS:
+                        continue
+                    try:
+                        parts = p.relative_to(root).parts[:-1]
+                    except ValueError:
+                        continue
+                    # Never rename inside dot-dirs or photo libraries
+                    # (renaming Photos library internals corrupts it).
+                    if any(part.startswith(".")
+                           or part.endswith(".photoslibrary")
+                           for part in parts):
+                        continue
+                    files.append(p)
+            except PermissionError:
+                logger.warning("router rename: no permission to read %s "
+                               "— grant Full Disk Access to your terminal",
+                               root)
+        files.sort(key=lambda p: (str(p.parent), p.name.lower()))
+        stats["scanned"] = len(files)
+        for p in files:
+            if not any(rx.fullmatch(p.stem)
+                       for rx in _GENERIC_STEM_PATTERNS):
+                continue
+            stats["eligible"] += 1
+            # Skip files we already know have no readable text (same
+            # size + mtime) so every tidy run doesn't re-OCR them.
+            ent = self.state["entries"].get(str(p))
+            try:
+                st = p.stat()
+            except OSError:
+                st = None
+            if (st is not None
+                    and isinstance(ent, dict)
+                    and ent.get("rename_skipped") == "no_text"
+                    and ent.get("mtime_ns") == st.st_mtime_ns
+                    and ent.get("size") == st.st_size):
+                stats["skipped"] += 1
+                continue
+            ext = _suffix(p.name)
+            if ext in IMAGE_EXTS:
+                if not self.ocr_enabled or self._ocr_used >= self.ocr_budget:
+                    stats["skipped"] += 1
+                    continue
+                self._ocr_used += 1
+                stats["ocr_used"] += 1
+            try:
+                data = self.extractor.extract(p)
+                text = data.get("text", "")
+            except Exception as e:
+                logger.warning("router rename: extract %s failed: %s", p, e)
+                text = ""
+            if ext in HTML_EXTS:
+                # Saved articles: the <title> is the real name; pages
+                # without one (ad frames, dumps) are left alone.
+                text = _html_title(p)
+            slug = _name_from_text(text)
+            if len(slug) < 4 or not re.search(r"[a-z]", slug):
+                stats["skipped"] += 1
+                self._entry(p)["rename_skipped"] = "no_text"
+                continue
+            # Keep a leading full date so the day isn't lost:
+            # 20261121.pdf -> 20261121-<slug>.pdf (still year-sorts).
+            mdate = _LEADING_8DIGIT.match(p.stem)
+            if mdate:
+                slug = f"{mdate.group(1)}-{slug}"
+            new_name = slug + ext
+            if new_name.lower() == p.name.lower():
+                stats["skipped"] += 1
+                continue
+            dest = p.with_name(new_name)
+            if dest.exists():
+                dest = p.with_name(next_free_name(p.parent, new_name))
+            if not apply:
+                stats["renames"].append(f"{p.name} -> {dest.name}")
+                continue
+            try:
+                os.replace(str(p), str(dest))
+                logger.info("router rename: %s -> %s", p, dest)
+                stats["renamed"] += 1
+                stats["renames"].append(f"{p.name} -> {dest.name}")
+            except OSError as e:
+                logger.error("router rename: %s -> %s failed: %s",
+                             p, dest, e)
+                stats["skipped"] += 1
+        self._save_state()
+        return stats
+
+    def year_pass(self, apply: bool = False) -> dict:
+        """Sort dated files into <root>/<year>/ (e.g. ~/pol/2026).
+
+        Files directly in a year-folder root are considered, plus files
+        one level down inside NON-year folders ('pol/SomeFolder/2026…').
+        Files already inside a year folder are left alone. The year
+        comes from the name (20260207_…, …-2024-…, 01-06-18-…), never
+        from mtime.
+        """
+        stats = {"scanned": 0, "moved": 0, "skipped": 0, "moves": []}
+        for root in self.year_folders:
+            if not root.exists():
+                logger.warning("router year: root missing: %s", root)
+                continue
+            try:
+                entries = sorted(root.iterdir(), key=lambda p: p.name.lower())
+            except PermissionError:
+                logger.warning("router year: no permission to read %s", root)
+                continue
+            for p in entries:
+                if (p.is_file() and not p.is_symlink()
+                        and not p.name.startswith(".")):
+                    self._year_candidate(root, p, apply, stats)
+                    continue
+                # One level deeper: dated files inside a non-year folder.
+                if (p.is_dir() and not p.is_symlink()
+                        and not p.name.startswith(".")
+                        and not re.fullmatch(r"\d{4}", p.name)):
+                    try:
+                        for f in sorted(p.iterdir(),
+                                        key=lambda q: q.name.lower()):
+                            if (f.is_file() and not f.is_symlink()
+                                    and not f.name.startswith(".")):
+                                self._year_candidate(root, f, apply, stats)
+                    except PermissionError:
+                        pass
+        return stats
+
+    def _year_candidate(self, root, p, apply, stats) -> None:
+        stats["scanned"] += 1
+        year = _year_from_name(p.name)
+        if not year:
+            stats["skipped"] += 1
+            return
+        dest_dir = root / year
+        dest = dest_dir / p.name
+        if dest.exists():
+            if (dest.stat().st_size == p.stat().st_size
+                    and self._files_equal(dest, p)):
+                stats["moves"].append(
+                    f"{p.name} -> delete (identical copy already "
+                    f"in {year}/)")
+                if apply:
+                    try:
+                        p.unlink(missing_ok=True)
+                        logger.info(
+                            "router year: deleted duplicate %s "
+                            "(same as %s)", p, dest)
+                    except OSError as e:
+                        stats["skipped"] += 1
+                        logger.error("router year: unlink %s "
+                                     "failed: %s", p, e)
+                return
+            dest = dest_dir / next_free_name(dest_dir, p.name)
+        stats["moves"].append(f"{p.name} -> {year}/{dest.name}")
+        if not apply:
+            return
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            os.replace(str(p), str(dest))
+            stats["moved"] += 1
+            logger.info("router year: %s -> %s", p, dest)
+        except OSError as e:
+            stats["skipped"] += 1
+            logger.error("router year: %s -> %s failed: %s",
+                         p, dest, e)
+
+    def tidy_roots(self) -> list:
+        """Every category target, minus tidy.exclude_folders."""
+        def _excluded(root: Path) -> bool:
+            rr = root.expanduser().resolve()
+            return any(e == rr or e in rr.parents
+                       for e in self.tidy_excludes)
+
+        return [
+            t for t in self.targets.values()
+            if t and str(t) not in ("", ".") and not _excluded(t)
+        ]
 
     def undo(self, count: Optional[int] = None) -> list:
         """Put the most recently routed files back where they came from."""

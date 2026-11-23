@@ -412,6 +412,14 @@ def main(argv=None):
                         default=None, metavar="N",
                         help="Undo the last N router moves (all if no N); "
                              "moves files back only with --REAL")
+    parser.add_argument("--rename-by-content", action="store_true",
+                        help="Rename images with auto-generated names "
+                             "(4665.jpg, IMG-…, Screenshot_…) from their "
+                             "OCR text — plan unless --REAL")
+    parser.add_argument("--tidy", action="store_true",
+                        help="One-command tidy: OCR renames, year-sort, "
+                             "folder tidy, and a Music mirror to Proton "
+                             "Drive — plan unless --REAL")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     # Flags are case-insensitive and dashes are optional (real/-real/
@@ -602,6 +610,101 @@ def main(argv=None):
                       f"lines above (e.g. disk full or permissions).")
             print("Changed your mind? './organize route-undo' puts the "
                   "last moves back.")
+        return
+
+    if args.rename_by_content:
+        from file_organizer.router import Router
+        router = Router(config)
+        roots_desc = ", ".join(
+            str(r) for r in router.rename_folders) or "?"
+        print("=== Rename-by-content plan — nothing renamed yet ==="
+              if not real_mode
+              else "=== Renaming images from their text ===")
+        print(f"Sweeping: {roots_desc}")
+        stats = router.rename_pass(apply=real_mode)
+        print(f"Scanned {stats['scanned']} image(s); "
+              f"{stats['eligible']} had auto-generated names; "
+              f"OCR read {stats['ocr_used']} of them.")
+        if stats["renames"]:
+            verb = "Renamed" if real_mode else "Would rename"
+            print(f"\n{verb} {len(stats['renames'])} file(s):")
+            for line in stats["renames"][:200]:
+                print(f"  {line}")
+            if len(stats["renames"]) > 200:
+                print(f"  … and {len(stats['renames']) - 200} more")
+        else:
+            print("\nNo renames planned — nothing matched the generic "
+                  "name patterns or no readable text was found.")
+        if not real_mode:
+            print("\nNothing was renamed — this is just a plan.")
+            print("Run './organize rename-by-content-real' to rename for "
+                  "real.")
+        return
+
+    if args.tidy:
+        from file_organizer.router import Router
+        from file_organizer.tidy import tidy_folders
+        from file_organizer.sync_engine import SyncEngine
+        router = Router(config)
+        print("=== Tidy plan — nothing changed yet ===" if not real_mode
+              else "=== Tidy — applying ===")
+
+        print("\n[1/4] Rename generic-named images from OCR text:")
+        r = router.rename_pass(apply=real_mode)
+        print(f"  scanned {r['scanned']}, eligible {r['eligible']}, "
+              f"renames planned {len(r['renames'])}")
+        for line in r["renames"][:40]:
+            print(f"    {line}")
+        if len(r["renames"]) > 40:
+            print(f"    … and {len(r['renames']) - 40} more")
+
+        print("\n[2/4] Sort dated files into year subfolders:")
+        y = router.year_pass(apply=real_mode)
+        print(f"  scanned {y['scanned']}, moves planned {len(y['moves'])}")
+        for line in y["moves"][:40]:
+            print(f"    {line}")
+        if len(y["moves"]) > 40:
+            print(f"    … and {len(y['moves']) - 40} more")
+
+        music_root = Path(
+            config._resolve_path("MAIN_DRIVE/Music")).expanduser()
+        print("\n[3/4] Tidy folders:")
+        tidy_roots = router.tidy_roots()
+        print(f"  roots: {', '.join(str(r) for r in tidy_roots)}")
+        if router.tidy_excludes:
+            print(f"  excluded: "
+                  f"{', '.join(str(e) for e in router.tidy_excludes)}")
+        m = tidy_folders(tidy_roots, excludes=router.tidy_excludes,
+                         apply=real_mode)
+        for key, label in (
+            ("merged", "merges"), ("renamed_dirs", "folder renames"),
+            ("flattened", "flattens"), ("removed_dirs", "empty folders"),
+            ("file_renames", "file renames"), ("file_moves", "file moves"),
+            ("dupes_deleted", "duplicate files"),
+        ):
+            lst = m[key]
+            print(f"  {label}: {len(lst)}")
+            for line in lst[:25]:
+                print(f"    {line}")
+            if len(lst) > 25:
+                print(f"    … and {len(lst) - 25} more")
+        if m["errors"]:
+            print(f"  errors: {m['errors']}")
+
+        proton_music = Path(
+            config._resolve_path("PROTON_DRIVE/Music")).expanduser()
+        print("\n[4/4] Sync: ~/Music -> Proton Drive Music (mirror)")
+        if real_mode:
+            se = SyncEngine(config)
+            ok = se.sync_one_way(music_root, proton_music, delete=True)
+            print("  sync " + ("OK" if ok else "FAILED — see log"))
+        else:
+            print("  (would mirror ~/Music to Proton Drive, deleting "
+                  "Proton-only files)")
+
+        if not real_mode:
+            print("\nNothing was changed — this is just a plan.")
+            print("Run './organize tidy-real' to apply everything.")
         return
 
     if args.sync_only and real_mode:
