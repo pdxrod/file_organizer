@@ -1113,7 +1113,9 @@ def apply_rename(filepath: Path, new_name: str) -> Path:
         raise ValueError(f"'{new_name}' is not a plain file name")
     old_suffix = filepath.suffix
     if old_suffix and not Path(new_name).suffix:
-        new_name += old_suffix
+        # A stray trailing dot left after clearing the prefill must not
+        # produce 'notes..jpg' — strip it before appending.
+        new_name = new_name.rstrip(".") + old_suffix
     target = filepath.parent / new_name
     if target.exists():
         raise ValueError(f"'{target.name}' already exists — not overwriting")

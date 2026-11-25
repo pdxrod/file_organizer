@@ -36,6 +36,20 @@ class ApplyRenameTests(unittest.TestCase):
         self.assertTrue(new.exists())
         self.assertFalse(p.exists())
 
+    def test_screenshot_example_keeps_jpg(self):
+        # The owner's rule: Screenshot_20261125_X.jpg + '20261125_foobar'
+        # -> 20261125_foobar.jpg.
+        p = self._file("Screenshot_20261125_X.jpg")
+        new = apply_rename(p, "20261125_foobar")
+        self.assertEqual(new.name, "20261125_foobar.jpg")
+
+    def test_trailing_dot_does_not_double_the_extension(self):
+        # A stray dot left after clearing the prefill gives notes.jpeg,
+        # not notes..jpeg.
+        p = self._file("shot.jpeg")
+        new = apply_rename(p, "notes.")
+        self.assertEqual(new.name, "notes.jpeg")
+
     def test_explicit_extension_wins(self):
         p = self._file("shot.jpeg")
         new = apply_rename(p, "scan.pdf")
