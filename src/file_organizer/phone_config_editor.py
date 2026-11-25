@@ -99,8 +99,7 @@ DEFAULTS: Dict[str, Any] = {
                              ".stack-work", "_build", "deps", "ebin", "dist",
                              "build", "target", ".bundle", "vendor", "bundle",
                              "priv/static", ".gradle", ".m2", "tmp/cache"],
-    "exclude_folder_patterns": ["line", "twitter", "gmail", "whatsapp",
-                                "telegram"],
+    "exclude_folder_patterns": ["line", "twitter", "gmail", "telegram"],
     "delete_after_copy": False,
     "prune_max_age_days": 30,
 }

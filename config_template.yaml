@@ -829,11 +829,13 @@ phone:
   # but FILES with these words in their names are still copied. This is how
   # messenger folders (LINE, Twitter, etc.) are excluded without losing a
   # file like airline-ticket.pdf. Case-insensitive substring match.
+  # WhatsApp is deliberately NOT listed: the template scans
+  # Pictures/WhatsApp (see source_directories), so its downloads can be
+  # renamed and copied. Add "whatsapp" here if you'd rather skip it.
   exclude_folder_patterns:
     - "line"
     - "twitter"
     - "gmail"
-    - "whatsapp"
     - "telegram"
 
   # ── Delete after copy? ─────────────────────────────────────────────────────
