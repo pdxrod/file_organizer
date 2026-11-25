@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -36,6 +37,7 @@ import time
 from pathlib import Path
 
 from file_organizer.config import map_staging_path, resolve_staging_map
+from file_organizer.credential_guard import file_contains_secret
 from file_organizer.filename_rules import (
     is_app_generated,
     normalise_leading_date,
@@ -67,7 +69,15 @@ class Puller:
         drives = (cfg or {}).get("drives", {}) or {}
         self.drives = drives
         self.quiet = quiet
-        self.adb = _resolve(pp.get("adb_path") or "adb", drives)
+        adb = _resolve(pp.get("adb_path") or "adb", drives)
+        self.path_adb = shutil.which("adb") or ""
+        if not (os.path.isfile(adb) and os.access(adb, os.X_OK)):
+            if self.path_adb:
+                self._warn(
+                    f"adb_path '{adb}' not found — using adb from "
+                    f"PATH ({self.path_adb})")
+                adb = self.path_adb
+        self.adb = adb
         self.android_base = pp.get("android_base") or "/storage/emulated/0"
         self.source_dirs = pp.get("phone_source_dirs") or DEFAULT_SOURCE_DIRS
         local_stage = _resolve(pp.get("local_stage") or "~/misc", drives)
@@ -128,6 +138,12 @@ class Puller:
         rc, out = self._adb("devices")
         if not out.strip():
             self._warn("adb did not respond — restarting the adb server")
+            self._adb("kill-server", timeout=10)
+            rc, out = self._adb("devices")
+        if not out.strip() and self.path_adb and self.path_adb != self.adb:
+            self._warn(f"configured adb is not responding — trying "
+                       f"{self.path_adb}")
+            self.adb = self.path_adb
             self._adb("kill-server", timeout=10)
             rc, out = self._adb("devices")
         if not out.strip():
@@ -283,6 +299,10 @@ class Puller:
         # Extract to a temp file first (never write over an existing file).
         tar.extract(member, tmp)
         extracted = Path(tmp) / name
+        # Credentials are never pulled off the phone, whatever their name.
+        if file_contains_secret(extracted):
+            self._warn(f"  {name} -> SKIPPED (looks like a credential file)")
+            return "skipped"
         try:
             if not dest.exists():
                 os.replace(str(extracted), str(dest))
