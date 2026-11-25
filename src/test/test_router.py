@@ -192,6 +192,18 @@ class ContentKeywordTests(unittest.TestCase):
         r.run()
         self.assertEqual(category_of(r, "diary.txt"), "documents")
 
+    def test_phrase_hint_on_builtin_category(self):
+        # A user-added hint with spaces matches as a phrase, e.g.
+        # 'donald trump' decides political for 'Donald Trump said…'.
+        write(self.tmp, "in/letter.txt", "Donald Trump said something new.")
+        r = make_router(self.tmp, extractor=StubExtractor({
+            "letter.txt": {"text": "Donald Trump said something new.",
+                           "meta": {}},
+        }), keywords={"political": ["donald trump"]})
+        r.run()
+        entry = r.state["entries"][str(self.tmp / "in" / "letter.txt")]
+        self.assertEqual(entry["category"], "political")
+
     def test_indigenous_politics_content(self):
         # Boat people / stolen generations / native title: political even
         # when the filename says nothing.
@@ -546,6 +558,23 @@ class ExclusionTests(unittest.TestCase):
         finally:
             router_mod.find_project_root = original
 
+    def test_credential_content_never_routed(self):
+        # An innocent-named file containing an API key stays put — it is
+        # never routed into a category folder.
+        src = write(self.tmp, "in/notes.txt",
+                    "my key: sk-abcdefghijklmnopqrstuvwxyz")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        stats = r.run(apply=True)
+        self.assertEqual(stats["scanned"], 0)
+        self.assertTrue(src.exists())
+
+    def test_credential_named_file_never_routed(self):
+        src = write(self.tmp, "in/deepseek-api-key.txt", "sk-whatever")
+        r = make_router(self.tmp, extractor=StubExtractor())
+        stats = r.run(apply=True)
+        self.assertEqual(stats["scanned"], 0)
+        self.assertTrue(src.exists())
+
     def test_symlink_skipped(self):
         write(self.tmp, "in/real.txt", "content")
         os.symlink(self.tmp / "in" / "real.txt", self.tmp / "in" / "link.txt")
@@ -655,6 +684,212 @@ class NoHardcodedTargetsTests(unittest.TestCase):
         entry = r.state["entries"][str(self.tmp / "in" / "song.mp3")]
         self.assertEqual(entry["status"], "error")
         self.assertIn("no target folder", entry["reason"])
+
+
+class CustomCategoryTests(unittest.TestCase):
+    """User-defined categories: the keys of router.target_folders ARE the
+    categories, and router.keywords.<name> gives a new category signals."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _targets_with(self, **extra):
+        targets = {
+            "political": str(self.tmp / "out" / "pol"),
+            "ml_development": str(self.tmp / "out" / "dev" / "ml"),
+            "development": str(self.tmp / "out" / "dev"),
+            "pictures": str(self.tmp / "out" / "Pictures"),
+            "videos": str(self.tmp / "out" / "Videos"),
+            "music": str(self.tmp / "out" / "Music"),
+            "documents": str(self.tmp / "out" / "Documents"),
+            "misc": str(self.tmp / "out" / "misc"),
+        }
+        targets.update(extra)
+        return targets
+
+    def test_keyword_in_name_decides(self):
+        write(self.tmp, "in/tax_return.pdf", "pdf")
+        r = make_router(
+            self.tmp, extractor=StubExtractor(),
+            target_folders=self._targets_with(
+                finance=str(self.tmp / "out" / "Finance")),
+            keywords={"finance": ["tax"]},
+        )
+        r.run()
+        self.assertEqual(category_of(r, "tax_return.pdf"), "finance")
+
+    def test_keyword_in_content_decides(self):
+        write(self.tmp, "in/letter.txt", "quarterly invoice and budget")
+        r = make_router(
+            self.tmp, extractor=StubExtractor({
+                "letter.txt": {"text": "quarterly invoice and budget",
+                               "meta": {}},
+            }),
+            target_folders=self._targets_with(
+                finance=str(self.tmp / "out" / "Finance")),
+            keywords={"finance": ["invoice"]},
+        )
+        r.run()
+        entry = r.state["entries"][str(self.tmp / "in" / "letter.txt")]
+        self.assertEqual(entry["category"], "finance")
+        self.assertEqual(entry["source"], "content")
+
+    def test_keyword_in_ocr_text_decides(self):
+        write(self.tmp, "in/bill.jpg", "img")
+        r = make_router(
+            self.tmp, extractor=StubExtractor({
+                "bill.jpg": {"text": "quarterly invoice", "meta": {}},
+            }),
+            target_folders=self._targets_with(
+                finance=str(self.tmp / "out" / "Finance")),
+            keywords={"finance": ["invoice"]},
+        )
+        r.run()
+        entry = r.state["entries"][str(self.tmp / "in" / "bill.jpg")]
+        self.assertEqual(entry["category"], "finance")
+
+    def test_phrase_keyword_matches_multiword_name(self):
+        write(self.tmp, "in/tax_return_2025.pdf", "pdf")
+        r = make_router(
+            self.tmp, extractor=StubExtractor(),
+            target_folders=self._targets_with(
+                finance=str(self.tmp / "out" / "Finance")),
+            keywords={"finance": ["tax return"]},
+        )
+        r.run()
+        self.assertEqual(category_of(r, "tax_return_2025.pdf"), "finance")
+
+    def test_custom_category_moves_to_its_folder(self):
+        write(self.tmp, "in/tax_return.pdf", "pdf")
+        r = make_router(
+            self.tmp, extractor=StubExtractor(),
+            target_folders=self._targets_with(
+                finance=str(self.tmp / "out" / "Finance")),
+            keywords={"finance": ["tax"]},
+        )
+        stats = r.run(apply=True)
+        self.assertEqual(stats["moved"], 1)
+        self.assertTrue(
+            (self.tmp / "out" / "Finance" / "tax_return.pdf").exists())
+
+    def test_keywords_for_unconfigured_category_stay_inert(self):
+        # Keyword hints for a category with no home never fire — the
+        # file falls through to documents instead of erroring.
+        write(self.tmp, "in/tax_return.pdf", "pdf")
+        r = make_router(self.tmp, extractor=StubExtractor(),
+                        keywords={"finance": ["tax"]})
+        stats = r.run(apply=True)
+        self.assertEqual(stats["errors"], 0)
+        self.assertTrue(
+            (self.tmp / "out" / "Documents" / "tax_return.pdf").exists())
+
+    def test_ml_keywords_accepted_under_category_name(self):
+        # The editor writes hints under 'ml_development'; the router
+        # must accept that key as well as the legacy 'ml'.
+        write(self.tmp, "in/notebook_notes.md", "# notes")
+        r = make_router(self.tmp, extractor=StubExtractor(),
+                        keywords={"ml_development": ["notebook"]})
+        r.run()
+        self.assertEqual(category_of(r, "notebook_notes.md"),
+                         "ml_development")
+
+
+class TargetPathFormTests(unittest.TestCase):
+    """The template defaults use MAIN_DRIVE/... paths, but a user's own
+    config.yaml may still use ~/... — expanduser must keep that working,
+    and an empty path must switch a category off without an error."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _targets(self, **overrides):
+        targets = {
+            "political": str(self.tmp / "out" / "pol"),
+            "ml_development": str(self.tmp / "out" / "dev" / "ml"),
+            "development": str(self.tmp / "out" / "dev"),
+            "pictures": str(self.tmp / "out" / "Pictures"),
+            "videos": str(self.tmp / "out" / "Videos"),
+            "music": str(self.tmp / "out" / "Music"),
+            "documents": str(self.tmp / "out" / "Documents"),
+            "misc": str(self.tmp / "out" / "misc"),
+        }
+        targets.update(overrides)
+        return targets
+
+    def test_tilde_path_expands_to_home(self):
+        r = make_router(self.tmp, extractor=StubExtractor(),
+                        target_folders=self._targets(documents="~/Documents"))
+        self.assertEqual(r.targets["documents"],
+                         Path.home() / "Documents")
+
+    def test_empty_path_disables_category(self):
+        # pictures: "" means 'no pictures bucket': media falls to misc
+        # instead of erroring, and the category stays out of _active.
+        write(self.tmp, "in/holiday.jpg", "img")
+        r = make_router(self.tmp, extractor=StubExtractor(),
+                        target_folders=self._targets(pictures=""))
+        self.assertNotIn("pictures", r._active)
+        stats = r.run(apply=True)
+        self.assertEqual(stats["errors"], 0)
+        self.assertTrue((self.tmp / "out" / "misc" / "holiday.jpg").exists())
+
+
+class BuiltinGatingTests(unittest.TestCase):
+    """Built-in expertise only runs for categories the user configured.
+    A user without a political bucket gets the file in documents/misc,
+    never an error entry into an unconfigured category."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _generic_targets(self, *drop):
+        targets = {
+            "development": str(self.tmp / "out" / "dev"),
+            "pictures": str(self.tmp / "out" / "Pictures"),
+            "videos": str(self.tmp / "out" / "Videos"),
+            "music": str(self.tmp / "out" / "Music"),
+            "documents": str(self.tmp / "out" / "Documents"),
+            "misc": str(self.tmp / "out" / "misc"),
+        }
+        for name in drop:
+            targets.pop(name, None)
+        return targets
+
+    def test_political_tier_inactive_when_category_absent(self):
+        # The political keyword tier must not decide when no political
+        # bucket is configured: the file goes to documents instead of
+        # an error entry.
+        write(self.tmp, "in/ukraine_war_news.txt", "parliament sanctions")
+        r = make_router(self.tmp, extractor=StubExtractor({
+            "ukraine_war_news.txt": {"text": "parliament sanctions",
+                                    "meta": {}},
+        }), target_folders=self._generic_targets())
+        stats = r.run(apply=True)
+        self.assertEqual(stats["errors"], 0)
+        self.assertTrue(
+            (self.tmp / "out" / "Documents" /
+             "ukraine_war_news.txt").exists())
+
+    def test_unconfigured_bucket_falls_into_misc(self):
+        # No music bucket: audio lands in misc, not an error.
+        write(self.tmp, "in/song.mp3")
+        r = make_router(self.tmp, extractor=StubExtractor(),
+                        target_folders=self._generic_targets("music"))
+        stats = r.run(apply=True)
+        self.assertEqual(stats["errors"], 0)
+        self.assertTrue((self.tmp / "out" / "misc" / "song.mp3").exists())
 
 
 class SmartSortingTests(unittest.TestCase):

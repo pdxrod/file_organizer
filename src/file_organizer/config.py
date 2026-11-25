@@ -13,6 +13,8 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from file_organizer import credential_guard
+
 # ── defaults ──────────────────────────────────────────────────────────
 DEFAULTS: Dict[str, Any] = {
     "drives": {},
@@ -52,6 +54,10 @@ DEFAULTS: Dict[str, Any] = {
         # Cross-device sync lock — coordination marker between machines,
         # never file content (see sync_engine.py).
         ".file_organizer.sync.lock",
+        # Credential files — never copied anywhere, whatever the user's
+        # list says (see credential_guard.py for the full list + content
+        # sniffing that catches keys in innocent-looking files).
+        *credential_guard.NAME_PATTERNS,
     ],
     # Legacy softlink-handling classification (see softlink_handler.py).
     # The modern behaviour is exclusion via exclude_patterns above; these
@@ -107,8 +113,9 @@ DEFAULTS: Dict[str, Any] = {
     # mmap) are remembered and not retried until this many minutes pass,
     # instead of failing again every cycle. 0 = always retry.
     "sync_failure_cooldown_minutes": 360,
-    # Where the failed-sync memory lives (JSON). ~ = home directory.
-    "sync_failure_state_path": "~/.file_organizer_sync_failures.json",
+    # Where the failed-sync memory lives (JSON). MAIN_DRIVE/... keeps it
+    # inside your home on every platform; ~/... and plain paths work too.
+    "sync_failure_state_path": "MAIN_DRIVE/.file_organizer_sync_failures.json",
     # Item 11: per-I/O stall guard (rsync --timeout, seconds).
     "rsync_io_timeout_seconds": 300,
     "rsync_additional_args": [],
@@ -317,6 +324,10 @@ class Config:
 
         merged["log_path"] = self._resolve_path(merged.get("log_path", DEFAULTS["log_path"]))
         merged["pid_path"] = self._resolve_path(merged.get("pid_path", DEFAULTS["pid_path"]))
+        merged["sync_failure_state_path"] = self._resolve_path(
+            merged.get("sync_failure_state_path",
+                       DEFAULTS["sync_failure_state_path"]) or ""
+        )
 
         self.data = merged
         self._validate()

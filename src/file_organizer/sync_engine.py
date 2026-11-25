@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from file_organizer import credential_guard
+
 logger = logging.getLogger(__name__)
 
 # Cache of "is this rsync binary GNU rsync?" probes (see _probe_gnu).
@@ -205,6 +207,33 @@ class SyncEngine:
         text = str(path)
         return any(m in text for m in self.CLOUD_MARKERS)
 
+    def _credential_excludes(self, source: Path) -> list:
+        """'/rel/path' rsync patterns for credential-looking files under
+        source. Content-sniffed on LOCAL sides only: reading a cloud
+        mount's placeholders would materialise them (item 11). Filenames
+        that look like credentials are already excluded by the built-in
+        exclude_patterns, so only innocent-named files are sniffed here."""
+        if self._is_cloud_path(source):
+            return []
+        excludes = []
+        try:
+            for dirpath, dirnames, filenames in os.walk(source):
+                dirnames[:] = [
+                    d for d in dirnames
+                    if not credential_guard.suspicious_name(d)
+                ]
+                for fname in filenames:
+                    if credential_guard.suspicious_name(fname):
+                        continue  # covered by --exclude patterns
+                    p = Path(dirpath) / fname
+                    if credential_guard.sniff_file_for_secret(p):
+                        excludes.append(
+                            "/" + p.relative_to(source).as_posix()
+                        )
+        except OSError:
+            pass
+        return excludes
+
     def _shared_lock_dir(self, folder_a: Path, folder_b: Path) -> "Optional[Path]":
         """The pair folder both machines can see, or None for local-only pairs.
 
@@ -374,6 +403,11 @@ class SyncEngine:
         # list is needed here.
         for pat in self._exclude_patterns:
             args.extend(["--exclude", pat])
+
+        # Credential files found by CONTENT: a key inside an innocent-
+        # named file (notes.txt with 'sk-…') is never copied either.
+        for rel in self._credential_excludes(source):
+            args.extend(["--exclude", rel])
 
         # Additional args from config
         args.extend(self._additional_args)

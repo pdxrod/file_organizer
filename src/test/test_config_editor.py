@@ -338,6 +338,24 @@ class PathStatusTests(TempConfigTests):
     def test_missing_path(self):
         self.assertIn("not available", ce.path_status(str(self.dir / "nope")))
 
+    def test_drive_ref_resolves_to_real_status(self):
+        # The editor knows the drives, so MAIN_DRIVE/pol is checked as
+        # the REAL folder — not as the literal string.
+        drives = {"MAIN_DRIVE": str(self.dir)}
+        (self.dir / "pol").mkdir()
+        self.assertIn("exists", ce.path_status("MAIN_DRIVE/pol", drives))
+        self.assertIn("not available",
+                      ce.path_status("MAIN_DRIVE/nope", drives))
+
+    def test_starter_drive_ref_reports_starter_example(self):
+        drives = {"MAIN_DRIVE": "/Users/janedoe"}
+        self.assertIn("starter example",
+                      ce.path_status("MAIN_DRIVE/pol", drives))
+
+    def test_undefined_drive_is_explained(self):
+        self.assertIn("drive 'MAIN_DRIVE' is not defined",
+                      ce.path_status("MAIN_DRIVE/pol"))
+
 
 # ── section editors ────────────────────────────────────────────────────────
 
@@ -532,6 +550,185 @@ class ToggleTests(unittest.TestCase):
         cfg = {}
         ce._toggle(cfg, "auto_git", "t", "explain", Scripted(["y"]), Capture())
         self.assertNotIn("auto_git", cfg)
+
+
+class RouterEditorTests(unittest.TestCase):
+    """The router section editor: categories are user-defined — existing
+    ones are kept or removed, standard buckets can be added, and brand-
+    new categories get a folder plus optional keyword hints. The walk
+    continues through keyword hints, route roots, watch folders,
+    rename/year folders, year subfolders, DeepSeek, OCR and the largest-
+    file size, so everything is configurable without editing YAML."""
+
+    # After the category and keyword prompts the walk always asks these,
+    # in order: route roots, watch folders, watch-on-cycles, rename
+    # folders, year folders, year subfolders toggle, year categories,
+    # DeepSeek toggle, OCR toggle, OCR budget, largest content file.
+    KEEP_REST = ("", "", "", "", "", "", "", "", "", "", "")
+
+    def test_adds_custom_category_with_keywords(self):
+        cfg = {"router": {"enabled": True, "action": "move",
+                          "target_folders": {"documents": "/tmp/Docs",
+                                             "misc": "/tmp/misc"}}}
+        ce._router(cfg, Scripted([
+            "",                  # enabled: keep ON
+            "",                  # action: keep
+            "/tmp/Docs",         # documents: keep (Enter on prefilled line)
+            "/tmp/misc",         # misc: keep
+            "", "", "", "",      # standard additions: skip
+            "y",                 # add a category of your own?
+            "finance",           # name
+            "/tmp/Finance",      # folder
+            "",                  # another? no
+            "",                  # hints for documents: none
+            "",                  # hints for misc: none
+            "invoice, tax return",  # hints for finance
+        ] + list(self.KEEP_REST)), Capture())
+        targets = cfg["router"]["target_folders"]
+        self.assertEqual(targets["finance"], "/tmp/Finance")
+        self.assertEqual(targets["documents"], "/tmp/Docs")
+        self.assertEqual(cfg["router"]["keywords"]["finance"],
+                         ["invoice", "tax return"])
+
+    def test_blank_path_removes_category(self):
+        cfg = {"router": {"enabled": True, "action": "move",
+                          "target_folders": {"documents": "/tmp/Docs",
+                                             "music": "/tmp/Music"}}}
+        ce._router(cfg, Scripted([
+            "",                  # enabled: keep ON
+            "",                  # action: keep
+            "/tmp/Docs",         # documents: keep (Enter on prefilled line)
+            "",                  # music: blank -> removed
+            "", "", "", "", "",  # standard additions: skip
+            "",                  # add a category of your own? no
+            "",                  # hints for documents: none
+        ] + list(self.KEEP_REST)), Capture())
+        self.assertNotIn("music", cfg["router"]["target_folders"])
+        self.assertNotIn("music", cfg["router"].get("keywords", {}))
+        self.assertEqual(cfg["router"]["target_folders"]["documents"],
+                         "/tmp/Docs")
+
+    def test_custom_category_name_is_normalised(self):
+        cfg = {"router": {"enabled": True, "action": "move",
+                          "target_folders": {}}}
+        ce._router(cfg, Scripted([
+            "",                  # enabled: keep ON
+            "",                  # action: keep
+            "", "", "", "", "", "",  # standard additions: skip
+            "y",                 # add a category of your own?
+            "Home Videos",       # name (normalised to home_videos)
+            "/tmp/Videos",       # folder
+            "",                  # another? no
+            "",                  # hints for home_videos: none
+        ] + list(self.KEEP_REST)), Capture())
+        self.assertIn("home_videos", cfg["router"]["target_folders"])
+
+    def test_keyword_hints_for_existing_category(self):
+        # A normie can give ANY category hints through the walk — no
+        # config.yaml editing.
+        cfg = {"router": {"enabled": True, "action": "move",
+                          "target_folders": {"documents": "/tmp/Docs"}}}
+        ce._router(cfg, Scripted([
+            "",                  # enabled: keep ON
+            "",                  # action: keep
+            "/tmp/Docs",         # documents: keep
+            "", "", "", "", "",  # standard additions: skip
+            "",                  # add a category of your own? no
+            "gaza, election",    # hints for documents
+        ] + list(self.KEEP_REST)), Capture())
+        self.assertEqual(cfg["router"]["keywords"]["documents"],
+                         ["gaza", "election"])
+
+    def test_blank_hints_remove_keywords(self):
+        cfg = {"router": {"enabled": True, "action": "move",
+                          "target_folders": {"documents": "/tmp/Docs"},
+                          "keywords": {"documents": ["receipt"]}}}
+        ce._router(cfg, Scripted([
+            "",                  # enabled: keep ON
+            "",                  # action: keep
+            "/tmp/Docs",         # documents: keep
+            "", "", "", "", "",  # standard additions: skip
+            "",                  # add a category of your own? no
+            "",                  # hints for documents: blank removes them
+        ] + list(self.KEEP_REST)), Capture())
+        self.assertNotIn("keywords", cfg["router"])
+
+    def test_space_separated_words_become_separate_hints(self):
+        # 'corbyn palestine gaza' (no commas) = three hints, one per word.
+        cfg = {"router": {"enabled": True, "action": "move",
+                          "target_folders": {"political": "/tmp/pol"}}}
+        ce._router(cfg, Scripted([
+            "",                  # enabled: keep ON
+            "",                  # action: keep
+            "/tmp/pol",          # political: keep
+            "", "", "", "", "", "",  # standard additions: skip
+            "",                  # add a category of your own? no
+            "corbyn palestine gaza",  # hints for political
+        ] + list(self.KEEP_REST)), Capture())
+        self.assertEqual(cfg["router"]["keywords"]["political"],
+                         ["corbyn", "palestine", "gaza"])
+
+    def test_comma_item_with_spaces_is_one_phrase(self):
+        # 'corbyn, donald trump' = two hints; the second is a phrase.
+        cfg = {"router": {"enabled": True, "action": "move",
+                          "target_folders": {"political": "/tmp/pol"}}}
+        ce._router(cfg, Scripted([
+            "",                  # enabled: keep ON
+            "",                  # action: keep
+            "/tmp/pol",          # political: keep
+            "", "", "", "", "", "",  # standard additions: skip
+            "",                  # add a category of your own? no
+            "corbyn, donald trump",  # hints for political
+        ] + list(self.KEEP_REST)), Capture())
+        self.assertEqual(cfg["router"]["keywords"]["political"],
+                         ["corbyn", "donald trump"])
+
+    def test_legacy_ml_hints_key_migrates_to_ml_development(self):
+        cfg = {"router": {"enabled": True, "action": "move",
+                          "target_folders": {
+                              "ml_development": "/tmp/ML"},
+                          "keywords": {"ml": ["notebook"]}}}
+        ce._router(cfg, Scripted([
+            "",                  # enabled: keep ON
+            "",                  # action: keep
+            "/tmp/ML",           # ml_development: keep
+            "", "", "", "", "", "",  # standard additions: skip
+            "",                  # add a category of your own? no
+            "notebook, papers",  # hints for ml_development
+        ] + list(self.KEEP_REST)), Capture())
+        self.assertEqual(cfg["router"]["keywords"],
+                         {"ml_development": ["notebook", "papers"]})
+
+    def test_year_subfolder_categories_editable(self):
+        cfg = {"router": {"enabled": True, "action": "move",
+                          "target_folders": {"documents": "/tmp/Docs",
+                                             "pictures": "/tmp/Pictures"},
+                          "year_subfolders": True,
+                          "year_subfolder_categories": ["pictures",
+                                                       "documents"]}}
+        ce._router(cfg, Scripted([
+            "",                  # enabled: keep ON
+            "",                  # action: keep
+            "/tmp/Docs",         # documents: keep
+            "/tmp/Pictures",     # pictures: keep
+            "", "", "", "",      # standard additions: skip
+            "",                  # add a category of your own? no
+            "",                  # hints for documents: none
+            "",                  # hints for pictures: none
+            "",                  # route roots: done
+            "",                  # watch folders: done
+            "",                  # watch-on-cycles: keep ON
+            "",                  # rename folders: done
+            "",                  # year folders: done
+            "",                  # year subfolders: keep ON
+            "pictures, videos",  # year categories: edited
+            "",                  # deepseek: keep OFF
+            "",                  # ocr: keep ON
+            "",                  # ocr budget: keep
+            "",                  # largest content file: keep
+        ]), Capture())
+        self.assertEqual(cfg["router"]["year_subfolder_categories"],
+                         ["pictures", "videos"])
 
 
 # ── write_config ───────────────────────────────────────────────────────────

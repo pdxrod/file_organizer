@@ -175,14 +175,14 @@ def edit_drives(drives, input_fn, output_fn) -> Dict[str, str]:
         if edit_num is not None:
             if 1 <= edit_num <= len(names):
                 name = names[edit_num - 1]
-                new_name = ask(f"  name [{name}] (Enter keeps):",
+                new_name = ask(f"  name [{name}] (hit Enter to keep it):",
                                input_fn, output_fn, default=name,
                                prefill=name)
                 new_name = new_name.strip().upper()
                 if new_name != name and new_name in drives:
                     output_fn(f"  {new_name} already exists — keeping {name}")
                     new_name = name
-                value = ask(f"  folder [{drives[name]}] (Enter keeps):",
+                value = ask(f"  folder [{drives[name]}] (hit Enter to keep it):",
                             input_fn, output_fn, default=drives[name],
                             prefill=drives[name])
                 if new_name != name:
@@ -215,7 +215,7 @@ def _output_base(cfg: Dict, input_fn, output_fn) -> None:
         "file_organizer folder. Type a path to put it somewhere else,\n"
         "e.g. ~/organized or PROTON_DRIVE/organized.",
     )
-    value = ask("  folder for the organized tree [enter keeps current]:",
+    value = ask("  folder for the organized tree [hit Enter to keep it]:",
                 input_fn, output_fn, default=current, prefill=current)
     if value in (None, "", "organized", "~/organized"):
         cfg["output_base"] = "organized"
@@ -223,13 +223,29 @@ def _output_base(cfg: Dict, input_fn, output_fn) -> None:
         cfg["output_base"] = value
 
 
+def _ask_number(question, input_fn, output_fn, default, converter=int):
+    """One number with the current value prefilled (Enter keeps it).
+    Anything that isn't a number keeps the current value."""
+    value = ask(question, input_fn, output_fn, default="",
+                prefill=str(default))
+    value = (value or "").strip()
+    if not value:
+        return default
+    try:
+        return converter(value)
+    except ValueError:
+        output_fn("  (not a number — keeping the current value)")
+        return default
+
+
 def _router(cfg: Dict, input_fn, output_fn) -> None:
     router = cfg.setdefault("router", {})
     on = _toggle(
         router, "enabled", "Smart router",
-        "Moves files into category folders (political → ~/pol, music →\n"
-        "~/Music, …) by reading each file's name and contents. It MOVES\n"
-        "files, so it starts OFF — plan first with './organize route'.",
+        "Moves files into category folders (documents → ~/Documents, "
+        "music →\n~/Music, …) by reading each file's name and contents. "
+        "It MOVES\nfiles, so it starts OFF — plan first with "
+        "'./organize route'.",
         input_fn, output_fn,
     )
     if not on:
@@ -243,32 +259,114 @@ def _router(cfg: Dict, input_fn, output_fn) -> None:
         output_fn(f"  action is now: {router['action']}")
 
     output_fn("")
-    output_fn("Where each category goes (press Enter to keep each one):")
+    output_fn("Your categories — each one is a folder the router can sort")
+    output_fn("files into. Enter keeps the current path; a blank path")
+    output_fn("removes the category. You can add any category you like.")
     targets = dict(router.get("target_folders") or {})
-    for name, desc in (
-        ("political", "politics, geopolitics, culture war…"),
-        ("ml_development", "AI/ML projects, papers, notes, code"),
-        ("development", "software projects and dev notes"),
-        ("pictures", "images that are not political"),
-        ("videos", "videos that are not political"),
-        ("music", "music"),
-        ("documents", "documents"),
-        ("misc", "everything the router can't place"),
-    ):
-        current = targets.get(name, "")
-        value = ask(f"  {name} ({desc}) [{current or 'not set'}]:",
-                    input_fn, output_fn, default=current,
+    for name in list(targets):
+        current = str(targets.get(name, "") or "")
+        # prefill shows the current path on the line, so Enter keeps it;
+        # a genuinely blank answer (delete the text) removes the category.
+        value = ask(f"  {name} [{current or 'not set'}]:",
+                    input_fn, output_fn, default="",
                     prefill=current or None)
-        targets[name] = value
+        if value.strip():
+            targets[name] = value.strip()
+        else:
+            targets.pop(name, None)
+    for name, desc in (
+        ("documents", "general documents"),
+        ("pictures", "images"),
+        ("videos", "videos"),
+        ("music", "music"),
+        ("development", "software projects and dev notes"),
+        ("misc", "the catch-all for files the router can't place"),
+    ):
+        if name in targets:
+            continue
+        suggested = {
+            "documents": "MAIN_DRIVE/Documents",
+            "pictures": "MAIN_DRIVE/Pictures",
+            "videos": "MAIN_DRIVE/Videos",
+            "music": "MAIN_DRIVE/Music",
+            "development": "MAIN_DRIVE/Development",
+            "misc": "MAIN_DRIVE/Downloads",
+        }[name]
+        # The suggested folder sits on the line: Enter accepts it, typing
+        # over it uses the typed folder, clearing the line skips.
+        value = ask(
+            f"  Add '{name}' ({desc})?\n"
+            f"    suggested: {suggested} — Enter accepts, type your own,\n"
+            f"    or clear the line to skip:",
+            input_fn, output_fn, default="", prefill=suggested,
+        )
+        if value.strip():
+            targets[name] = value.strip()
+    while confirm("  Add a category of your own?",
+                  input_fn, output_fn, default=False):
+        name = ask("  Category name (lowercase, underscores):",
+                   input_fn, output_fn, default="")
+        if not name.strip():
+            continue
+        name = name.strip().lower().replace(" ", "_")
+        if name in targets:
+            output_fn(f"  '{name}' is already a category.")
+            continue
+        path = ask(f"  Folder for '{name}' files:",
+                   input_fn, output_fn, default="")
+        if not path.strip():
+            continue
+        targets[name] = path.strip()
     router["target_folders"] = targets
+
+    # ── keyword hints for every category ──
+    output_fn("")
+    output_fn("Keyword hints (optional): words or short phrases that mark")
+    output_fn("a file for a category — matched in names and contents.")
+    output_fn("Enter a series of hints, separated by commas, e.g.")
+    output_fn("'donald trump, iran'. Enter keeps what's shown; a blank")
+    output_fn("answer removes them.")
+    keywords = dict(router.get("keywords") or {})
+    for name in targets:
+        legacy = "ml" if name == "ml_development" else name
+        current = keywords.get(name)
+        if not current and legacy != name:
+            current = keywords.get(legacy)
+        prefill = ", ".join(str(w) for w in (current or []))
+        value = ask(f"  hints for '{name}' [{prefill or 'none'}]:",
+                    input_fn, output_fn, default="",
+                    prefill=prefill or None)
+        raw_hints = value.strip()
+        if "," in raw_hints:
+            # Comma-separated: each item is one hint; spaces inside an
+            # item keep it whole as a phrase ('donald trump').
+            hints = [w.strip() for w in raw_hints.split(",") if w.strip()]
+        else:
+            # Plain space-separated words: one hint per word.
+            hints = [w for w in raw_hints.split() if w.strip()]
+        output_fn(f"  hints for '{name}': "
+                  f"{', '.join(hints) if hints else '(none)'}")
+        if hints:
+            keywords[name] = hints
+            if legacy != name:
+                keywords.pop(legacy, None)
+        else:
+            keywords.pop(name, None)
+            if legacy != name:
+                keywords.pop(legacy, None)
+    if keywords:
+        router["keywords"] = keywords
+    elif "keywords" in router:
+        router.pop("keywords")
 
     router.setdefault("route_roots", [])
     edit_path_list(
         "Route roots",
         router["route_roots"],
         "Folders swept when you run './organize route'. Files there are\n"
-        "classified once.",
-        input_fn, output_fn, example="MAIN_DRIVE/misc",
+        "classified once. Your downloads folder is a good inbox.",
+        input_fn, output_fn, example="MAIN_DRIVE/Downloads",
+        drives=cfg.get("drives"),
     )
     router.setdefault("watch_folders", [])
     edit_path_list(
@@ -277,7 +375,60 @@ def _router(cfg: Dict, input_fn, output_fn) -> None:
         "New files dropped here are routed automatically on every\n"
         "production cycle (./organize auto / start).",
         input_fn, output_fn, example="MAIN_DRIVE/Downloads",
+        drives=cfg.get("drives"),
     )
+    router.setdefault("watch_on_cycles", True)
+    _toggle(
+        router, "watch_on_cycles", "Route new watch-folder files automatically",
+        "Every production cycle (./organize auto / start) classifies new\n"
+        "files dropped in the watch folders, not only when you run\n"
+        "'./organize route'.",
+        input_fn, output_fn,
+    )
+
+    router.setdefault("rename_folders", [])
+    edit_path_list(
+        "Rename-by-content folders",
+        router["rename_folders"],
+        "Folders './organize rename-by-content' sweeps for files with\n"
+        "auto-generated names (4665.jpg, IMG-…, Screenshot_…, DSC…): the\n"
+        "content becomes the name. Empty = the pictures and documents\n"
+        "targets (plus political when configured).",
+        input_fn, output_fn, example="MAIN_DRIVE/Pictures",
+        drives=cfg.get("drives"),
+    )
+    router.setdefault("year_folders", [])
+    edit_path_list(
+        "Year-sort folders",
+        router["year_folders"],
+        "Folders './organize tidy' sorts by year: dated files move into\n"
+        "<folder>/<year>/ subfolders. Empty = the pictures, videos and\n"
+        "documents targets (plus political when configured).",
+        input_fn, output_fn, example="MAIN_DRIVE/Pictures",
+        drives=cfg.get("drives"),
+    )
+
+    router.setdefault("year_subfolders", True)
+    if _toggle(
+        router, "year_subfolders", "Year subfolders",
+        "Dated files inside a category folder get a <year> subfolder\n"
+        "(e.g. ~/Pictures/2018, ~/Videos/2026); everything else stays\n"
+        "flat.",
+        input_fn, output_fn,
+    ):
+        cats = router.get("year_subfolder_categories")
+        cats = (list(cats) if isinstance(cats, list)
+                else ["pictures", "videos", "documents"])
+        prefill = ", ".join(cats)
+        value = ask(
+            f"  categories with year subfolders [{prefill}]:",
+            input_fn, output_fn, default="",
+            prefill=prefill or None,
+        )
+        picked = [c.strip().lower() for c in value.split(",") if c.strip()]
+        router["year_subfolder_categories"] = picked or cats
+    elif "year_subfolder_categories" in router:
+        router.pop("year_subfolder_categories")
 
     deepseek = router.setdefault("deepseek", {})
     if _toggle(
@@ -288,11 +439,75 @@ def _router(cfg: Dict, input_fn, output_fn) -> None:
         input_fn, output_fn,
     ):
         deepseek["api_key_path"] = ask(
-            f"  API key file path [enter keeps: "
+            f"  API key file path [hit Enter to keep it: "
             f"{deepseek.get('api_key_path', '') or 'use env var'}]:",
             input_fn, output_fn, default=deepseek.get("api_key_path", ""),
             prefill=deepseek.get("api_key_path") or None,
+        ) or ""
+        deepseek["model"] = ask(
+            f"  model [{deepseek.get('model', 'deepseek-chat')}]:",
+            input_fn, output_fn,
+            default=deepseek.get("model", "deepseek-chat"),
+            prefill=deepseek.get("model") or None,
+        ) or "deepseek-chat"
+        deepseek.setdefault("media_enabled", True)
+        _toggle(
+            deepseek, "media_enabled", "Send media to DeepSeek",
+            "Images and videos reach DeepSeek as OCR text + Vision\n"
+            "scene labels when this is on.",
+            input_fn, output_fn,
         )
+        deepseek["min_confidence"] = _ask_number(
+            f"  minimum confidence, 0.0-1.0 "
+            f"[{deepseek.get('min_confidence', 0.6)}]:",
+            input_fn, output_fn, float(deepseek.get("min_confidence", 0.6)),
+            converter=float,
+        )
+        deepseek["batch_size"] = _ask_number(
+            f"  files per DeepSeek request "
+            f"[{deepseek.get('batch_size', 20)}]:",
+            input_fn, output_fn, int(deepseek.get("batch_size", 20) or 20),
+        )
+        deepseek["max_calls_per_run"] = _ask_number(
+            f"  DeepSeek calls per run "
+            f"[{deepseek.get('max_calls_per_run', 50)}]:",
+            input_fn, output_fn,
+            int(deepseek.get("max_calls_per_run", 50) or 0),
+        )
+        deepseek["max_chars_per_file"] = _ask_number(
+            f"  characters of content sent per file "
+            f"[{deepseek.get('max_chars_per_file', 1500)}]:",
+            input_fn, output_fn,
+            int(deepseek.get("max_chars_per_file", 1500) or 1500),
+        )
+        deepseek["timeout_seconds"] = _ask_number(
+            f"  request timeout in seconds "
+            f"[{deepseek.get('timeout_seconds', 90)}]:",
+            input_fn, output_fn,
+            int(deepseek.get("timeout_seconds", 90) or 90),
+        )
+
+    ocr = router.setdefault("ocr", {})
+    ocr.setdefault("enabled", True)
+    if _toggle(
+        ocr, "enabled", "OCR for images and PDFs",
+        "Reads text out of images, videos and scanned PDFs so the router\n"
+        "can classify them (macOS Vision; skipped on other platforms).",
+        input_fn, output_fn,
+    ):
+        ocr["budget_per_run"] = _ask_number(
+            f"  media files OCR'd per run "
+            f"[{ocr.get('budget_per_run', 300)}]:",
+            input_fn, output_fn, int(ocr.get("budget_per_run", 300) or 0),
+        )
+
+    max_bytes = int(router.get("max_file_size", 262144000) or 262144000)
+    mb = max(1, max_bytes // (1024 * 1024))
+    mb = _ask_number(
+        f"  largest file read by content, in MB [{mb}]:",
+        input_fn, output_fn, mb,
+    )
+    router["max_file_size"] = int(mb) * 1024 * 1024
 
 
 def _phone_pull(cfg: Dict, input_fn, output_fn) -> None:
@@ -446,14 +661,15 @@ def run_editor(config_path: str, template_path: Optional[str] = None,
             "and duplicate detection looks inside them.",
             input_fn, output_fn,
             example="MAIN_DRIVE/Documents, MAIN_DRIVE/Pictures",
+            drives=cfg.get("drives"),
         )
 
         cfg.setdefault("sync_pairs", [])
         edit_pairs("Sync pairs (both ways)", cfg["sync_pairs"],
-                   False, input_fn, output_fn)
+                   False, input_fn, output_fn, drives=cfg.get("drives"))
         cfg.setdefault("one_way_pairs", [])
         edit_pairs("One-way backups", cfg["one_way_pairs"],
-                   True, input_fn, output_fn)
+                   True, input_fn, output_fn, drives=cfg.get("drives"))
 
         _output_base(cfg, input_fn, output_fn)
 
@@ -494,7 +710,8 @@ def run_editor(config_path: str, template_path: Optional[str] = None,
                 cfg["auto_git_folders"],
                 "Any folder under these gets git init + .gitignore +\n"
                 "first commit.",
-                input_fn, output_fn, example="MAIN_DRIVE/dev",
+                input_fn, output_fn, example="MAIN_DRIVE/Development",
+                drives=cfg.get("drives"),
             )
         _toggle(
             cfg, "collapse_rename_families", "Collapse rename families",

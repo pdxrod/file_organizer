@@ -31,7 +31,7 @@ class EditorSaveQuit(Exception):
 def _input_with_prefill(prompt: str, prefill: str, input_fn=input) -> str:
     """input_fn(prompt) with `prefill` already on the line as editable
     text when possible, e.g.
-        name [GOOGLE_DRIVE] (Enter keeps): GOOGLE_DRIVE▏
+        name [GOOGLE_DRIVE] (hit Enter to keep it): GOOGLE_DRIVE▏
     On an interactive terminal (input_fn is the builtin input and stdin
     is a tty) the prefill arrives as real typed text: GNU readline builds
     (Termux, Homebrew, python.org) use the pre-input hook, and macOS's
@@ -170,16 +170,36 @@ def _placeholder_markers():
         return ("janedoe", "yourexternaldrive", "yourgoogledrive", "yourname")
 
 
-def path_status(path: str) -> str:
-    """One short status word for a path, in plain language."""
+def _resolve_drive(path: str, drives) -> str:
+    """'MAIN_DRIVE/pol' -> '/Users/rod/pol' when the drives map knows
+    MAIN_DRIVE; unknown refs pass through unchanged."""
+    for drive, base in (drives or {}).items():
+        base = os.path.expanduser(str(base))
+        if path == drive:
+            return base
+        if path.startswith(drive + "/") or path.startswith(drive + os.sep):
+            return base + path[len(drive):]
+    return path
+
+
+def path_status(path: str, drives=None) -> str:
+    """One short status word for a path, in plain language. Drive
+    shortcuts (MAIN_DRIVE/...) are resolved through `drives` when given,
+    so the editor reports the REAL folder's status."""
     expanded = os.path.expanduser(str(path))
+    if drives:
+        expanded = _resolve_drive(expanded, drives)
     if os.path.exists(expanded):
         return "✓ exists"
     low = expanded.lower()
     for marker in _placeholder_markers():
         if marker in low:
             return f"✗ starter example — replace it with your real path"
-    return "? not available right now (will be skipped if missing)"
+    head = str(path).split("/", 1)[0]
+    if (head and "_" in head and head == head.upper()
+            and head not in (drives or {})):
+        return f"? drive '{head}' is not defined under drives: — add it first"
+    return "✗ not available right now (will be skipped if missing)"
 
 
 # ── section editors ────────────────────────────────────────────────────────
@@ -212,7 +232,8 @@ def _pick_number(kind: str, entries, input_fn, output_fn) -> Optional[int]:
 
 def edit_path_list(title: str, items, explanation: str, input_fn, output_fn,
                    example: Optional[str] = None,
-                   show_status: bool = True) -> List[str]:
+                   show_status: bool = True,
+                   drives: Optional[Dict] = None) -> List[str]:
     """Menu-driven editor for a list of paths (or patterns when
     show_status=False)."""
     if items is None:
@@ -224,7 +245,8 @@ def edit_path_list(title: str, items, explanation: str, input_fn, output_fn,
         output_fn("")
         if items:
             for i, item in enumerate(items, 1):
-                status = f"  ({path_status(item)})" if show_status else ""
+                status = (f"  ({path_status(item, drives)})"
+                          if show_status else "")
                 output_fn(f"  {i}. {item}{status}")
         else:
             output_fn("  (none)")
@@ -261,7 +283,7 @@ def edit_path_list(title: str, items, explanation: str, input_fn, output_fn,
             if 1 <= edit_num <= len(items):
                 current = items[edit_num - 1]
                 value = ask(f"  new value for item {edit_num} "
-                            f"[{current}] (Enter keeps):", input_fn,
+                            f"[{current}] (hit Enter to keep it):", input_fn,
                             output_fn, default=current, prefill=current)
                 items[edit_num - 1] = value
             else:
@@ -279,7 +301,8 @@ def edit_path_list(title: str, items, explanation: str, input_fn, output_fn,
     return items
 
 
-def edit_pairs(title: str, pairs, one_way: bool, input_fn, output_fn) -> List[Dict]:
+def edit_pairs(title: str, pairs, one_way: bool, input_fn, output_fn,
+               drives: Optional[Dict] = None) -> List[Dict]:
     """Edit sync_pairs (one_way=False) or one_way_pairs (one_way=True)."""
     arrow = "→" if one_way else "⇄"
     if one_way:
@@ -305,7 +328,8 @@ def edit_pairs(title: str, pairs, one_way: bool, input_fn, output_fn) -> List[Di
                     folders.append("")
                 a, b = folders[0], folders[1]
                 output_fn(f"  {i}. {a}  {arrow}  {b}")
-                output_fn(f"     ({path_status(a)})   ({path_status(b)})")
+                output_fn(f"     ({path_status(a, drives)})   "
+                          f"({path_status(b, drives)})")
         else:
             output_fn("  (none)")
         prompt = ("  [enter]=done, a=add pair, e=edit, r=remove, "

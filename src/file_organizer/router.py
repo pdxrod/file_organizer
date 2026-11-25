@@ -1,18 +1,19 @@
 """router.py — the deep router: works out where a file should go from its
 NAME and its CONTENTS, then moves it there.
 
-Eight buckets (the user's target layout):
-    political      -> ~/pol          (politics, geopolitics, culture war…)
-    ml_development -> ~/dev/ml       (AI/ML projects, papers, notes, code)
-    development    -> ~/dev          (software projects and dev notes)
-    pictures       -> ~/Pictures     (non-political images)
-    videos         -> ~/Videos       (non-political videos)
-    music          -> ~/Music
-    documents      -> ~/Documents
-    misc           -> ~/misc         (anything that can't be worked out)
+Categories come from config: the keys of router.target_folders ARE the
+categories, each mapped to its folder. The template ships a generic set
+(documents, pictures, videos, music, development, misc); users add any
+category they want (e.g. 'political' -> ~/pol) or drop ones they don't.
+Built-in recognition (extension fast paths, keyword tiers, scene labels,
+DeepSeek descriptions) runs only for categories that are actually
+configured — a file that would land in an unconfigured bucket goes to
+misc instead. User-defined categories get keyword hints from
+router.keywords.<name> (words or short phrases matched in names and
+extracted text) and reach DeepSeek through the configured category list.
 
-Year subfolders: political/pictures/videos/documents files whose YEAR can
-be read from the name (20260914_…, 01-06-18-…, 'Gaza 2024_…') or the
+Year subfolders: files in year-subfolder categories whose YEAR can be
+read from the name (20260914_…, 01-06-18-…, 'Gaza 2024_…') or the
 content (OCR'd '…2019…') land in <target>/<year>/ (e.g. ~/pol/2019,
 ~/Pictures/2018, ~/Videos/2026); files with no readable year stay flat in
 the target. router.year_subfolders / year_subfolder_categories tune this.
@@ -56,6 +57,7 @@ from pathlib import Path
 from typing import Optional
 
 from file_organizer.config import find_project_root
+from file_organizer.credential_guard import file_contains_secret
 from file_organizer.extractor import (
     Extractor, TEXT_EXTS, IMAGE_EXTS, VIDEO_EXTS, HTML_EXTS, OFFICE_EXTS,
 )
@@ -383,7 +385,7 @@ def _suffix(name: str) -> str:
 
 
 class Router:
-    """Classifies files into the seven buckets and moves them."""
+    """Classifies files into the configured categories and moves them."""
 
     def __init__(self, config, deepseek: Optional[DeepSeekClient] = None,
                  extractor: Optional[Extractor] = None):
@@ -394,17 +396,29 @@ class Router:
         if self.action not in ("move", "copy"):
             self.action = "move"
 
-        # Targets: config only — nothing is hardcoded. A category with
-        # no target in the config gets an empty path, and _apply_entry
-        # reports it as "no target folder configured" instead of moving
-        # the file somewhere surprising.
+        # Targets: config only — nothing is hardcoded. The KEYS of
+        # target_folders ARE the categories: users add, remove or rename
+        # them as they like. A category with an empty path is disabled,
+        # and _apply_entry reports a decision with no target as "no
+        # target folder configured" instead of moving the file
+        # somewhere surprising.
         resolved_targets = raw.get("target_folders") or {}
         self.targets = {}
-        for cat in CATEGORIES:
-            val = resolved_targets.get(cat) or ""
+        for cat, val in resolved_targets.items():
+            cat = str(cat).strip().lower()
+            if not cat:
+                continue
             self.targets[cat] = Path(
                 config._resolve_path(val) if val else ""
             ).expanduser()
+        # Categories that really have a home. Built-in recognition
+        # (keyword tiers, scene labels, extension fast paths) only runs
+        # for categories in this set — a file that would land in an
+        # unconfigured bucket goes to misc instead.
+        self._active = {
+            cat for cat, t in self.targets.items()
+            if str(t) not in ("", ".")
+        }
 
         self.route_roots = [
             Path(config._resolve_path(p)).expanduser()
@@ -489,6 +503,16 @@ class Router:
             except OSError:
                 self._sweep_roots.add(root)
 
+        # DeepSeek is offered only the categories that really have a
+        # home (built-ins first, then user-defined ones in config order),
+        # so the model never proposes a bucket the router can't fill.
+        self.ds_categories = [
+            c for c in CATEGORIES if c in self._active
+        ] + [
+            c for c in self.targets
+            if c not in CATEGORIES and c in self._active
+        ]
+
         ds_cfg = raw.get("deepseek") or {}
         self.ds_enabled = bool(ds_cfg.get("enabled", True))
         self.ds_media_enabled = bool(ds_cfg.get("media_enabled", False))
@@ -505,6 +529,7 @@ class Router:
                 ),
                 model=ds_cfg.get("model", "deepseek-chat"),
                 timeout_seconds=int(ds_cfg.get("timeout_seconds", 90) or 90),
+                categories=self.ds_categories or None,
             )
         else:
             self.ds = None
@@ -521,7 +546,10 @@ class Router:
         else:
             self.extractor = Extractor(max_extract_bytes=self.max_extract_bytes)
 
-        # Keywords: built-in tiers + config additions.
+        # Keywords: built-in tiers + config additions. Built-in tiers
+        # only decide when their category is active (configured with a
+        # real folder) — the call sites gate on self._active — so a file
+        # is never classified into a bucket with no home.
         kw = raw.get("keywords") or {}
         self._kw = {
             "political": self._compile(
@@ -530,7 +558,8 @@ class Router:
                 _POLITICAL_WEAK_WORDS,
             ),
             "ml": self._compile(
-                _ML_STRONG_WORDS + list(kw.get("ml", [])),
+                _ML_STRONG_WORDS + list(kw.get("ml", []))
+                + list(kw.get("ml_development", [])),
                 _ML_STRONG_PHRASES,
                 _ML_WEAK_WORDS,
             ),
@@ -540,6 +569,22 @@ class Router:
                 [],
             ),
         }
+        # User-defined categories: router.keywords.<name> is a list of
+        # words or short phrases. One hit in a filename or the extracted
+        # text decides the file goes there. Only categories with a real
+        # home are armed (an armed category with no target would turn
+        # every match into an error entry).
+        self._custom_kw = {}
+        for name, words in kw.items():
+            name = str(name).strip().lower()
+            if (not name
+                    or name in ("political", "ml", "development",
+                                "ml_development")
+                    or name not in self._active):
+                continue
+            spec = self._compile_custom(words)
+            if spec["strong_words"] or spec["strong_phrases"]:
+                self._custom_kw[name] = spec
         self._docname_re = [re.compile(rf"\b{re.escape(w)}\b", re.I)
                             for w in _DOCNAME_WORDS]
         self._doc_content_re = [
@@ -589,6 +634,18 @@ class Router:
                            for w in weak_words if w],
         }
 
+    @staticmethod
+    def _compile_custom(words) -> dict:
+        """A user-defined category spec: entries with spaces are phrases
+        (substring match), single words match on word boundaries."""
+        strong, phrases = [], []
+        for w in words or []:
+            w = str(w).strip().lower()
+            if not w:
+                continue
+            (phrases if " " in w else strong).append(w)
+        return Router._compile(strong, phrases, [])
+
     def _scene_signal(self, classifications: str) -> tuple[bool, list]:
         """(hit?, labels) — do the Vision scene labels look political?"""
         if not classifications:
@@ -597,9 +654,9 @@ class Router:
         hits = [w for w in _POLITICAL_SCENE_WORDS if w in lower]
         return bool(hits), hits
 
-    def _signal(self, stem_text: str, key: str) -> tuple[bool, list]:
+    @staticmethod
+    def _signal_spec(spec: dict, stem_text: str) -> tuple[bool, list]:
         """(hit?, matched tokens) — one strong hit or two weak hits."""
-        spec = self._kw[key]
         text = stem_text.lower()
         hits = []
         for rx in spec["strong_words"]:
@@ -617,6 +674,19 @@ class Router:
         if len(set(weak)) >= 2:
             return True, weak
         return False, hits + weak
+
+    def _signal(self, stem_text: str, key: str) -> tuple[bool, list]:
+        """(hit?, matched tokens) — one strong hit or two weak hits."""
+        return self._signal_spec(self._kw[key], stem_text)
+
+    def _custom_category(self, stem_text: str) -> tuple:
+        """(category, tokens) for the first user-defined category whose
+        keywords match, or (None, [])."""
+        for cat, spec in self._custom_kw.items():
+            hit, tokens = self._signal_spec(spec, stem_text)
+            if hit:
+                return cat, tokens
+        return None, []
 
     # ── state ────────────────────────────────────────────────────────
 
@@ -658,6 +728,11 @@ class Router:
         for pat in self.config.raw_config.get("exclude_patterns", []):
             if fnmatch.fnmatch(name, pat):
                 return f"excluded ({pat})"
+        # Content sniff: a key file with an innocent name (notes.txt
+        # containing 'sk-…') is never routed anywhere. Small text-ish
+        # files only, so the check is cheap.
+        if file_contains_secret(p):
+            return "credential file"
         try:
             resolved = p.resolve()
         except OSError:
@@ -717,14 +792,13 @@ class Router:
 
     # ── decisions ────────────────────────────────────────────────────
 
-    @staticmethod
-    def _empty_stats() -> dict:
+    def _empty_stats(self) -> dict:
         return {
             "scanned": 0, "decided": 0, "moved": 0, "copied": 0,
             "duplicates": 0, "collisions": 0, "errors": 0, "skipped": 0,
             "ocr_used": 0, "deepseek_calls": 0,
             "copies_found": 0, "copies_deleted": 0,
-            "by_category": {c: 0 for c in CATEGORIES},
+            "by_category": {c: 0 for c in self.targets},
             "by_source": {"extension": 0, "filename": 0, "content": 0,
                           "deepseek": 0, "fallback": 0},
         }
@@ -819,50 +893,82 @@ class Router:
         ext = _suffix(p.name)
         stem_text = _lower_stem(p.stem)
         self.stats["scanned"] += 1
+        active = self._active
 
         if ext in MUSIC_EXTS:
-            return self._decide(p, "music", 1.0, "extension", "audio file", [])
+            if "music" in active:
+                return self._decide(p, "music", 1.0, "extension",
+                                    "audio file", [])
+            return self._decide(p, *self._fallback(p, "audio file"), [])
 
         is_media = ext in IMAGE_EXTS or ext in VIDEO_EXTS
         is_code = ext in CODE_EXTS
 
         if is_media:
             # Media: only political names (or doc-like names) matter here.
-            pol, hits = self._signal(stem_text, "political")
-            if pol:
-                return self._decide(p, "political", 0.9, "filename",
-                                    "political name: " + ", ".join(hits[:4]),
-                                    hits)
-            if any(rx.search(stem_text) for rx in self._docname_re):
+            if "political" in active:
+                pol, hits = self._signal(stem_text, "political")
+                if pol:
+                    return self._decide(p, "political", 0.9, "filename",
+                                        "political name: " +
+                                        ", ".join(hits[:4]), hits)
+            custom, chits = self._custom_category(stem_text)
+            if custom:
+                return self._decide(p, custom, 0.9, "filename",
+                                    "custom category: " +
+                                    ", ".join(chits[:4]), chits)
+            if "documents" in active and any(
+                    rx.search(stem_text) for rx in self._docname_re):
                 return self._decide(p, "documents", 0.8, "filename",
-                                    "picture of a document (name)", hits)
+                                    "picture of a document (name)", [])
             return None  # -> OCR queue, else fallback pictures
 
         if is_code:
+            if "ml_development" in active:
+                ml, hits = self._signal(stem_text, "ml")
+                if ml:
+                    return self._decide(p, "ml_development", 0.9,
+                                        "filename",
+                                        "ML name: " + ", ".join(hits[:4]),
+                                        hits)
+            if "development" in active:
+                dev, dhits = self._signal(stem_text, "development")
+                if dev:
+                    return self._decide(p, "development", 0.9, "filename",
+                                        "dev name: " +
+                                        ", ".join(dhits[:4]), dhits)
+            custom, chits = self._custom_category(stem_text)
+            if custom:
+                return self._decide(p, custom, 0.9, "filename",
+                                    "custom category: " +
+                                    ", ".join(chits[:4]), chits)
+            if "development" in active:
+                return self._decide(p, "development", 0.7, "extension",
+                                    "code file", [])
+            return self._decide(p, *self._fallback(p, "code file"), [])
+
+        # Text-bearing files.
+        if "political" in active:
+            pol, hits = self._signal(stem_text, "political")
+            if pol:
+                return self._decide(p, "political", 0.9, "filename",
+                                    "political name: " +
+                                    ", ".join(hits[:4]), hits)
+        if "ml_development" in active:
             ml, hits = self._signal(stem_text, "ml")
             if ml:
                 return self._decide(p, "ml_development", 0.9, "filename",
                                     "ML name: " + ", ".join(hits[:4]), hits)
-            dev, dhits = self._signal(stem_text, "development")
+        if "development" in active:
+            dev, hits = self._signal(stem_text, "development")
             if dev:
                 return self._decide(p, "development", 0.9, "filename",
-                                    "dev name: " + ", ".join(dhits[:4]), hits)
-            return self._decide(p, "development", 0.7, "extension",
-                                "code file", [])
-
-        # Text-bearing files.
-        pol, hits = self._signal(stem_text, "political")
-        if pol:
-            return self._decide(p, "political", 0.9, "filename",
-                                "political name: " + ", ".join(hits[:4]), hits)
-        ml, hits = self._signal(stem_text, "ml")
-        if ml:
-            return self._decide(p, "ml_development", 0.9, "filename",
-                                "ML name: " + ", ".join(hits[:4]), hits)
-        dev, hits = self._signal(stem_text, "development")
-        if dev:
-            return self._decide(p, "development", 0.9, "filename",
-                                "dev name: " + ", ".join(hits[:4]), hits)
+                                    "dev name: " + ", ".join(hits[:4]), hits)
+        custom, chits = self._custom_category(stem_text)
+        if custom:
+            return self._decide(p, custom, 0.9, "filename",
+                                "custom category: " +
+                                ", ".join(chits[:4]), chits)
 
         if p.stat().st_size > self.max_file_size:
             # Too big for content extraction: decide by extension only.
@@ -916,23 +1022,33 @@ class Router:
             if yr:
                 entry["year"] = yr
         if sample:
-            pol, hits = self._signal(sample, "political")
-            if pol:
-                return self._decide(p, "political", 0.85, "content",
-                                    "political content: " +
-                                    ", ".join(hits[:4]), hits)
-            ml, hits = self._signal(sample, "ml")
-            if ml:
-                return self._decide(p, "ml_development", 0.85, "content",
-                                    "ML content: " + ", ".join(hits[:4]),
-                                    hits)
-            dev, hits = self._signal(sample, "development")
-            if dev:
-                return self._decide(p, "development", 0.85, "content",
-                                    "dev content: " + ", ".join(hits[:4]),
-                                    hits)
+            if "political" in self._active:
+                pol, hits = self._signal(sample, "political")
+                if pol:
+                    return self._decide(p, "political", 0.85, "content",
+                                        "political content: " +
+                                        ", ".join(hits[:4]), hits)
+            if "ml_development" in self._active:
+                ml, hits = self._signal(sample, "ml")
+                if ml:
+                    return self._decide(p, "ml_development", 0.85,
+                                        "content",
+                                        "ML content: " +
+                                        ", ".join(hits[:4]), hits)
+            if "development" in self._active:
+                dev, hits = self._signal(sample, "development")
+                if dev:
+                    return self._decide(p, "development", 0.85, "content",
+                                        "dev content: " +
+                                        ", ".join(hits[:4]), hits)
+            custom, chits = self._custom_category(sample)
+            if custom:
+                return self._decide(p, custom, 0.85, "content",
+                                    "custom category content: " +
+                                    ", ".join(chits[:4]), chits)
         # Undecided: DeepSeek if it has something to look at.
-        if sample and self.ds is not None and self.ds.api_key:
+        if (sample and self.ds is not None and self.ds.api_key
+                and self.ds_categories):
             self._ds_queue.append((p, entry, sample, {}))
             return None
         return self._decide(p, *self._fallback(p, "no signal in content"),
@@ -954,41 +1070,53 @@ class Router:
                 yr = _year_from_text(text)
                 if yr:
                     entry["year"] = yr
-            pol, hits = self._signal(text, "political")
-            if pol:
-                self._decide(p, "political", 0.85, "content",
-                             "OCR political text: " + ", ".join(hits[:4]),
-                             hits)
-                continue
-            # Scene labels: a political-looking photo/video with no text.
-            scene, labels = self._scene_signal(
-                str(data.get("meta", {}).get("classifications", ""))
-            )
-            if scene and _suffix(p.name) in IMAGE_EXTS | VIDEO_EXTS:
-                self._decide(p, "political", 0.7, "content",
-                             "political scene: " + ", ".join(labels[:4]),
-                             labels)
-                continue
-            ml, hits = self._signal(text, "ml")
-            if ml and _suffix(p.name) == ".pdf":
-                self._decide(p, "ml_development", 0.85, "content",
-                             "OCR ML text: " + ", ".join(hits[:4]), hits)
-                continue
+            if "political" in self._active:
+                pol, hits = self._signal(text, "political")
+                if pol:
+                    self._decide(p, "political", 0.85, "content",
+                                 "OCR political text: " +
+                                 ", ".join(hits[:4]), hits)
+                    continue
+                # Scene labels: a political-looking photo/video with no
+                # text.
+                scene, labels = self._scene_signal(
+                    str(data.get("meta", {}).get("classifications", ""))
+                )
+                if scene and _suffix(p.name) in IMAGE_EXTS | VIDEO_EXTS:
+                    self._decide(p, "political", 0.7, "content",
+                                 "political scene: " +
+                                 ", ".join(labels[:4]), labels)
+                    continue
+            if "ml_development" in self._active:
+                ml, hits = self._signal(text, "ml")
+                if ml and _suffix(p.name) == ".pdf":
+                    self._decide(p, "ml_development", 0.85, "content",
+                                 "OCR ML text: " + ", ".join(hits[:4]),
+                                 hits)
+                    continue
             # Document-looking media: OCR text like a property listing,
             # form, bill or receipt means the picture/video is really a
             # document (e.g. an apartment-listing photo -> Documents).
             doc_hits = [w for w, rx in zip(_DOC_CONTENT_WORDS,
                                             self._doc_content_re)
                         if rx.search(text.lower())]
-            if doc_hits and _suffix(p.name) in IMAGE_EXTS | VIDEO_EXTS:
+            if ("documents" in self._active and doc_hits
+                    and _suffix(p.name) in IMAGE_EXTS | VIDEO_EXTS):
                 self._decide(p, "documents", 0.7, "content",
                              "document text in media: "
                              + ", ".join(doc_hits[:4]), doc_hits)
                 continue
+            # User-defined category keywords in the OCR text.
+            custom, chits = self._custom_category(text)
+            if custom:
+                self._decide(p, custom, 0.85, "content",
+                             "custom category in OCR text: " +
+                             ", ".join(chits[:4]), chits)
+                continue
             # Media with anything for DeepSeek to read when enabled —
             # OCR text, or at least Vision scene labels.
             if (self.ds_media_enabled and self.ds is not None
-                    and self.ds.api_key
+                    and self.ds.api_key and self.ds_categories
                     and (text or str(data.get("meta", {})
                                      .get("classifications", "")))):
                 self._ds_queue.append((p, entry, text, data.get("meta", {})))
@@ -1038,6 +1166,7 @@ class Router:
                         _suffix(p.name) in IMAGE_EXTS:
                     res = dict(res, category="pictures")
                 if (res.get("category")
+                        and res.get("category") in self.targets
                         and res.get("confidence", 0) >= self.min_confidence):
                     self._decide(
                         p, res["category"], res["confidence"],
@@ -1059,19 +1188,25 @@ class Router:
         ext = _suffix(p.name)
         note = f" ({reason})" if reason else ""
         if ext in MUSIC_EXTS:
-            return "music", 0.6, "fallback", "audio extension" + note
-        if ext in VIDEO_EXTS:
-            return "videos", 0.6, "fallback", \
-                "video without political signal" + note
-        if ext in IMAGE_EXTS:
-            return "pictures", 0.6, "fallback", \
-                "media without political signal" + note
-        if ext in CODE_EXTS:
-            return "development", 0.6, "fallback", "code extension" + note
-        if (ext in DOC_EXTS or ext in TEXT_EXTS or ext in HTML_EXTS
+            cat, why = "music", "audio extension"
+        elif ext in VIDEO_EXTS:
+            cat, why = "videos", "video without political signal"
+        elif ext in IMAGE_EXTS:
+            cat, why = "pictures", "media without political signal"
+        elif ext in CODE_EXTS:
+            cat, why = "development", "code extension"
+        elif (ext in DOC_EXTS or ext in TEXT_EXTS or ext in HTML_EXTS
                 or ext == ".pdf"):
-            return "documents", 0.6, "fallback", "document extension" + note
-        return "misc", 0.6, "fallback", f"{reason or 'unknown type'}"
+            cat, why = "documents", "document extension"
+        else:
+            return "misc", 0.6, "fallback", f"{reason or 'unknown type'}"
+        if cat not in self._active:
+            # The bucket has no configured home: the file belongs in the
+            # 'anything else' bucket (misc) — which _apply_entry reports
+            # as an error when misc has no home either.
+            return ("misc", 0.6, "fallback",
+                    f"{why} (no '{cat}' category configured){note}")
+        return cat, 0.6, "fallback", why + note
 
     # ── apply (move/copy) ────────────────────────────────────────────
 
@@ -1167,7 +1302,8 @@ class Router:
         entry["name"] = dest.name
         entry["status"] = "moved" if self.action == "move" else "copied"
         self.stats["moved" if self.action == "move" else "copied"] += 1
-        self.stats["by_category"][category] += 1
+        self.stats["by_category"][category] = \
+            self.stats["by_category"].get(category, 0) + 1
         entry["links"] = self._create_links(dest)
         # A superseded copy at the previous destination (an old flat
         # decision re-routed into a year subfolder) is a duplicate now —
@@ -1621,7 +1757,7 @@ class Router:
 
     def status(self) -> dict:
         """Aggregate state for `route --status`."""
-        by_category = {c: 0 for c in CATEGORIES}
+        by_category = {c: 0 for c in self.targets}
         by_status = {}
         pending = 0
         for entry in self.state["entries"].values():

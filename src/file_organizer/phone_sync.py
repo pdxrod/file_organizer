@@ -60,6 +60,12 @@ except ImportError:  # pragma: no cover - standalone script execution
     from filename_rules import is_app_generated, normalise_leading_date, \
         date_prefix_in
 
+# Credential guard (name patterns + content sniffing).
+try:
+    from . import credential_guard
+except ImportError:  # pragma: no cover - standalone script execution
+    import credential_guard
+
 # ── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_CONFIG = "phone_sync_config.yaml"
@@ -1473,6 +1479,9 @@ class PhoneSync:
                   target_root: Optional[Path] = None) -> Optional[Path]:
         """Copy a file to the target directory, preserving relative structure.
 
+        Credential-looking files (by name, or by content for small text
+        files) are NEVER copied — see credential_guard.py.
+
         The target path mirrors the source structure under target_dir.
         For example, DCIM/Camera/IMG_001.jpg → <target>/DCIM/Camera/IMG_001.jpg
         dest_name overrides the final filename (used by item 13's leading
@@ -1485,6 +1494,11 @@ class PhoneSync:
         to a '.partial' temp name and renamed into place, so concurrent
         readers (e.g. an ADB tar stream) never see a half-written file.
         """
+        # Credentials are never copied, whatever their name: a notes.txt
+        # holding an API key stays on the device.
+        if credential_guard.file_contains_secret(source):
+            logger.info("Skipping credential-looking file: %s", source)
+            return None
         # Determine relative path: find which source dir the file is under
         source_resolved = source.resolve()
         rel_path = None

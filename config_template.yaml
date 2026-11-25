@@ -43,7 +43,12 @@ computer:
     # this computer. Use these names in sync_pairs and source_folders
     # below. A drive which is not available is reported and skipped —
     # plug it in and rerun, or edit the path.
-    # Replace the placeholder paths with your real ones.
+    # Replace the placeholder paths with your real ones. Paths look
+    # different on each platform (replace 'janedoe' with your user name):
+    #   macOS:    MAIN_DRIVE: "/Users/janedoe"
+    #   Windows:  MAIN_DRIVE: "C:/Users/janedoe"  (or "/c/Users/janedoe"
+    #             when you run under Git Bash)
+    #   Linux:    MAIN_DRIVE: "/home/janedoe"
     MAIN_DRIVE: "/Users/janedoe"
     EXTERNAL_DRIVE: "/Volumes/YourExternalDrive"
     # e.g. the Proton Drive folder macOS mounts for your account:
@@ -54,8 +59,8 @@ computer:
   sync_pairs:
     # Example: Using drive placeholders (recommended)
     - folders:
-        - "MAIN_DRIVE/dev"
-        - "EXTERNAL_DRIVE/dev"
+        - "MAIN_DRIVE/Development"
+        - "EXTERNAL_DRIVE/Development"
 
     # Example: Using drive placeholders with cloud storage
     - folders:
@@ -140,7 +145,10 @@ computer:
   # The output_base (the 'organized' folder) and softlink_backup_base are
   # always excluded automatically. The built-in safety defaults (.git etc.)
   # are always in force even if you shorten this list — your entries only
-  # ADD to them.
+  # ADD to them. Credentials are always protected too, whatever this list
+  # says: files whose NAME looks like a credential (API keys, private
+  # keys, tokens, .env, …) and small text files whose CONTENT holds one
+  # are never copied anywhere.
   exclude_patterns:
     # Junk files
     - ".DS_Store"
@@ -199,7 +207,7 @@ computer:
 
   # Where the 'organized' soft-link folder lives (item 15).
   # Default: the organized/ folder inside THIS file_organizer folder.
-  # Set any other path to override, e.g. "~/organized" for the old
+  # Set any other path to override, e.g. "MAIN_DRIVE/organized" for the old
   # home-folder behaviour, or a cloud-drive path.
   output_base: "organized"
 
@@ -210,7 +218,8 @@ computer:
   pid_path: "/tmp/file_organizer.pid"
 
   # ── Legacy softlink-folder handling ──────────────────────────────────────
-  # The old file_organiser backed these folders up to ~/organised and replaced
+  # The old file_organiser backed these folders up to MAIN_DRIVE/organised
+  # and replaced
   # them with soft links. That breaks tools like git, so the current default is
   # simply to EXCLUDE them from sync (see exclude_patterns above).
   #
@@ -300,8 +309,10 @@ computer:
   # is remembered and not retried until this many minutes pass, instead
   # of failing again every cycle. 0 = always retry.
   sync_failure_cooldown_minutes: 360
-  # Item 20 — where the failed-sync memory lives (~ = home directory).
-  sync_failure_state_path: "~/.file_organizer_sync_failures.json"
+  # Item 20 — where the failed-sync memory lives. Empty = a file in your
+  # home folder; MAIN_DRIVE/... keeps it inside your home on every
+  # platform.
+  sync_failure_state_path: "MAIN_DRIVE/.file_organizer_sync_failures.json"
   # Item 11 — rsync --timeout stall guard: a stuck cloud read fails after
   # this many seconds instead of hanging the whole sync hour. 0 = off.
   rsync_io_timeout_seconds: 300
@@ -325,7 +336,8 @@ computer:
   # Direct subfolder NAMES never synced, on top of exclude_patterns.
   # The organizers must not mirror their own checkouts between machines:
   # if your file_organizer folder lives inside a synced tree (e.g.
-  # MAIN_DRIVE/dev), list it here on EVERY machine that syncs that tree.
+  # MAIN_DRIVE/Development), list it here on EVERY machine that syncs that
+  # tree.
   sync_exclude_folder_names:
     - "file_organizer"
     - "file_organizer_v2"
@@ -361,7 +373,7 @@ computer:
   # Use './organize git-init' to actually run it.
   auto_git: false
   auto_git_folders:
-    - "MAIN_DRIVE/dev"
+    - "MAIN_DRIVE/Development"
 
   # Item 10 — collapse 'foo (1).png' rename families (made by the Mac or a
   # phone when the same file is downloaded twice). The NEWEST member becomes
@@ -391,22 +403,34 @@ computer:
   # Folders listed below are never touched (or anything inside them) —
   # e.g. software projects or legal files whose names are meaningful.
   # Add 'MAIN_DRIVE/Music' here if you do NOT want your music tidied in
-  # this style; users without a ~/Music folder simply get the other
+  # this style; users without a Music folder simply get the other
   # folders tidied.
   tidy:
     exclude_folders:
-      - MAIN_DRIVE/dev
+      - MAIN_DRIVE/Development
       - MAIN_DRIVE/Documents
 
   # ── Router (smart classification by name AND content) ────────────────────
-  # The router works out where a file should go from its name and contents:
-  #   political      -> ~/pol       (politics, geopolitics, culture war…)
-  #   ml_development -> ~/dev/ml    (AI/ML projects, papers, notes, code)
-  #   development    -> ~/dev       (software projects and dev notes)
-  #   pictures       -> ~/Pictures  (non-political images AND videos)
-  #   music          -> ~/Music
-  #   documents      -> ~/Documents
-  #   misc           -> ~/misc      (anything it can't work out)
+  # The router works out where a file should go from its name and contents.
+  # target_folders below ARE your categories — add, remove or rename them
+  # as you like, and every file is sorted into one of them. The standard
+  # buckets (documents, pictures, videos, music, development, misc) are
+  # recognised by extension and content out of the box. Any other category
+  # is yours to define: give it a folder here, and optional keyword hints
+  # under 'keywords:' — a file whose name or contents contain a hint goes
+  # there (DeepSeek also picks categories from this list).
+  #
+  # Example — a user who wants politics and AI/ML buckets adds two lines
+  # to target_folders and may sharpen them with keywords (a keyword is
+  # one word or a short phrase, matched in names and extracted text):
+  #   target_folders:
+  #     political: "MAIN_DRIVE/pol"
+  #     ml_development: "MAIN_DRIVE/Development/ml"
+  #   keywords:
+  #     political:
+  #       - "gaza"
+  #       - "election"
+  #
   # Plan first with './organize route' (dry-run, moves nothing), then apply
   # with './organize route-real'. route-status shows decisions so far and
   # route-undo puts the most recent moves back. OFF by default for safety.
@@ -416,9 +440,10 @@ computer:
     action: "move"
     # Folders to sweep when you run './organize route'. Existing files
     # get classified once; new files in watch_folders are routed on every
-    # production cycle (./organize auto / start).
+    # production cycle (./organize auto / start). Your downloads folder
+    # is a good inbox.
     route_roots:
-      - "MAIN_DRIVE/misc"
+      - "MAIN_DRIVE/Downloads"
     watch_folders:
       - "MAIN_DRIVE/Downloads"
       - "MAIN_DRIVE/Desktop"
@@ -427,30 +452,40 @@ computer:
     # Folders './organize rename-by-content' sweeps for files with
     # auto-generated names (4665.jpg, IMG-…, Screenshot_…, DSC…). The
     # content becomes the new name (images are OCR'd; text/PDF/office
-    # files are read directly). Empty means pictures, political and
-    # documents targets.
+    # files are read directly). Empty means the pictures and documents
+    # targets (plus political when configured).
     rename_folders: []
     # Folders './organize tidy' moves dated files in (top level plus one
     # level of non-year subfolders) into <folder>/<year>/ subfolders.
-    # Empty means political, pictures, videos and documents.
+    # Empty means the pictures, videos and documents targets (plus
+    # political when configured).
     year_folders: []
-    # Where each category goes (defaults shown; change as you like).
+    # Where each category goes — these ARE your categories: add, remove
+    # or rename them as you like; a category with an empty path is off.
+    # './organize config' walks through every category and its hints.
+    # MAIN_DRIVE/... stays inside your home folder on every platform;
+    # any real path (C:/Users/you/Documents, /home/you/Documents) also
+    # works.
     target_folders:
-      political: "~/pol"
-      ml_development: "~/dev/ml"
-      development: "~/dev"
-      pictures: "~/Pictures"
-      videos: "~/Videos"
-      music: "~/Music"
-      documents: "~/Documents"
-      misc: "~/misc"
+      documents: "MAIN_DRIVE/Documents"
+      pictures: "MAIN_DRIVE/Pictures"
+      videos: "MAIN_DRIVE/Videos"
+      music: "MAIN_DRIVE/Music"
+      development: "MAIN_DRIVE/Development"
+      # The catch-all: files the router can't classify. Downloads exists
+      # on every computer, so the unclassifiable lands where you already
+      # look — point it anywhere else you like.
+      misc: "MAIN_DRIVE/Downloads"
+    # Optional keyword hints per category (see the router: header above;
+    # './organize config' edits these too).
+    keywords: {}
     # Files whose year can be read from the name or the content get a
-    # year subfolder in these buckets (e.g. ~/Pictures/2018, ~/pol/2019,
-    # ~/Videos/2026); everything else stays flat. Set year_subfolders to
-    # false to disable, or trim the list to stop specific buckets.
+    # year subfolder in these buckets (e.g. Pictures/2018, Videos/2026);
+    # everything else stays flat. Set year_subfolders to false to disable,
+    # or trim the list to stop specific buckets. Any of your categories
+    # can appear here.
     year_subfolders: true
     year_subfolder_categories:
-      - "political"
       - "pictures"
       - "videos"
       - "documents"
@@ -485,14 +520,19 @@ computer:
   #
   # Note: on macOS the Proton Drive mount root IS the drive root — the
   # phone/web app's "My Files" level does not exist as a folder here, so
-  # reference its contents directly (e.g. PROTON_DRIVE/misc).
+  # reference its contents directly (e.g. PROTON_DRIVE/Downloads).
   phone_pull:
     # auto_pull: each production auto cycle runs phone_pull.sh pull when a
     # phone is connected (it exits quietly when none is). Set false to
     # only pull with `./organize pull`.
     auto_pull: true
-    local_stage: "MAIN_DRIVE/misc"
-    remote_stage: "PROTON_DRIVE/misc"
+    local_stage: "MAIN_DRIVE/Downloads"
+    remote_stage: "PROTON_DRIVE/Downloads"
+    # Where the adb tool lives on each platform (leave empty to use the
+    # 'adb' already on PATH):
+    #   macOS:    MAIN_DRIVE/Library/Android/sdk/platform-tools/adb
+    #   Windows:  "C:/platform-tools/adb.exe"
+    #   Linux:    usually already on PATH — use "adb"
     adb_path: "MAIN_DRIVE/Library/Android/sdk/platform-tools/adb"
     # Directories on the phone to pull (relative to /storage/emulated/0).
     # The phone program stages grace-period-filtered, deduped files into
@@ -514,8 +554,8 @@ computer:
     #      MAIN_DRIVE/Entertainment, overriding the default);
     #   2. otherwise, if a same-named folder exists under MAIN_DRIVE
     #      (e.g. MAIN_DRIVE/Music for staging/Music), files go there;
-    #   3. otherwise files land in MAIN_DRIVE/misc (created on demand) with
-    #      the staging path preserved underneath it.
+    #   3. otherwise files land in MAIN_DRIVE/Downloads (created on
+    #      demand) with the staging path preserved underneath it.
     staging_map: {}
     #   "Music": "MAIN_DRIVE/Entertainment"
     #   "DCIM/Camera": "MAIN_DRIVE/Pictures/Camera"
@@ -625,34 +665,14 @@ phone:
   # ── Cloud drive candidate paths ───────────────────────────────────────────
   # Where to look for cloud drive folders (`find-cloud-drives` checks
   # these): Proton Drive, Google Drive, Dropbox, iCloud, OneDrive, and
-  # whatever else you add. Wildcards like * are allowed. The built-in
-  # defaults are used for any paths you don't override.
-  cloud_drive_paths:
-    # macOS — Apple File Provider mounts
-    - "~/Library/CloudStorage/ProtonDrive-*"
-    - "~/Library/CloudStorage/GoogleDrive-*"
-    - "~/Library/CloudStorage/Dropbox-*"
-    - "~/Library/CloudStorage/OneDrive-*"
-    # macOS — classic sync-app folders
-    - "~/Google Drive"
-    - "~/GoogleDrive"
-    - "~/Dropbox"
-    - "~/OneDrive"
-    - "~/iCloud Drive"
-    - "~/Library/Mobile Documents/com~apple~CloudDocs"
-    # Android — shared storage
-    - "/storage/emulated/0/ProtonDrive"
-    - "/storage/emulated/0/Proton Drive"
-    - "/storage/emulated/0/GoogleDrive"
-    - "/storage/emulated/0/Google Drive"
-    - "/storage/emulated/0/Dropbox"
-    - "/storage/emulated/0/OneDrive"
-    # Termux shared
-    - "~/storage/shared/ProtonDrive"
-    - "~/storage/shared/Proton Drive"
-    - "~/storage/shared/GoogleDrive"
-    - "~/storage/shared/Google Drive"
-    - "~/storage/shared/Dropbox"
+  # whatever else you add. Wildcards like * are allowed. An EMPTY list
+  # uses the built-in defaults (macOS, Windows and Android locations).
+  # Add your own or override the defaults — replace 'janedoe' with your
+  # user name:
+  #   - "/Users/janedoe/Library/CloudStorage/ProtonDrive-*"
+  #   - "/Users/janedoe/Dropbox"
+  #   - "/storage/emulated/0/MyCloudApp"
+  cloud_drive_paths: []
 
   # ── Phone-side cloud sync ────────────────────────────────────────────────
   # When true, the daemon looks for cloud drive folders on the device
@@ -735,7 +755,10 @@ phone:
   # Files or folders whose name contains any of these patterns are skipped.
   # Case-insensitive substring match. Useful for thumbnails, caches, etc.
   # The built-in safety defaults (.thumbnails, .DS_Store, …) are always in
-  # force — your entries only ADD to them.
+  # force — your entries only ADD to them. Credentials are always
+  # protected too, whatever this list says: files whose name looks like
+  # a credential (API keys, private keys, tokens, .env, …) and small
+  # text files whose content holds one are never copied.
   exclude_patterns:
     - ".thumbnails"
     - ".thumbdata"

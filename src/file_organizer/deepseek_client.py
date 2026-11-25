@@ -15,54 +15,91 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 
-# The eight buckets the router knows about. Keep in sync with router.py.
+# The buckets the router recognises out of the box. The ACTIVE category
+# list always comes from config (router.target_folders) — these are only
+# the ones with built-in descriptions. Keep in sync with router.py.
 CATEGORIES = [
     "political", "ml_development", "development",
     "pictures", "videos", "music", "documents", "misc",
 ]
 
-SYSTEM_PROMPT = """You are the classification engine of a personal file organizer.
-You receive a batch of files (name, kind, and an excerpt of extracted text,
-possibly empty). For each file pick exactly one category:
+CATEGORY_DESCRIPTIONS = {
+    "political": ("politics, geopolitics, wars, elections, politicians, "
+                  "ideology, activism, protests, news/commentary about "
+                  "politics, books or articles on political/culture-war "
+                  "topics"),
+    "ml_development": ("AI/ML material — papers, notes, notebooks, or code "
+                       "about machine learning, deep learning, neural "
+                       "networks, LLMs, transformers, training, data "
+                       "science, AI tools"),
+    "development": ("software development — programs, repos, dev notes, "
+                    "configs, documentation of software projects that are "
+                    "NOT about ML"),
+    "pictures": ("non-political images — photos, screenshots, travel, "
+                 "family, memes"),
+    "videos": ("non-political videos and clips — home movies, travel "
+               "footage, screen recordings"),
+    "music": "audio files",
+    "documents": ("general documents — letters, receipts, forms, records, "
+                  "reports, property/real-estate listings"),
+    "misc": "none of the above, or genuinely impossible to tell",
+}
 
-- "political": politics, geopolitics, wars, elections, politicians, ideology,
-  activism, protests, news/commentary about politics, books or articles on
-  political/culture-war topics.
-- "ml_development": AI/ML material — papers, notes, notebooks, or code about
-  machine learning, deep learning, neural networks, LLMs, transformers,
-  training, data science, AI tools.
-- "development": software development — programs, repos, dev notes, configs,
-  documentation of software projects that are NOT about ML.
-- "pictures": non-political images — photos, screenshots, travel,
-  family, memes that are not political.
-- "videos": non-political videos and clips — home movies, travel footage,
-  screen recordings that are not political.
-- "music": audio files.
-- "documents": general documents — letters, receipts, forms, records, reports,
-  property/real-estate listings, that are not political and not ML.
-- "misc": none of the above, or genuinely impossible to tell.
 
-Rules:
-1. Political content wins over documents, pictures and videos for
-   text-bearing files.
-2. Software/code files go to development (or ml_development if ML-related),
-   never political.
-3. Media without political content goes to pictures (images) or videos
-   (video files).
-4. A photo/screenshot OF a document (a form, letter, receipt, contract,
-   property listing, invoice) is documents, not pictures.
-5. When unsure, choose the single most likely category and set confidence
-   below 0.6 — the organizer falls back to filename-based rules for those.
+def _category_description(name: str) -> str:
+    """A prompt line for a category: the built-in description when there
+    is one, else a plain 'files about <name>' so user-defined categories
+    still make sense to the model."""
+    return CATEGORY_DESCRIPTIONS.get(
+        name, f"files about {name.replace('_', ' ')}"
+    )
 
-Answer with JSON only, in exactly this shape:
-{"results": [{"i": 0, "category": "political", "confidence": 0.9, "reason": "short reason"}]}
-Every input file must appear exactly once."""
+
+def build_system_prompt(categories: list) -> str:
+    """The classification prompt, built from the ACTIVE category list so
+    user-defined categories are offered too and removed ones never are."""
+    lines = [
+        "You are the classification engine of a personal file organizer.",
+        "You receive a batch of files (name, kind, and an excerpt of "
+        "extracted text, possibly empty). For each file pick exactly one "
+        "category:",
+        "",
+    ]
+    for cat in categories:
+        lines.append(f'- "{cat}": {_category_description(cat)}.')
+    rules = [
+        "- Software/code files go to a development category when one is "
+        "configured, never to a media category.",
+        "- Media without other signals goes to pictures (images) or "
+        "videos (video files) when those categories exist.",
+        "- A photo/screenshot OF a document (a form, letter, receipt, "
+        "contract, property listing, invoice) is documents, not "
+        "pictures, when a documents category exists.",
+        "- When unsure, choose the single most likely category and set "
+        "confidence below 0.6 — the organizer falls back to "
+        "filename-based rules for those.",
+    ]
+    if "political" in categories:
+        rules.insert(
+            0,
+            "- Political content wins over documents, pictures and videos "
+            "for text-bearing files.",
+        )
+    lines += ["Rules: "] + rules + [
+        "",
+        "Answer with JSON only, in exactly this shape:",
+        '{"results": [{"i": 0, "category": "documents", "confidence": '
+        '0.9, "reason": "short reason"}]}',
+        "Every input file must appear exactly once.",
+    ]
+    return "\n".join(lines)
 
 
 class DeepSeekError(Exception):
@@ -81,6 +118,7 @@ class DeepSeekClient:
         timeout_seconds: int = 90,
         max_retries: int = 2,
         max_tokens: int = 4096,
+        categories: Optional[list] = None,
     ):
         self.api_key = (
             api_key
@@ -92,6 +130,15 @@ class DeepSeekClient:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.max_tokens = max_tokens
+        # The categories offered to the model: the caller's active list
+        # (config target_folders), or the built-in set when none given.
+        # The system prompt is built from this list so user-defined
+        # categories are offered and removed ones never are.
+        self.categories = (
+            [str(c).strip().lower() for c in categories if str(c).strip()]
+            if categories else list(CATEGORIES)
+        ) or list(CATEGORIES)
+        self.system_prompt = build_system_prompt(self.categories)
 
     @staticmethod
     def _read_key_file(path: str) -> str:
@@ -172,7 +219,7 @@ class DeepSeekClient:
         try:
             message = self._chat(
                 [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": user},
                 ],
                 response_format={"type": "json_object"},
@@ -201,8 +248,13 @@ class DeepSeekClient:
             except (TypeError, ValueError):
                 continue
             category = str(entry.get("category", "")).strip().lower()
-            if category not in CATEGORIES:
-                category = "misc"
+            if category not in self.categories:
+                # An off-list answer (model drift) falls into the
+                # 'anything else' bucket, or the first real category.
+                category = (
+                    "misc" if "misc" in self.categories
+                    else (self.categories[0] if self.categories else "misc")
+                )
             try:
                 confidence = float(entry.get("confidence", 0.0))
             except (TypeError, ValueError):
