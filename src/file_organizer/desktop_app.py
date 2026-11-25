@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Desktop GUI wrapper for file_organizer using Tkinter."""
 
-import sys, os, shutil, threading, subprocess
+import sys, os, shutil, threading, subprocess, signal, time
 from pathlib import Path
 
 # Add src/ to path so we can import the package
@@ -232,45 +232,97 @@ class OrganizerGUI:
             return
         self._run_command(["--REAL", "--sync-only"])
 
+    def _pid_file(self):
+        try:
+            from file_organizer.config import Config
+            cfg = Config(str(PROJECT_ROOT / "config.yaml"))
+            return str(cfg.data.get("pid_path") or "/tmp/file_organizer.pid")
+        except Exception:
+            return "/tmp/file_organizer.pid"
+
+    def _daemon_pid(self):
+        try:
+            from file_organizer.single_instance import read_holder
+            return read_holder(self._pid_file())
+        except Exception:
+            return 0
+
+    def _kill_pid(self, pid, killed):
+        """SIGTERM a pid, wait up to 5s, then SIGKILL. Returns True when
+        the pid existed."""
+        try:
+            from file_organizer.single_instance import pid_alive
+        except ImportError:
+            pid_alive = lambda p: True  # noqa: E731
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            return False
+        self._log(f"Sent SIGTERM to PID {pid}")
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if not pid_alive(pid):
+                self._log(f"PID {pid} stopped.")
+                killed.append(pid)
+                return True
+            time.sleep(0.25)
+        try:
+            os.kill(pid, signal.SIGKILL)
+            self._log(f"Force-killed PID {pid}")
+        except OSError:
+            pass
+        killed.append(pid)
+        return True
+
     def _start_daemon(self):
+        holder = self._daemon_pid()
+        if holder:
+            self._log(
+                f"A file_organizer daemon is already running (PID {holder})."
+            )
+            self._log("Only one organizer may run at a time — Stop it "
+                      "here (or './organize stop') before starting another.")
+            self.status_var.set(f"Already running (PID {holder}).")
+            return
         if not messagebox.askyesno("Confirm", "Start daemon in PRODUCTION mode? Runs continuously."):
             return
         self._run_command(["--REAL"])
 
     def _exit_app(self):
-        """Kill everything and exit."""
-        self._running = False
-        # Kill any running file_organizer processes
-        try:
-            subprocess.run(["pkill", "-f", "python.*file_organizer"], capture_output=True)
-        except Exception:
-            pass
+        """Stop the daemon (if any) and exit."""
+        self._stop_daemon()
         self.root.destroy()
 
     def _stop_daemon(self):
         self._log("Stopping daemon...")
         self.status_var.set("Stopping...")
-        killed = 0
+        killed = []
+        holder = self._daemon_pid()
+        if holder:
+            self._kill_pid(holder, killed)
+        # Fallback for daemons started by older versions that never
+        # wrote the pid file: any other file_organizer process we can
+        # see — never this GUI itself.
         try:
             result = subprocess.run(
-                ["pgrep", "-f", "python.*file_organizer"],
+                ["pgrep", "-f", "file_organizer"],
                 capture_output=True, text=True
             )
-            for pid in result.stdout.strip().split("\n"):
-                pid = pid.strip()
-                if pid:
-                    try:
-                        os.kill(int(pid), 15)  # SIGTERM
-                        self._log(f"Sent SIGTERM to PID {pid}")
-                        killed += 1
-                    except OSError:
-                        pass
+            for pid_s in result.stdout.split():
+                try:
+                    pid = int(pid_s.strip())
+                except ValueError:
+                    continue
+                if pid == os.getpid() or pid in killed:
+                    continue
+                self._kill_pid(pid, killed)
         except Exception as e:
-            self._log(f"Error stopping daemon: {e}")
+            self._log(f"Error scanning for daemon processes: {e}")
         self._running = False
         if killed:
-            self.status_var.set(f"Stopped {killed} process(es).")
-            self._log(f"Daemon stopped ({killed} process{'es' if killed > 1 else ''}).")
+            n = len(killed)
+            self.status_var.set(f"Stopped {n} process(es).")
+            self._log(f"Daemon stopped ({n} process{'es' if n > 1 else ''}).")
         else:
             self.status_var.set("No daemon running.")
             self._log("No file_organizer daemon found.")

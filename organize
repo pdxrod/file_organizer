@@ -423,6 +423,12 @@ def computer_start(log):
             raise SystemExit(1)
 
     pid_file, log_file = computer_pid_log()
+    from file_organizer.single_instance import read_holder
+    holder = read_holder(pid_file)
+    if holder:
+        log(f"File organizer is already running (PID {holder}) —")
+        log("'./organize stop' stops it. Only one may run at a time.")
+        raise SystemExit(0)
     proc = subprocess.Popen(
         [sys.executable, "-m", "file_organizer", "--REAL",
          "--config", str(cfg_path)],

@@ -799,6 +799,23 @@ def main(argv=None):
 
     # Daemon mode
     if real_mode and not args.scan_once:
+        from file_organizer.single_instance import (
+            acquire, release, read_holder,
+        )
+        pid_path = str(
+            config.data.get("pid_path") or "/tmp/file_organizer.pid"
+        )
+        lock = acquire(pid_path)
+        if lock is None:
+            holder = read_holder(pid_path)
+            msg = (
+                f"file_organizer is already running (PID {holder or '?'}) — "
+                "'./organize stop' stops it. Only one organizer may run "
+                "at a time."
+            )
+            print(msg)
+            logger.warning(msg)
+            return
         logger.info("Entering daemon mode (Ctrl+C to stop, or './organize stop')")
         interval = config.raw_config.get("scan_interval", 3600)
         backoff_factor = int(config.raw_config.get("idle_backoff_factor", 2) or 2)
@@ -806,6 +823,14 @@ def main(argv=None):
             config.raw_config.get("idle_backoff_max_multiplier", 8) or 8
         )
         idle_streak = 0
+
+        def _sigterm(_signum, _frame):
+            # './organize stop' sends SIGTERM — treat it like Ctrl+C so
+            # the finally block releases the lock and removes the pid
+            # file instead of leaving a stale one behind.
+            raise KeyboardInterrupt
+
+        previous = signal.signal(signal.SIGTERM, _sigterm)
         try:
             while True:
                 # Run the cycle, then wait for the background sync so two
@@ -831,9 +856,30 @@ def main(argv=None):
                 time.sleep(sleep_for)
         except KeyboardInterrupt:
             logger.info("Daemon stopped.")
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+            release(lock, pid_path)
         return
 
     # One-shot cycle
+    if real_mode:
+        # A production run while the daemon is running would double up on
+        # syncs (the daemon holds the single-instance lock). Refuse — the
+        # user asked for it: 'organize stop' first.
+        from file_organizer.single_instance import read_holder
+        pid_path = str(
+            config.data.get("pid_path") or "/tmp/file_organizer.pid"
+        )
+        holder = read_holder(pid_path)
+        if holder:
+            msg = (
+                f"A file_organizer daemon is already running (PID {holder}) "
+                "— './organize stop' stops it. Only one organizer may run "
+                "at a time."
+            )
+            print(msg)
+            logger.warning(msg)
+            return
     try:
         _, sync_thread = run_full_cycle(config, dry_run=not real_mode)
         # The folder sync runs in a background daemon thread; a one-shot
