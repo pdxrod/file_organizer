@@ -47,16 +47,18 @@ try {
     choco install innosetup --no-progress -y *>&1 | Tee-Object build\choco.log
     if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed ($LASTEXITCODE)" }
 
-    # Locate ISCC: prefer the choco shim on PATH, fall back to the default
-    # install location.
-    $iscc = (Get-Command ISCC -ErrorAction SilentlyContinue).Source
-    if (-not $iscc) {
-        $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    # Locate ISCC: prefer the real install location, fall back to the
+    # choco shim on PATH.
+    $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    if (-not (Test-Path $iscc)) {
+        $iscc = (Get-Command ISCC -ErrorAction SilentlyContinue).Source
     }
-    if (-not (Test-Path $iscc)) { throw "ISCC.exe not found (tried PATH and $iscc)" }
-    # /LOG makes ISCC write its own compile log — errors included — so a
-    # failure always leaves evidence even when nothing prints to stdout.
-    & $iscc /Q "/LOG=build\iscc.log" build\file_organizer.iss
+    if (-not $iscc -or -not (Test-Path $iscc)) {
+        throw "ISCC.exe not found (tried the Inno Setup 6 install dir and PATH)"
+    }
+    # Tee captures stdout+stderr: PSNativeCommandUseErrorActionPreference is
+    # off, so native stderr flows through the pipeline instead of throwing.
+    & $iscc /Q build\file_organizer.iss *>&1 | Tee-Object build\iscc.log
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed ($LASTEXITCODE)" }
     if (-not (Test-Path dist\FileOrganizerSetup.exe)) {
         throw "dist\FileOrganizerSetup.exe was not produced"
