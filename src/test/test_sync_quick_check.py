@@ -321,5 +321,79 @@ class RsyncBinaryTests(unittest.TestCase):
         self.assertEqual(args[0], "/custom/rsync")
 
 
+class ChunkExcludeTests(unittest.TestCase):
+    """Chunked sync must never launch an rsync run rooted at an
+    excluded subfolder (.git, __pycache__, …): inside that run the
+    bare-name exclude pattern can no longer match (the excluded name is
+    the transfer root, not an item inside it), so rsync used to walk and
+    transfer the whole junk tree."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="chunk_exclude_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def _engine(self, raw=None):
+        cfg = {
+            "exclude_patterns": [
+                ".git", "__pycache__", "node_modules", ".trashed*",
+            ],
+        }
+        cfg.update(raw or {})
+        return sync_engine.SyncEngine(StubConfig(cfg))
+
+    def _mk(self, root, names):
+        for n in names:
+            (root / n).mkdir(parents=True, exist_ok=True)
+
+    def test_sync_subdirs_skips_excluded_names(self):
+        src = self.tmp / "src"
+        self._mk(src, [".git", "__pycache__", "node_modules",
+                       ".trashed-123", "keep1", "keep2"])
+        self.assertEqual(
+            self._engine()._sync_subdirs(src), ["keep1", "keep2"],
+        )
+
+    def test_sync_subdirs_still_applies_exclude_folder_names(self):
+        src = self.tmp / "src"
+        self._mk(src, ["vendor", "keep"])
+        engine = self._engine({"sync_exclude_folder_names": ["vendor"]})
+        self.assertEqual(engine._sync_subdirs(src), ["keep"])
+
+    def test_sync_subdirs_invalid_patterns_leave_list_unfiltered(self):
+        # Unsupported pattern shapes (matcher.valid == False) must not
+        # filter anything — rsync gets the full list, like the quick
+        # check declining to decide.
+        src = self.tmp / "src"
+        self._mk(src, [".git", "keep"])
+        engine = self._engine({"exclude_patterns": ["foo/"]})
+        self.assertEqual(engine._sync_subdirs(src), [".git", "keep"])
+
+    def test_chunked_sync_never_runs_rsync_for_excluded_subfolders(self):
+        src = self.tmp / "src"
+        tgt = self.tmp / "tgt"
+        self._mk(src, [".git", "__pycache__"] + [f"d{i}" for i in range(34)])
+        _write(src / ".git" / "objects" / "pack-big.pack", b"x" * 100)
+        engine = self._engine()  # chunk threshold default 30
+        with mock.patch.object(
+            engine, "_run_rsync", return_value=True
+        ) as run:
+            ok = engine._run_rsync_many(src, tgt)
+        self.assertTrue(ok)
+        # 34 kept subfolders each get one run, plus the top-level run
+        # for loose files (with the subfolders excluded via kwargs).
+        self.assertEqual(run.call_count, 35)
+        for call in run.call_args_list:
+            args, _kwargs = call
+            self.assertNotIn(
+                Path(args[0]).name, {".git", "__pycache__"},
+                f"rsync run rooted at excluded subfolder: {args[0]}",
+            )
+        # The final top-level run must exclude the kept subfolders so
+        # their contents are not transferred twice.
+        _final_args, final_kwargs = run.call_args_list[-1]
+        self.assertIs(final_kwargs.get("delete"), False)
+        self.assertEqual(len(final_kwargs["exclude_subdirs"]), 34)
+
+
 if __name__ == "__main__":
     unittest.main()

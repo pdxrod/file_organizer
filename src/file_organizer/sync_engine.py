@@ -551,7 +551,17 @@ class SyncEngine:
         """Direct subfolder names eligible for sync, excluding folders the
         user asked never to sync (sync_exclude_folder_names — e.g. the
         file_organizer checkouts themselves, so the organizers never
-        mirror their own source code between machines).
+        mirror their own source code between machines) AND subfolders
+        whose names match exclude_patterns (.git, __pycache__,
+        node_modules, .venv, …).
+
+        The pattern filter matters in chunked mode: each subfolder gets
+        its own rsync run ROOTED at that subfolder, where a bare-name
+        exclude like ".git" no longer matches anything (the .git
+        component is the transfer root itself, not an item inside it) —
+        without this filter those junk trees were fully walked and
+        transferred. Invalid (unsupported) patterns leave the list
+        unfiltered, exactly like the quick check declines to decide.
         """
         try:
             subdirs = sorted(
@@ -559,7 +569,25 @@ class SyncEngine:
             )
         except OSError:
             return []
-        return [n for n in subdirs if n not in self._exclude_folder_names]
+        matcher = _ExcludeMatcher(
+            list(self._exclude_patterns)
+            + [f"/{n}/" for n in self._exclude_folder_names]
+        )
+        kept: list[str] = []
+        skipped: list[str] = []
+        for name in subdirs:
+            if name in self._exclude_folder_names:
+                continue
+            if matcher.valid and matcher.matches(name, is_dir=True):
+                skipped.append(name)
+                continue
+            kept.append(name)
+        if skipped:
+            logger.info(
+                "Chunker skipping excluded subfolder(s) of %s: %s",
+                source, ", ".join(skipped),
+            )
+        return kept
 
     def _run_rsync_many(self, source: Path, target: Path,
                         delete: bool = False) -> bool:
