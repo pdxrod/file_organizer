@@ -1,6 +1,7 @@
 ; file_organizer (organize) — per-user Windows installer.
 ; Compiled by packaging/build_windows.ps1; {{VERSION}} is stamped there.
 ; SourceDir is the repo root (the .iss lives one level below, in build\).
+; NOTE: Inno Setup directives are single lines — no line continuations.
 
 #define MyAppName "file_organizer (organize)"
 #define MyAppVersion "{{VERSION}}"
@@ -31,23 +32,15 @@ UninstallDisplayName={#MyAppName}
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-; The PyInstaller onedir build: organize.exe + _internal\, plus the
-; config template and the phone-pull helper staged by build_windows.ps1.
-Source: "dist\organize\*"; DestDir: "{app}"; \
-    Flags: ignoreversion recursesubdirs createallsubdirs
+; The PyInstaller onedir build: organize.exe + _internal\, plus the config template and the phone-pull helper staged by build_windows.ps1.
+Source: "dist\organize\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Registry]
-; Put {app} on the user's PATH (HKCU — no admin rights needed).
-; A new console window picks it up; explorer-based apps after a re-login.
-Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
-    ValueData: "{olddata};{app}"; Check: NeedsAddPath('{app}'); \
-    Flags: preservestringtype
+; Put {app} on the user's PATH (HKCU — no admin rights needed). New console windows pick it up.
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Check: NeedsAddPath('{app}'); Flags: preservestringtype
 
 [Run]
-Filename: "{cmd}"; \
-    Parameters: "/k echo file_organizer installed! Open a NEW PowerShell/CMD window and type: organize"; \
-    Description: "&Open a console window"; \
-    Flags: postinstall nowait skipifsilent
+Filename: "{cmd}"; Parameters: "/k echo file_organizer installed! Open a NEW PowerShell/CMD window and type: organize"; Description: "&Open a console window"; Flags: postinstall nowait skipifsilent
 
 [Code]
 function NeedsAddPath(Param: string): boolean;

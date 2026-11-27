@@ -13,10 +13,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-13
+          - os: macos-15-intel
             asset: file_organizer-mac-intel.zip
             build: bash packaging/build_macos.sh
-          - os: macos-14
+          - os: macos-15
             asset: file_organizer-mac-apple-silicon.zip
             build: bash packaging/build_macos.sh
           - os: windows-latest
