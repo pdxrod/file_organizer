@@ -14,6 +14,37 @@ your computer, cloud drives, and Android phone.
 
 ---
 
+## 📦 Download — no Python needed
+
+Installers for macOS and Windows are built automatically for every
+release and attached to the latest
+[GitHub Release](https://github.com/pdxrod/file_organizer/releases/latest):
+
+| Platform | Download | Install |
+|----------|----------|---------|
+| **macOS — Apple Silicon** (M1/M2/M3/M4) | [file_organizer-mac-apple-silicon.zip](https://github.com/pdxrod/file_organizer/releases/latest/download/file_organizer-mac-apple-silicon.zip) | Unzip, then double-click **install.command**. Open a new Terminal and type `organize`. |
+| **macOS — Intel** | [file_organizer-mac-intel.zip](https://github.com/pdxrod/file_organizer/releases/latest/download/file_organizer-mac-intel.zip) | Same as above. |
+| **Windows** | [FileOrganizerSetup.exe](https://github.com/pdxrod/file_organizer/releases/latest/download/FileOrganizerSetup.exe) | Run it and click through (per-user, no admin). Open a new PowerShell/CMD window and type `organize`. |
+
+**Linux**: clone this repo and run `./organize` (Python 3 + `pip install pyyaml`).
+
+The first `organize` run walks you through the settings with a guided
+editor — no YAML editing needed.
+
+First-time notes:
+
+- **macOS**: the installers are unsigned, so macOS may say a file
+  *"cannot be opened because the developer cannot be verified"* —
+  right-click it in Finder → **Open** → **Open**. (The installer removes
+  the quarantine flag from the files it installs, so `organize` itself
+  runs without prompts.)
+- **Windows**: if SmartScreen warns, click **More info → Run anyway**.
+- **rsync** is required for folder sync (`brew install rsync` on macOS;
+  MSYS2 or cwRsync on Windows). **adb** is only needed for phone sync
+  over USB.
+
+---
+
 ## What it does
 
 | Capability | What happens |

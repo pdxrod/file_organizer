@@ -758,15 +758,16 @@ def report_first_run(config_path: str) -> None:
         )
     else:
         step2 = "  2. Replace any starter example paths with YOUR real paths.\n"
+    cmd = "organize" if getattr(sys, "frozen", False) else "./organize"
     print(
         "\nTo finish setup:\n"
-        "  1. Run './organize config' — a guided editor that sets each\n"
+        f"  1. Run '{cmd} config' — a guided editor that sets each\n"
         "     section with you, no text editor needed.\n"
         f"     (Or open {config_path} with TextEdit (Mac), Notepad (Windows)\n"
         "     or nano (Termux).)\n"
         + step2
         + "  3. Use SPACES for indentation — YAML does not allow TABs.\n"
-        + "  4. Run again: ./organize test\n"
+        f"  4. Run again: {cmd} test\n"
         + "\nEverything is OFF until you enable it — nothing moves or "
         + "syncs yet.\n",
         file=sys.stderr,
@@ -778,7 +779,13 @@ def find_project_root() -> Path:
     config_template.yaml. Walks up from this file
     (src/file_organizer/config.py → src → project root), and falls back to
     this file's directory when no template is found (e.g. old flat layout).
+
+    In a FROZEN build (the macOS/Windows installer) the root is the
+    folder the `organize` binary lives in — config.yaml,
+    config_template.yaml, organized/ and the log all live there.
     """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
     cur = Path(__file__).resolve().parent
     for _ in range(6):
         if (cur / "config_template.yaml").exists():

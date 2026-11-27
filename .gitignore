@@ -173,3 +173,7 @@ flagged/
 .cache
 mkdocs-material-insiders
 .swp
+
+# Installer build artifacts (packaging/build_*.sh / .ps1)
+build/
+dist/

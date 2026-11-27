@@ -1,0 +1,68 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            asset: file_organizer-mac-intel.zip
+            build: bash packaging/build_macos.sh
+          - os: macos-14
+            asset: file_organizer-mac-apple-silicon.zip
+            build: bash packaging/build_macos.sh
+          - os: windows-latest
+            asset: FileOrganizerSetup.exe
+            build: pwsh -File packaging/build_windows.ps1
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests (sanity gate)
+        run: python -m unittest discover -s src/test -q
+      - name: Build installer
+        run: ${{ matrix.build }}
+      - name: Pick the release asset
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ "$RUNNER_ARCH" = "ARM64" ]; then
+              cp dist/file_organizer-mac.zip dist/file_organizer-mac-apple-silicon.zip
+            else
+              cp dist/file_organizer-mac.zip dist/file_organizer-mac-intel.zip
+            fi
+            echo "ASSET=dist/${{ matrix.asset }}" >> "$GITHUB_ENV"
+          else
+            echo "ASSET=dist/FileOrganizerSetup.exe" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
