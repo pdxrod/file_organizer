@@ -36,11 +36,13 @@ $version = (Select-String -Path src\file_organizer\__init__.py `
 if (-not $version) { throw "could not read the version from __init__.py" }
 $iss = Get-Content packaging\file_organizer.iss -Raw
 $iss = $iss.Replace("{{VERSION}}", $version)
-Set-Content -Path build\file_organizer.iss -Value $iss -Encoding UTF8
+# ASCII on purpose: Inno Setup compiles BOM-less .iss files as ANSI, so any
+# non-ASCII character in the script breaks preprocessing.
+Set-Content -Path build\file_organizer.iss -Value $iss -Encoding ascii
 
 choco install innosetup --no-progress -y *>&1 | Tee-Object build\choco.log
 if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed ($LASTEXITCODE)" }
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /Qp build\file_organizer.iss *>&1 | Tee-Object build\iscc.log
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /Q build\file_organizer.iss *>&1 | Tee-Object build\iscc.log
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed ($LASTEXITCODE)" }
 if (-not (Test-Path dist\FileOrganizerSetup.exe)) {
     throw "dist\FileOrganizerSetup.exe was not produced"

@@ -1,7 +1,8 @@
-; file_organizer (organize) — per-user Windows installer.
+; file_organizer (organize) - per-user Windows installer.
 ; Compiled by packaging/build_windows.ps1; {{VERSION}} is stamped there.
 ; SourceDir is the repo root (the .iss lives one level below, in build\).
-; NOTE: Inno Setup directives are single lines — no line continuations.
+; NOTE: Inno Setup directives are single lines - no line continuations.
+; NOTE: keep this file pure ASCII - it is compiled as ANSI.
 
 #define MyAppName "file_organizer (organize)"
 #define MyAppVersion "{{VERSION}}"
@@ -36,7 +37,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "dist\organize\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Registry]
-; Put {app} on the user's PATH (HKCU — no admin rights needed). New console windows pick it up.
+; Put {app} on the user's PATH (HKCU - no admin rights needed). New console windows pick it up.
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Check: NeedsAddPath('{app}'); Flags: preservestringtype
 
 [Run]
