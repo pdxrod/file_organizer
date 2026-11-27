@@ -359,14 +359,25 @@ class ChunkExcludeTests(unittest.TestCase):
         engine = self._engine({"sync_exclude_folder_names": ["vendor"]})
         self.assertEqual(engine._sync_subdirs(src), ["keep"])
 
-    def test_sync_subdirs_invalid_patterns_leave_list_unfiltered(self):
-        # Unsupported pattern shapes (matcher.valid == False) must not
-        # filter anything — rsync gets the full list, like the quick
-        # check declining to decide.
+    def test_unsupported_pattern_shapes_never_match_a_bare_name(self):
+        # Suffix pairs ("a/b") and anchored files ("/x.txt") cannot
+        # match a top-level subfolder name — they are left for rsync,
+        # and must NOT disable the .git-style protection.
         src = self.tmp / "src"
         self._mk(src, [".git", "keep"])
-        engine = self._engine({"exclude_patterns": ["foo/"]})
-        self.assertEqual(engine._sync_subdirs(src), [".git", "keep"])
+        engine = self._engine({
+            "exclude_patterns": [".git", "a/b", "/x.txt"],
+        })
+        self.assertEqual(engine._sync_subdirs(src), ["keep"])
+
+    def test_one_unsupported_pattern_does_not_disable_the_filter(self):
+        # Regression: previously the whole filter was switched off when
+        # ANY pattern had an unsupported shape, so .git got chunk-synced
+        # again. Now .git is always skipped, whatever else is listed.
+        src = self.tmp / "src"
+        self._mk(src, [".git", "keep"])
+        engine = self._engine({"exclude_patterns": [".git", "foo/"]})
+        self.assertEqual(engine._sync_subdirs(src), ["keep"])
 
     def test_chunked_sync_never_runs_rsync_for_excluded_subfolders(self):
         src = self.tmp / "src"

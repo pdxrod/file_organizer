@@ -7,6 +7,6 @@ Syncs folders bidirectionally or one-way using rsync.
 Handles .git, .venv, and other development folders intelligently.
 """
 
-__version__ = "2.8.2"
+__version__ = "2.8.3"
 __author__ = "janedoe"
 __license__ = "MIT"

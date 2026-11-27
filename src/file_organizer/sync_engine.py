@@ -548,37 +548,52 @@ class SyncEngine:
         return ok
 
     def _sync_subdirs(self, source: Path) -> list:
-        """Direct subfolder names eligible for sync, excluding folders the
-        user asked never to sync (sync_exclude_folder_names — e.g. the
-        file_organizer checkouts themselves, so the organizers never
-        mirror their own source code between machines) AND subfolders
-        whose names match exclude_patterns (.git, __pycache__,
-        node_modules, .venv, …).
+        """Direct subfolder names eligible for sync. Excludes:
 
-        The pattern filter matters in chunked mode: each subfolder gets
-        its own rsync run ROOTED at that subfolder, where a bare-name
-        exclude like ".git" no longer matches anything (the .git
-        component is the transfer root itself, not an item inside it) —
-        without this filter those junk trees were fully walked and
-        transferred. Invalid (unsupported) patterns leave the list
-        unfiltered, exactly like the quick check declines to decide.
+          - sync_exclude_folder_names (root-level, exact names), and
+          - names matching the simple exclude_patterns shapes that CAN
+            match a bare folder name (".git", "__pycache__",
+            ".trashed*", "**/name", "/name/"). Exotic shapes (suffix
+            pairs like "a/b", anchored files like "/x.txt") can never
+            match a top-level name, so they are left for rsync itself.
+
+        The filter matches per name and can never be switched off
+        wholesale by one unsupported pattern. In chunked mode each
+        subfolder gets its own rsync run ROOTED at that subfolder,
+        where a bare-name exclude like ".git" no longer matches
+        anything (the .git component is the transfer root itself, not
+        an item inside it) — so a chunk run for an excluded name would
+        walk and transfer the whole junk tree. Excluding it HERE is
+        what makes chunked mode safe.
         """
+        def _matches(name: str) -> bool:
+            for pat in self._exclude_patterns:
+                p = str(pat)
+                if "/" in p:
+                    # Only "/name/" (anchored root dir) and "**/name"
+                    # can match a bare top-level name.
+                    if p.startswith("/") and p.endswith("/") \
+                            and "/" not in p[1:-1] \
+                            and p[1:-1] == name:
+                        return True
+                    if p.startswith("**/") and "/" not in p[3:] \
+                            and fnmatch.fnmatchcase(name, p[3:]):
+                        return True
+                    continue
+                if fnmatch.fnmatchcase(name, p):
+                    return True
+            return False
+
         try:
             subdirs = sorted(
                 p.name for p in source.iterdir() if p.is_dir()
             )
         except OSError:
             return []
-        matcher = _ExcludeMatcher(
-            list(self._exclude_patterns)
-            + [f"/{n}/" for n in self._exclude_folder_names]
-        )
         kept: list[str] = []
         skipped: list[str] = []
         for name in subdirs:
-            if name in self._exclude_folder_names:
-                continue
-            if matcher.valid and matcher.matches(name, is_dir=True):
+            if name in self._exclude_folder_names or _matches(name):
                 skipped.append(name)
                 continue
             kept.append(name)
