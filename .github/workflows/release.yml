@@ -28,6 +28,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --quiet pyyaml flask
       - name: Unit tests (sanity gate)
         if: runner.os == 'macOS'
         run: python -m unittest discover -s src/test -q
@@ -55,6 +57,22 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ env.ASSET }}
           if-no-files-found: error
+      - name: Publish diagnostics branch (Windows, on failure)
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git config user.email "ci@users.noreply.github.com"
+          git config user.name "file_organizer CI"
+          git checkout -b ci-diagnostics
+          $diag = "build/ci-diagnostics.txt"
+          "run $env:GITHUB_RUN_ID — $env:GITHUB_SHA" | Set-Content $diag
+          Get-ChildItem build -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object {
+            Add-Content $diag "`n===== $($_.Name) ====="
+            Get-Content $_.FullName -ErrorAction SilentlyContinue | Select-Object -Last 120 | Add-Content $diag
+          }
+          git add -f $diag
+          git commit -m "ci diagnostics run $env:GITHUB_RUN_ID" --no-verify
+          git push origin HEAD:refs/heads/ci-diagnostics --force
 
   release:
     needs: build
