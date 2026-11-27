@@ -66,7 +66,8 @@ jobs:
           git checkout -b ci-diagnostics
           $diag = "build/ci-diagnostics.txt"
           "run $env:GITHUB_RUN_ID — $env:GITHUB_SHA" | Set-Content $diag
-          Get-ChildItem build -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object {
+          Get-ChildItem build -File -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.Name -notlike '*.log' -and $_.Name -ne 'FAILURE.txt') { return }
             Add-Content $diag "`n===== $($_.Name) ====="
             Get-Content $_.FullName -ErrorAction SilentlyContinue | Select-Object -Last 120 | Add-Content $diag
           }
