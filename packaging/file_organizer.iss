@@ -1,6 +1,7 @@
 ; file_organizer (organize) - per-user Windows installer.
 ; Compiled by packaging/build_windows.ps1; {{VERSION}} is stamped there.
-; SourceDir is the repo root (the .iss lives one level below, in build\).
+; SourceDir is the repo root (the .iss lives one level below, in build\), so
+; OutputDir=dist means the repo's dist\ folder.
 ; NOTE: Inno Setup directives are single lines - no line continuations.
 ; NOTE: keep this file pure ASCII - it is compiled as ANSI.
 
@@ -18,7 +19,7 @@ DefaultDirName={localappdata}\Programs\file_organizer
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-OutputDir=..\dist
+OutputDir=dist
 OutputBaseFilename=FileOrganizerSetup
 SourceDir=..
 Compression=lzma2
