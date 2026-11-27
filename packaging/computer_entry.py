@@ -387,7 +387,7 @@ def computer_gui(log):
         from file_organizer.desktop_app import OrganizerGUI
         OrganizerGUI().run()
         return 0
-    except (ImportError, Exception) as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — broken Tk / missing GUI deps
         log(
             "The desktop GUI could not start (needs Tk 8.6 or newer): "
             f"{exc}\n"
