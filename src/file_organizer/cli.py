@@ -9,6 +9,7 @@ from file_organizer.scanner import FileScanner
 from file_organizer.analyzer import ContentAnalyzer
 from file_organizer.organizer import Organizer
 from file_organizer.sync_engine import SyncEngine
+from file_organizer.run_lock import RunLock
 from file_organizer.softlink_handler import SoftlinkHandler
 from file_organizer.auto_git import AutoGit
 from file_organizer.dedup import DedupEngine
@@ -716,8 +717,16 @@ def main(argv=None):
         print("\n[4/4] Sync: ~/Music -> Proton Drive Music (mirror)")
         if real_mode:
             se = SyncEngine(config)
-            ok = se.sync_one_way(music_root, proton_music, delete=True)
-            print("  sync " + ("OK" if ok else "FAILED — see log"))
+            run_lock = RunLock(config)
+            if not run_lock.acquire():
+                print("  another organizer is running on another "
+                      "computer — skipping the sync step (see the log)")
+                return
+            try:
+                ok = se.sync_one_way(music_root, proton_music, delete=True)
+                print("  sync " + ("OK" if ok else "FAILED — see log"))
+            finally:
+                run_lock.release()
         else:
             print("  (would mirror ~/Music to Proton Drive, deleting "
                   "Proton-only files)")
@@ -729,12 +738,28 @@ def main(argv=None):
 
     if args.sync_only and real_mode:
         sync_engine = SyncEngine(config)
-        sync_engine.run_all_sync_pairs()
+        run_lock = RunLock(config)
+        if not run_lock.acquire():
+            print("Another organizer is running on another computer — "
+                  "backing out of this sync. See the log for details.")
+            return
+        try:
+            sync_engine.run_all_sync_pairs()
+        finally:
+            run_lock.release()
         return
 
     if args.dedupe_only and real_mode:
         dedup = DedupEngine(config)
-        dedup.run(dry_run=False)
+        run_lock = RunLock(config)
+        if not run_lock.acquire():
+            print("Another organizer is running on another computer — "
+                  "backing out of this dedupe. See the log for details.")
+            return
+        try:
+            dedup.run(dry_run=False)
+        finally:
+            run_lock.release()
         return
 
     if args.cleanup and real_mode:
@@ -833,26 +858,38 @@ def main(argv=None):
         previous = signal.signal(signal.SIGTERM, _sigterm)
         try:
             while True:
-                # Run the cycle, then wait for the background sync so two
-                # rsyncs never overlap (cloud drives dislike that) and the
-                # action counts are complete.
-                actions, sync_thread = run_full_cycle(config, dry_run=False)
-                if sync_thread is not None:
-                    sync_thread.join(timeout=max(interval, 60))
-                # Classify anything new in the router watch folders.
-                _router_watch_pass(config, apply=True)
-                total = sum(actions.values())
-                if total == 0:
-                    idle_streak += 1
-                else:
-                    idle_streak = 0
-                sleep_for = compute_idle_sleep(
-                    interval, backoff_factor, backoff_max, idle_streak
-                )
-                logger.info(
-                    "Cycle actions: %s. Sleeping %ds (idle streak %d).",
-                    actions, sleep_for, idle_streak,
-                )
+                # Cross-device run lock: only ONE organizer may touch the
+                # shared cloud drive at a time, whatever computer it runs
+                # on. The second machine backs out of its whole cycle and
+                # retries on a later loop.
+                run_lock = RunLock(config)
+                if not run_lock.acquire():
+                    time.sleep(min(interval, 600) if interval > 0 else 60)
+                    continue
+                try:
+                    # Run the cycle, then wait for the background sync so
+                    # two rsyncs never overlap (cloud drives dislike that)
+                    # and the action counts are complete.
+                    actions, sync_thread = run_full_cycle(
+                        config, dry_run=False)
+                    if sync_thread is not None:
+                        sync_thread.join(timeout=max(interval, 60))
+                    # Classify anything new in the router watch folders.
+                    _router_watch_pass(config, apply=True)
+                    total = sum(actions.values())
+                    if total == 0:
+                        idle_streak += 1
+                    else:
+                        idle_streak = 0
+                    sleep_for = compute_idle_sleep(
+                        interval, backoff_factor, backoff_max, idle_streak
+                    )
+                    logger.info(
+                        "Cycle actions: %s. Sleeping %ds (idle streak %d).",
+                        actions, sleep_for, idle_streak,
+                    )
+                finally:
+                    run_lock.release()
                 time.sleep(sleep_for)
         except KeyboardInterrupt:
             logger.info("Daemon stopped.")
@@ -881,16 +918,31 @@ def main(argv=None):
             logger.warning(msg)
             return
     try:
-        _, sync_thread = run_full_cycle(config, dry_run=not real_mode)
-        # The folder sync runs in a background daemon thread; a one-shot
-        # run must wait for it or the process exit kills the rsyncs
-        # mid-transfer (cloud drives dislike that, and the sync would
-        # silently never finish).
-        if sync_thread is not None:
-            sync_thread.join()
-        # Classify anything new in the router watch folders (production
-        # one-shots move files; test mode only plans).
-        _router_watch_pass(config, apply=real_mode)
+        # Cross-device run lock: back out when another computer's
+        # organizer is mid-run. Test/dry-run reads but writes nothing,
+        # so it proceeds without the lock.
+        run_lock = RunLock(config)
+        if real_mode and not run_lock.acquire():
+            print(
+                "Another organizer is running on another computer — "
+                "backing out of this run so the cloud drive is not "
+                "read/written from two machines at once. See the log "
+                "for details."
+            )
+            return
+        try:
+            _, sync_thread = run_full_cycle(config, dry_run=not real_mode)
+            # The folder sync runs in a background daemon thread; a one-shot
+            # run must wait for it or the process exit kills the rsyncs
+            # mid-transfer (cloud drives dislike that, and the sync would
+            # silently never finish).
+            if sync_thread is not None:
+                sync_thread.join()
+            # Classify anything new in the router watch folders (production
+            # one-shots move files; test mode only plans).
+            _router_watch_pass(config, apply=real_mode)
+        finally:
+            run_lock.release()
     except KeyboardInterrupt:
         logger.info("Interrupted by user. Exiting.")
         return

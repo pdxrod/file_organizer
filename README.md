@@ -550,6 +550,7 @@ highlights:
 | `rsync_binary` | Optional path to a GNU rsync binary (empty = auto-detect Homebrew rsync) |
 | `sync_failure_cooldown_minutes` | A failed cloud sync is remembered and not retried for this long (0 = always retry) |
 | `sync_lock_enabled` / `sync_lock_stale_minutes` | One-machine-at-a-time sync: the second machine skips a pair another device is syncing (stale locks are taken over) |
+| `run_lock_enabled` / `run_lock_dir` / `run_lock_stale_minutes` | ONE organizer at a time across machines: the second computer backs out of its whole run while another is mid-run (heartbeat + stale takeover) |
 | `sync_chunk_subfolders` | Pairs with more subfolders than this are synced one subfolder at a time |
 | `phone_pull` | Where phone files land and where push mode reads from |
 
@@ -577,6 +578,31 @@ highlights:
 - [ ] You know how to watch the log and stop the process.
 
 If anything is unclear, stay in test mode.
+
+## Running organize on two computers at once
+
+Running `organize` on two computers at the same time used to mean both
+machines reading and writing the same cloud drive at once — the classic
+way to fight over cloud files. You no longer need to remember "only one
+computer at a time":
+
+- **One organizer at a time, across machines.** Before a real run, the
+  organizer writes a tiny `.file_organizer.run.lock` marker at the root
+  of your shared cloud drive (auto-detected from the `drives:` section —
+  e.g. `PROTON_DRIVE` — or set `run_lock_dir` to a shared folder). Every
+  computer sees the same marker through the cloud.
+- **The second machine backs out.** When computer B starts while A is
+  mid-run, B sees the fresh lock, says so in the log, skips its whole
+  cycle, and tries again on its next scheduled run. Nothing fights over
+  the drive.
+- **Crashes heal themselves.** The lock is refreshed (heartbeat) every
+  30 seconds while a run is alive. If a machine crashes, the heartbeat
+  stops and the other machine takes the lock over after
+  `run_lock_stale_minutes` (default 15).
+- **Test mode is exempt.** Dry-runs read but write nothing, so they run
+  without the lock.
+
+Settings: `run_lock_enabled`, `run_lock_dir`, `run_lock_stale_minutes`.
 
 ## Platform support
 

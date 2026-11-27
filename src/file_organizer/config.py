@@ -51,9 +51,10 @@ DEFAULTS: Dict[str, Any] = {
         "elm-stuff", ".elixir_ls", ".stack-work", "_build",
         "deps", "ebin", "dist", "build", "target",
         ".gradle", ".m2", "tmp/cache", ".tmp*",
-        # Cross-device sync lock — coordination marker between machines,
-        # never file content (see sync_engine.py).
+        # Cross-device coordination markers — locks between machines,
+        # never file content (see sync_engine.py and run_lock.py).
         ".file_organizer.sync.lock",
+        ".file_organizer.run.lock",
         # Credential files — never copied anywhere, whatever the user's
         # list says (see credential_guard.py for the full list + content
         # sniffing that catches keys in innocent-looking files).
@@ -130,6 +131,16 @@ DEFAULTS: Dict[str, Any] = {
     # than sync_lock_stale_minutes (crashed runs) are taken over.
     "sync_lock_enabled": True,
     "sync_lock_stale_minutes": 120,
+    # Run-level cross-device coordination: ONE organizer at a time across
+    # machines. A tiny .file_organizer.run.lock at the root of the shared
+    # cloud drive (or run_lock_dir) marks a live run on any computer. The
+    # second machine sees the fresh lock, backs out of its whole cycle,
+    # and retries on its next scheduled run; a heartbeat keeps the lock
+    # fresh during long runs, and a crashed machine's lock is taken over
+    # after run_lock_stale_minutes.
+    "run_lock_enabled": True,
+    "run_lock_dir": "",
+    "run_lock_stale_minutes": 15,
     # Direct subfolder NAMES the sync engine never copies, on top of
     # exclude_patterns. Put the file_organizer checkout folders here so
     # the organizers never mirror their own source code between machines.

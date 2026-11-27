@@ -333,6 +333,19 @@ computer:
   sync_lock_enabled: true
   sync_lock_stale_minutes: 120
 
+  # ONE organizer at a time across your machines: a tiny
+  # .file_organizer.run.lock at the root of your shared cloud drive marks
+  # a live run on any computer. A second machine starting mid-run sees
+  # the fresh lock and backs out of its whole cycle (it retries on its
+  # next scheduled run) instead of organizing + rsyncing the same cloud
+  # files at once. A heartbeat keeps the lock fresh during long runs;
+  # a crashed machine's lock is taken over after run_lock_stale_minutes.
+  # run_lock_dir: "" auto-picks the first cloud drive in drives: above
+  # (e.g. PROTON_DRIVE) — set an explicit shared folder to override.
+  run_lock_enabled: true
+  run_lock_dir: ""
+  run_lock_stale_minutes: 15
+
   # Direct subfolder NAMES never synced, on top of exclude_patterns.
   # The organizers must not mirror their own checkouts between machines:
   # if your file_organizer folder lives inside a synced tree (e.g.
